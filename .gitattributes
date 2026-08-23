@@ -1,0 +1,30 @@
+# POP CoCo3 port — line-ending policy.
+#
+# WHY THIS FILE EXISTS: cmd.exe cannot parse an LF-only .bat file. It reads
+# the batch as one mangled line and every command fails with a truncated name
+# ("'wasm' is not recognized"). build.bat is the CLAUDE.md §1 build contract,
+# so its line endings are load-bearing, not cosmetic. Without this, a clone on
+# a machine configured core.autocrlf=input silently produces an unrunnable
+# build. Pinned here rather than relying on any developer's git config.
+
+# Default: let git normalise text in the repo, check out native.
+* text=auto
+
+# Windows batch — MUST be CRLF in the working tree, always.
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
+# POSIX shell + Lua the harness feeds to MAME — MUST be LF, always.
+*.sh    text eol=lf
+*.lua   text eol=lf
+
+# 6809 assembly — LF (lwasm accepts either; keep diffs clean).
+*.s     text eol=lf
+
+# Binary / fixture: never touch.
+*.bin   binary
+*.dsk   binary
+*.dmk   binary
+*.hdv   binary
+*.png   binary
+*.pdf   binary

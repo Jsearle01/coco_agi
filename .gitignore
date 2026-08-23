@@ -1,0 +1,65 @@
+# build output
+/build/
+/build/logs/
+obj/
+
+# ★★ GROUND TRUTH IS LOCAL AND NEVER PUSHED (CLAUDE.md §2.2).
+# docs/ground-truth/ holds the GIME reference and the AGI Specifications. They are
+# third-party documents that live in the working tree and are not ours to redistribute.
+# The .gitkeep is tracked (negated below) so the directory exists on a fresh clone and
+# a citation like [ref: GIME-RM §10] has a home to point at.
+#
+# ★ CONSEQUENCE, and it is the reason this is a rule and not a convenience: a citation
+# against a file in here is EXECUTOR-VERIFIABLE AND ORCHESTRATOR-UNVERIFIABLE. Absence
+# from the public repo is NOT absence from the working tree (CLAUDE.md §2S.2).
+docs/ground-truth/*
+!docs/ground-truth/.gitkeep
+
+# ★ GAME DATA IS THE USER'S AND IS NEVER COMMITTED (CLAUDE.md §2P).
+# games/ holds MANIFESTS ONLY — checksums and version identification. VOL and DIR files
+# are copyrighted, are the user's property, and are read-only to this project. A game
+# file that reaches the index is a bug, not an oversight.
+games/**
+!games/manifests/
+!games/manifests/.gitkeep
+!games/manifests/*.md
+!games/manifests/*.json
+!games/manifests/*.tsv
+
+# ★ THE ORACLE IS PINNED, NOT VENDORED (CLAUDE.md §2Q.1).
+# oracle/ holds oracle/scummvm.pin, patches and dumps. A checked-in ScummVM tree starts
+# feeling like source, and per CLAUDE.md §2 there is no source. Never vendor it.
+oracle/scummvm/
+oracle/src/
+oracle/**/*.o
+oracle/**/*.so
+oracle/**/*.exe
+
+# disk images and build artifacts — reproducible from tools/imgbuild/, never committed
+*.dmk
+*.dsk
+*.jvc
+*.vhd
+*.bin
+!content/*.bin
+
+# python / logs / previews
+__pycache__/
+*.pyc
+*.log
+harness/**/previews/
+/build/previews/
+
+# MAME writes cfg/ (coco3.cfg, default.cfg) into its CWD, which is the repo root when
+# harness/smoke/run_*_test.sh runs. Emulator state, not project state.
+/cfg/
+
+# MAME writes snap/ (screenshots) into its CWD, same as cfg/.
+/snap/
+
+# MAME rewrites files in -cfg_directory on exit and drops a default.cfg there.
+# The authored coco3.cfg templates are tracked; MAME's byproducts are not.
+dist/mame-cfg/*/default.cfg
+
+# git checkout-index --temp scratch (used by the .gitattributes CRLF round-trip check)
+.merge_file_*
