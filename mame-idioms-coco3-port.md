@@ -2223,14 +2223,32 @@ mame coco3 -ext fdc \
 - **41e. `-flop3` does not exist on this driver.** `mame coco3 -ext fdc` exposes **`-flop1` and
   `-flop2` only**; a third mount is `Error: unknown option: -flop3`, exit 6. A set of three or
   more disks cannot all be mounted at once, so prefer a single-image variant when one exists.
-- **41f. ★★ CTRL+BREAK CANNOT BE POSTED, AND THE HOST KEYBOARD CANNOT SEND IT EITHER — ASSERT
-  THE INPUT PORT FIELD.** This cost three attempts. `natkeyboard:post` sends **characters**, and
-  BREAK is not one, so it cannot be posted at all. And pressing it by hand does not work either:
-  MAME maps CoCo3 `BREAK` to **`End` or `Esc`** (measured from `ioport`, not recalled — see the
-  table below), but on a keyboard-bearing driver **MAME's UI layer intercepts both** before the
-  emulated machine sees them, and `Esc` is additionally MAME's own quit key, so reaching for it
-  as a fallback exits the emulator. Toggling natural keyboard does not help; the interception is
-  above that. **Assert the field, which is what a real keypress ultimately does anyway:**
+- **41f. ★★★ MAME'S UI EATS `End` / `Home` / `PgUp` / `PgDn` / ARROWS, SO THE STOCK `BREAK`
+  BINDING IS UNUSABLE. REBIND TO `Insert`, OR ASSERT THE FIELD.** This cost four attempts and
+  two wrong diagnoses; the root cause is one sentence and everything else follows from it.
+
+  **MAME's UI reserves the navigation keys for menus, and consumes them before the emulated
+  keyboard sees them.** MAME maps CoCo3 `BREAK` to **`End` or `Esc`** (measured from `ioport`),
+  and **neither reaches the machine** — `Esc` is additionally MAME's quit key, so reaching for it
+  as a fallback exits the emulator.
+
+  ★★ **`Insert` IS NOT CLAIMED AND WORKS.** Confirmed by Jay at the P0.4 gate. `dist/mame-cfg/rgb/coco3.cfg`
+  binds it to **both** `BREAK` (`:row6` mask 4) and `CTRL` (mask 16), so **one press of `Insert`
+  = CTRL+BREAK** — a host key may drive more than one emulated field. Verified applied:
+  `BREAK = "Insert"`, `CTRL = "Ctrl or Right Ctrl or Insert"`.
+
+  ★★ **AND THE FALSE DIAGNOSIS IS THE PART WORTH KEEPING: A LOADED, CORRECT cfg CAN STILL LOOK
+  LIKE A BAD BINDING.** `PgDn` was tried first and failed. It was NOT a cfg error — an
+  instrumented run proved the cfg was loaded *and* survived MAME's own exit-rewrite (both
+  `KEYCODE_PGDN` sequences still present in the rewritten file) while the `:row6` BREAK bit never
+  asserted once. **In the same run `Ctrl` asserted correctly**, and that contrast is what isolated
+  it to *specific keys being captured* rather than to input, the cfg, or natural-keyboard mode.
+  **Checking that the binding is present proves nothing about whether the key arrives.**
+
+  ★ **`natkeyboard:post` cannot send BREAK at all** — post takes **characters** and BREAK is not
+  one. Toggling natural keyboard does not help either; the UI interception is above it.
+
+  **For automation, assert the field, which is what a real keypress ultimately does anyway:**
 
   ```lua
   local fBreak, fCtrl
@@ -2246,14 +2264,23 @@ mame coco3 -ext fdc \
 
   **Measured CoCo3 key map** (`mame coco3`, from the machine's own ioport, P0.4):
 
-  | CoCo3 | host |
-  |---|---|
-  | BREAK | `End` or `Esc` |
-  | CTRL | `Ctrl` |
-  | ALT | `Alt` |
-  | CLEAR | `Home` |
-  | SHIFT | `Shift` |
-  | ENTER | `Enter` |
+  | CoCo3 | host (MAME default) | reaches the machine? |
+  |---|---|---|
+  | BREAK | `End` or `Esc` | ★ **NO — UI-captured.** Rebind to `Insert` |
+  | CLEAR | `Home` | ★ **NO — UI-captured.** Rebind if needed |
+  | CTRL | `Ctrl` | yes |
+  | ALT | `Alt` | yes |
+  | SHIFT | `Shift` | yes |
+  | ENTER | `Enter` | yes |
+
+  ★ **Two of the six stock bindings are dead on arrival**, and nothing in MAME says so — the
+  key simply does nothing. `CLEAR` is untested but sits on the same UI-navigation list as
+  `End`, so treat it as suspect until measured.
+
+  ★ **The free diagnostic** (`harness/`-less, three lines of Lua): read `:row6` every frame and
+  print on change. A key that arrives moves a bit; a key that is captured moves nothing. That
+  is what separated "binding wrong" from "key never arrives", and it needs no pixels — which
+  matters because CLAUDE.md §3 forbids reading them.
 
   ★ **And the free verification, which is why this was provable without reading a pixel:** before
   the BREAK the snapshots were **byte-identical for 45 emulated seconds**; after it, every sample
