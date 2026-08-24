@@ -268,10 +268,16 @@ Corpus figures at the seven archives Jay supplied, sha256 of each in §5. Siblin
   `CMDS/MnLn` (25,559 B) on 38 images spanning **all seven titles**; KQ3 `Original` and LSL
   `Original` each carry their own smaller build. `MODULES/` is four modules, **one version each,
   byte-identical wherever present**. ✅ **PASS.**
-- **AC-8 [eye-gated] ★ PASSED — Jay, live-disk, RGB, static-png.** **King's Quest III renders
-  under Sierra's own interpreter**, confirmed by Jay at the gate. **Launch path: `live-disk`**
-  (real `DOS` off a mounted floppy; nothing poked). **Observation mode: `static-png`** —
-  endpoints only, **no motion under gate** (§4). ✅ **PASS.**
+- **AC-8 [eye-gated] ★★ PASSED — Jay, live-disk, RGB, LIVE and INTERACTIVE.** **King's Quest III
+  runs under Sierra's own interpreter, and Jay typed commands and read the responses.**
+  **Launch path: `live-disk`** (real `DOS` off a mounted floppy; nothing poked). **Observation:
+  LIVE**, 100.00% speed, 151 s wall-clock — **not** a still. ✅ **PASS.**
+
+  ★ The dispatch bounded AC-8 at *one title, one screenshot, then stop*, and it was first
+  delivered that way. Jay then asked for a live run to confirm it **advances** — which a still
+  cannot show — so the gate was re-run live at his request. §5's bound is exceeded deliberately
+  and on his instruction, not by scope drift; §12's "no playing past the first screen" still
+  held on my side, and the further play was Jay's own.
 
   ★★ **CORRECTION — the recipe first published in this report was wrong twice over, and the
   first two attempts FAILED.** Recorded rather than quietly replaced, because the two errors are
@@ -476,11 +482,50 @@ run_rule_demo.sh                          rc=0  (incl. the --expect 7 negative c
 **25.2 — bundled-artifact grep:** **N/A.** No build artifact was produced; the deliverables are
 a `.gitignore`, two Python tools and two TSV manifests, none of which bundles anything.
 
-**25.3 — operator-runtime-smoke: PASSED — Jay, live-disk, RGB, static-png (endpoints only — no
-motion under gate).**
+**25.3 — operator-runtime-smoke: ★★ PASSED — Jay, live-disk, RGB, LIVE (not a still).**
 
-**King's Quest III renders under Sierra's own CoCo3 interpreter.** Confirmed by Jay at the gate;
-I did not read the images (§3, §4 — Clyde screenshot analysis is never authoritative for 25.3).
+> **Jay, at the gate: *"worked. i got the game and could type and see messages."***
+
+★★ **This is a LIVE gate, and the distinction is load-bearing.** An earlier pass in this same
+task was `static-png`, which per §4 verifies ENDPOINTS ONLY and cannot show motion. This run was
+**100.00% speed, 151 seconds of real wall-clock**, driven to gameplay and then handed to Jay, who
+**typed commands and read the responses**. So what is gated is not "a plausible-looking frame"
+but **the interpreter accepting input and rendering its replies** — the first time tier 2 has
+been exercised as a running program rather than a screenshot.
+
+★ **Design v0.4 §8.1's tier-2 restoration is therefore real for KQ3**: palette output, animation
+rate, room-change latency and sound now have an original that can be *run*, not merely inspected.
+★ Still bounded by §7.1 — that applies to `KQ3/Original` and `LSL/Original`, not to the five
+converted titles.
+
+**The run, verbatim:**
+
+```
+[live f00000] Sequence: DOS -> R+ENTER (RGB) -> CTRL+BREAK -> keyboard released to you.
+[live f00300] posting DOS -- OS-9 boots off the floppy
+[live f02400] monitor prompt -- answering R (RGB)
+[live f02520] ENTER
+[live f03000] title screen up -- pressing CTRL+BREAK for you in ~5s
+[live f03300] CTRL+BREAK down
+[live f03315] CTRL+BREAK up -- it should advance now
+[live f03315] KEYBOARD IS YOURS. Close the window when done.
+Average speed: 100.00% (151 seconds)                                  rc=0
+```
+
+★★ **§2P re-verified across the WHOLE corpus after every MAME run**, because MAME mounts floppies
+read-write (§41, idioms §24):
+
+```
+all 80 images re-hashed against games/manifests/coco3-images.tsv
+  verified unchanged: 80 / 80    changed: 0    missing: 0
+```
+
+**Earlier in this task the same gate passed only as `static-png`.** That is retained above as
+the record of how it got here; the live result supersedes it.
+
+I did not read any screenshot (§3, §4 — Clyde screenshot analysis is never authoritative for
+25.3). What I contributed was the structured evidence: frame-hash equality over time as a motion
+test, and PC-varies-vs-PC-stuck as a liveness test (§41f).
 
 ```
 [f00300] posting DOS
@@ -581,12 +626,16 @@ file sizes, and stops there — no game data or screenshot committed, and no v3 
    and why CLAUDE.md §2B marks the composite palette table as unreproducible-by-tool and
    PROTECTED from the moment it exists. **It also means the composite table has an ORIGINAL to
    be gated against**, rather than only Jay's eye. Worth a dispatch of its own.
-6. ★ **A LIVE gate is now possible and this task did not deliver one.** 25.3 passed as
-   `static-png`, which verifies endpoints and cannot show motion (§4). The animation rate,
-   room-change latency and sound questions design v0.4 §8.1 wants tier 2 for **all require a
-   live run**, and the recipe to get there is now written down (§41).
-7. **Reaching gameplay needs CTRL+BREAK past the title** (§41d) — barred from this task by §12,
-   and the obvious first step of any follow-up.
+6. ★★ **THE LIVE GATE IS DONE — and it opens the tier-2 measurements, it does not close them.**
+   25.3 passed LIVE and interactive on Jay's instruction. **What that unlocks is a class of
+   questions design v0.4 §8.1 could not previously ask:** animation rate, room-change latency,
+   sound behaviour and palette output, each measurable against a running Sierra original rather
+   than inferred. ★ **All of them need instrumented LIVE runs**, not stills — and per §7 the
+   interpreter's timings carry OS-9 overhead, so **any rate read off it is a FLOOR, not a
+   ceiling** [backlog I-19]. The recipe is now §41.
+7. **The next natural target is `LSL/Original`** — the second and last genuine Sierra CoCo3
+   release. Confirming the same recipe boots it would establish that §41 generalises rather than
+   fitting KQ3, which matters because §41b's disk-choice trap is per-title.
 8. **Consider back-porting the ignore hardening to POP and Karateka** (§2G, separate task).
 
 ---

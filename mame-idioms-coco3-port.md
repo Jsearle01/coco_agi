@@ -2223,6 +2223,47 @@ mame coco3 -ext fdc \
 - **41e. `-flop3` does not exist on this driver.** `mame coco3 -ext fdc` exposes **`-flop1` and
   `-flop2` only**; a third mount is `Error: unknown option: -flop3`, exit 6. A set of three or
   more disks cannot all be mounted at once, so prefer a single-image variant when one exists.
+- **41f. ★★ CTRL+BREAK CANNOT BE POSTED, AND THE HOST KEYBOARD CANNOT SEND IT EITHER — ASSERT
+  THE INPUT PORT FIELD.** This cost three attempts. `natkeyboard:post` sends **characters**, and
+  BREAK is not one, so it cannot be posted at all. And pressing it by hand does not work either:
+  MAME maps CoCo3 `BREAK` to **`End` or `Esc`** (measured from `ioport`, not recalled — see the
+  table below), but on a keyboard-bearing driver **MAME's UI layer intercepts both** before the
+  emulated machine sees them, and `Esc` is additionally MAME's own quit key, so reaching for it
+  as a fallback exits the emulator. Toggling natural keyboard does not help; the interception is
+  above that. **Assert the field, which is what a real keypress ultimately does anyway:**
+
+  ```lua
+  local fBreak, fCtrl
+  for _, port in pairs(manager.machine.ioport.ports) do
+      for fname, field in pairs(port.fields) do
+          if fname:upper() == "BREAK" then fBreak = field end
+          if fname:upper() == "CTRL"  then fCtrl  = field end
+      end
+  end
+  fCtrl:set_value(1); fBreak:set_value(1)   -- hold ~15 frames
+  fBreak:set_value(0); fCtrl:set_value(0)
+  ```
+
+  **Measured CoCo3 key map** (`mame coco3`, from the machine's own ioport, P0.4):
+
+  | CoCo3 | host |
+  |---|---|
+  | BREAK | `End` or `Esc` |
+  | CTRL | `Ctrl` |
+  | ALT | `Alt` |
+  | CLEAR | `Home` |
+  | SHIFT | `Shift` |
+  | ENTER | `Enter` |
+
+  ★ **And the free verification, which is why this was provable without reading a pixel:** before
+  the BREAK the snapshots were **byte-identical for 45 emulated seconds**; after it, every sample
+  differed (627 B → 4438 B → 2755 B, distinct hashes) with `PC` moving `$BF71 → $D51B → $F2FF`.
+  **Frame-hash equality over time is a motion test; PC-varies-vs-PC-stuck is a liveness test.**
+  Neither needs the pixels, and CLAUDE.md §3 forbids reading them.
+- **41g. Two MAME instances cannot share a mounted image.** The second reports
+  `Unable to load image ... No such file or directory (generic:2)`, exit 4 — **not** a
+  file-in-use error, so it reads as a missing file and sends you looking in the wrong place. The
+  first instance holds the floppy open read-write. Use a separate copy set for a concurrent run.
 
 ★★ **AND THE §2P HAZARD, WHICH IS THE ONE THAT MATTERS: MAME OPENS A FLOPPY READ-WRITE AND JVC
 SAVES BACK** (§3, §24). A raw `.dsk` from the corpus mounted directly is a game file opened for
