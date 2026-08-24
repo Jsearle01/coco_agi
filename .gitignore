@@ -63,3 +63,84 @@ dist/mame-cfg/*/default.cfg
 
 # git checkout-index --temp scratch (used by the .gitattributes CRLF round-trip check)
 .merge_file_*
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★ GAME-DATA HARDENING (P0.4) — COMMITTED BEFORE THE CoCo3 CORPUS ARRIVED, DELIBERATELY.
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+#
+# ★★★ THE ORDERING IS THE SAFETY PROPERTY, NOT THE PATTERN LIST.
+# Game data pushed to a public repository CANNOT BE DELETED. A later `rm` takes it out of the
+# working tree and leaves it in history, and the only real remedy is a history rewrite across
+# three synchronised sibling repos (§2M) plus a force-push. So this block landed and was pushed
+# BEFORE any archive was dropped into the repo root. Patterns added after the fact protect
+# nothing that matters.
+#
+# This is defence in depth, not the primary control. The primary control is CLAUDE.md §2E's
+# explicit-path staging — `git add -A` is forbidden, and this task is the one that earns that
+# rule its keep. These patterns catch the case where someone forgets.
+#
+# ★ NOTE: .gitignore does NOT protect an already-tracked file, and does not stop `git add -f`.
+# It stops the accident, not the intent.
+#
+# --- carrier formats: disk images and archives, AT ANY DEPTH (no leading slash) ------------
+*.dsk
+*.par
+*.zip
+*.os9
+*.img
+*.dmk
+*.jvc
+*.vhd
+*.d77
+*.hfe
+# not named by the dispatch, added because an archive can arrive in any wrapper:
+*.7z
+*.rar
+*.tar
+*.tar.gz
+*.tgz
+*.gz
+*.arc
+*.lzh
+#
+# --- AGI resource files by NAME, at any depth ----------------------------------------------
+# ★ These have no extension, so an extension rule cannot catch them. They are the actual game
+# content: VOL files carry every LOGIC, PICTURE, VIEW and SOUND resource; the DIR files index
+# them; words.tok is the parser vocabulary; object is the inventory table.
+vol.*
+*vol.[0-9]
+*VOL.[0-9]
+logdir
+picdir
+viewdir
+snddir
+words.tok
+object
+LOGDIR
+PICDIR
+VIEWDIR
+SNDDIR
+WORDS.TOK
+OBJECT
+# v3 combined-directory shapes (<prefix>dir, e.g. dmdir / vdir — P0.3 §4.2).
+# ★ Deliberately broad: a v3 title names its directory file after its own prefix, so the set of
+# possible names is open-ended and cannot be enumerated. The cost is that a future directory
+# whose name ends in "dir" would also be ignored; the benefit is that no v3 title can slip
+# through on a prefix nobody predicted. Safety wins here — and an intended file can always be
+# added with `git add -f`, which is a visible act.
+*dir
+#
+# --- Sierra's CoCo3 interpreter and OS-9 modules -------------------------------------------
+# ★ Sierra's shipped interpreter is COPYRIGHTED CODE, not game data, and is likewise never
+# committed. It is a comparison target only (dispatch §7 / backlog D-14).
+CMDS/
+MODULES/
+OS9Boot
+os9boot
+#
+# ★★ WHAT IS STILL ALLOWED THROUGH, and must stay allowed:
+#   games/manifests/*.tsv  — checksums, sizes and version identification. NEVER content.
+# That negation lives in the games/** block above and is not overridden here: no pattern in
+# this section matches a .tsv, a .md or a .json.
+# ═══════════════════════════════════════════════════════════════════════════════════════════
