@@ -78,6 +78,17 @@ the fix for it failed silently until the second was.
 ★ **Only two of the seven titles are genuinely Sierra CoCo3 releases** (§3A). That materially
 bounds the tier-2 claim in the dispatch's §1 and design v0.4 §8.1.
 
+★★ **AC-8 ended as a LIVE, INTERACTIVE gate, not the still the dispatch asked for** — at Jay's
+insistence, and he was right: *"i'm not happy with that run it for me so i can make sure it
+advances to the game properly."* **King's Quest III runs under Sierra's own interpreter and
+accepts typed commands.** A `coco3.cfg` binding `Insert` to CTRL+BREAK ships with it.
+
+★ **Three things in this report correct earlier statements of mine**, and they are kept rather
+than tidied away: **AC-8 was filed as delivered when it had failed** (§4, §6.7); **the key
+binding was wrong twice** (§6.8); and **I asserted a cause in a tracked reference file that I had
+not established, now retracted** (§6.9, §7.9). ★ **The most expensive item is none of those: three
+consecutive defective instruments each burned a live run of Jay's time** (§7.10).
+
 ---
 
 ### 2 — Files modified
@@ -94,6 +105,15 @@ Explicit-path staging (§2E). Two commits.
 - `games/manifests/coco3-files.tsv` — **new**, 1,311 rows, one per file-in-image.
 - `.gitignore` — mixed-case `*Dir`/`*DIR` and `tOC` variants, added **because the corpus showed
   the real filenames** (§3E).
+
+**`17d0b93` → `41cdeb5` — the AC-8 gate work, after Jay asked for a live run**
+- `dist/mame-cfg/rgb/coco3.cfg` — **new**, authored MAME input map. **`Insert` = CTRL+BREAK in one
+  keypress**, bound to both the BREAK and CTRL fields on `:row6`. Port tag, mask and defvalue are
+  **measured from the machine's `ioport`**, not guessed — a cfg with a wrong mask does nothing
+  *silently*, which is the worst failure mode available here.
+- `mame-idioms-coco3-port.md` — **§41 added** (booting Sierra's OS-9 AGI titles), then **§41f
+  partly RETRACTED and re-graded by evidence class** (§6.9). §2A.4 requires discovered idioms be
+  written down; it does not license writing down a guess.
 
 ★ **No game data, screenshot, or extracted resource is in the repository.** Corpus at
 `C:\Projects\agi-games\coco3\`; AC-8's screenshots at `.../coco3/_ac8-screenshots/`. **No sibling
@@ -302,11 +322,15 @@ Corpus figures at the seven archives Jay supplied, sha256 of each in §5. Siblin
   seconds = waiting on a key; varying `$BF3A → $9EC9 → $F339 → $FC43` = running. That is how the
   two failures were distinguished from the success without my reading a screenshot.
 
-  ★ **Past the title screen it wants CTRL+BREAK** (Jay). Not pursued — §12 bars playing past the
-  first screen.
+  ★ **Past the title screen it wants CTRL+BREAK** (Jay), and reaching it took four attempts and
+  one retracted explanation — see §6.9 and §7.9. **Settled outcome: `Insert` works**, bound in
+  `dist/mame-cfg/rgb/coco3.cfg` to both `BREAK` and `CTRL` on `:row6` so one press asserts both.
+  For automation, assert the ioport field instead; `natkeyboard:post` **cannot** send BREAK,
+  because post takes characters and BREAK is not one.
 
   Screenshots at `C:\Projects\agi-games\coco3\_ac8-screenshots\`, **surfaced unexamined per §3**;
-  `rgb-04-after-R-ENTER-settled.png` is the gated frame.
+  `rgb-04-after-R-ENTER-settled.png` is the static frame that first passed the gate, superseded
+  by the live pass below.
 - **AC-9 [byte-comparable]** — `coco_agi` **0**, POP **59** at `282a65c`, Karateka **8** at
   `072ddcf`; fixture demo rc=0 including its negative control. ✅ **PASS.**
 - **AC-10 [suite]** — one candidate captured and pushed. §10. ✅ **PASS.**
@@ -566,6 +590,22 @@ room-change latency and any other motion question needs a LIVE run Jay watches, 
    seconds later costs nothing and lets Jay distinguish a settled screen from a transient one.
 6. **A second Lua run** dumped the text screen, because §3 forbids me answering "did it boot?"
    from the PNGs.
+7. **★ AC-8 was re-run LIVE at Jay's request**, exceeding §5's "one screenshot, then stop" bound.
+   His instruction, not scope drift; §12's bar on playing past the first screen held on my side,
+   and the further play was his.
+8. **`dist/mame-cfg/rgb/coco3.cfg` was authored** — not in §5's deliverables. Jay asked for a key
+   mapping, and `dist/mame-cfg/{rgb,composite}/` already exists in the tree for exactly this
+   (`.gitignore` tracks an authored `coco3.cfg` and ignores MAME's `default.cfg` byproduct).
+9. ★★ **A RETRACTION, and it is the item I would most want a reviewer to read.** I wrote
+   *"MAME's UI eats `End`/`Home`/`PgUp`/`PgDn`"* into idioms §41f **as established fact. It was a
+   hypothesis resting on thin evidence.** §41f now grades itself by class — measured /
+   operator-confirmed / not established — and the causal claim sits in the third bucket (§7.9).
+   **A tracked reference file is the worst place to put a guess:** §2A makes that file a
+   *mandatory read point*, so the next reader inherits it as fact and the guess outlives the
+   session that produced it. The idiom is real and useful; the *explanation* was not mine to
+   assert yet.
+10. ★ **Three defective instruments cost three live runs of Jay's time** (§7.10). Recorded as a
+   deviation rather than buried, because the waste was mine and the pattern is repeatable.
 
 **ROUTE ACCOUNTING.** No route was proposed to Jay or the Orchestrator. What this change contains
 is §2's file list plus the six items above. **What it does NOT contain, said here rather than
@@ -605,6 +645,33 @@ file sizes, and stops there — no game data or screenshot committed, and no v3 
    small as 1,394). Reads are clamped to the file, so a file whose segments point past the end
    is returned **short and flagged**, not zero-padded. No such truncation was observed in this
    corpus, but the flag exists in the TSV.
+9. ★★ **WHY `End` AND `PgDn` FAILED IS UNKNOWN, AND `Insert` IS ONLY KNOWN TO BE SUFFICIENT — NOT
+   NECESSARY.** The working outcome is solid (Jay confirmed `Insert`). The *explanation* is not:
+   - The port probe recorded **no BREAK assertion** in the runs where `End` or `PgDn` was the
+     nominated key, and **did** record `CTRL` and `ENTER`. Suggestive, not conclusive.
+   - **The probe never captured a confirmed host-layer press of `End` or `PgDn`**, so *"pressed
+     and swallowed"* is not distinguished from *"not pressed at that moment"*. UI capture remains
+     a hypothesis.
+   - ★ **`ENTER` reaches the port and was pressed repeatedly in the runs that advanced**, so it
+     is possible the title needs no CTRL+BREAK at all and `Insert`'s success is incidental.
+   - A cfg binding was **verified present and still not exercised** — `seq_name` reported
+     `BREAK = "End or Page Down"` and both sequences survived MAME's exit-rewrite. **That a
+     mapping exists is not evidence that the key arrives**, and I briefly treated it as such.
+
+   **Settling it is one cheap run** (§8.9) and nothing downstream depends on it, so it is flagged
+   rather than chased.
+10. ★★ **THREE CONSECUTIVE DIAGNOSTICS WERE DEFECTIVE, AND EACH SPENT A LIVE RUN OF JAY'S TIME.**
+   Named because the pattern is more costly than any one bug:
+   (a) the probe **armed at frame 3000** and the window closed at 45 s, recording nothing —
+   *arm an instrument at frame zero*;
+   (b) its readout went to **stdout, which the operator never sees**, while I asked him to watch
+   for a banner invisible to him — *render state into the window he is looking at*;
+   (c) it printed **`#WATCH` under the label "codes resolved"** — a constant masquerading as a
+   measurement, which then led me to blame a working API — *never print a figure you did not
+   compute*.
+   ★ **The corrective is cheap and I applied it too late: verify the instrument headlessly,
+   alone, before spending an operator's run on it.** The API check that cleared MAME's input
+   layer took seconds and needed nothing from Jay; it should have run four rounds earlier.
 
 ---
 
@@ -637,14 +704,52 @@ file sizes, and stops there — no game data or screenshot committed, and no v3 
    release. Confirming the same recipe boots it would establish that §41 generalises rather than
    fitting KQ3, which matters because §41b's disk-choice trap is per-title.
 8. **Consider back-porting the ignore hardening to POP and Karateka** (§2G, separate task).
+9. ★ **Settle §7.9 in ONE run, whenever convenient.** Boot, hand back, then log the **host key**
+   (`input:code_pressed`) and the **`:row6` port** simultaneously while the operator presses
+   `End`, then `Insert`, then `ENTER` — one key at a time, with the readout **on screen**. Three
+   presses answer all of: is `End` captured or merely unpressed; is `Insert` necessary or just
+   sufficient; does the title advance on `ENTER` alone. **Nothing downstream depends on it** —
+   `Insert` works today — so it is worth doing only when someone is at the keyboard anyway.
+10. **Test `CLEAR`/`Home`, `ALT` and `SHIFT`** while doing §8.9 — the key-map table in idioms §41f
+   marks them **untested**, and an AGI parser needs more of the keyboard than BREAK.
 
 ---
 
 ### 9 — User interaction during task
 
-**Jay sent one message: `dropped`**, indicating the seven archives were in the repo root. That
-resumed the task at §2's step 3. **No guidance about the work's content was given and none was
-requested.**
+**Extensive, and it drove the AC-8 outcome.** In order:
+
+1. **`dropped`** — the seven archives were in the repo root; resumed the task at §2 step 3.
+2. **`show me`** — the AC-8 screenshots. Opened in his viewer; **I did not read them** (§3).
+3. **"just shows os-9 booting nevr gets to the game i think"** — ★ **the first AC-8 failure**,
+   and it corrected a report I had already filed as delivered.
+4. **"it's asking for a monitor typr selection"** — identified the static screen. ★ **A design
+   finding, not just a boot detail** (§8.5).
+5. **"should be R for RGB"** and **"you need R + ENTER"** — the answer, and the reason `R` alone
+   stalled at `PC=$FD5F`.
+6. **"it went to the game and now it needs CNTRL+BREAK to continue"** — ★ **AC-8's first pass.**
+7. **"i'm not happy with that run it for me so i can make sure it advances to the game properly"**
+   — ★ **the request that produced the LIVE gate.** He was right that a still could not show it.
+8. **"what key do i use for break on my keyboard"** → measured the map from `ioport` rather than
+   recalling it.
+9. **"neither ESC or END work. maybe I need to be in natural keyboard?"**, **"doesn't work"**,
+   **"looks like ins worked"**, **"worked / nothing is chanfing in the text you added"** — four
+   rounds of key debugging, in which **his last message diagnosed my instrument**: the overlay
+   was dead, which was the defect I had just found (§7.10).
+10. **"can you put something in a mame cfg file that will map on of my keyboard keys to the coco3
+    break key"** — produced `dist/mame-cfg/rgb/coco3.cfg`.
+11. **`run it`**, **`update report`**.
+
+★★ **Two of his messages overturned conclusions I had already committed:** #3 caught AC-8
+reported as delivered when it had failed, and #12's *"nothing is changing"* caught a broken
+instrument I was still trusting. **Both were operator observations I could not have made** — §3
+bars me from reading the screen, and the probe's readout never reached him.
+
+No consultation trigger fired in this phase. ★ **§8.4 is worth naming as a near-miss:** it says
+*"AC-8's MAME boot proves awkward — report the exact failure and STOP."* The boot itself never
+proved awkward; it was the **post-boot keypress** that took four rounds, which §8.4 does not
+cover. **In hindsight I should have stopped and asked after the second failed key attempt**
+rather than iterating on Jay's time.
 
 ★ **One trigger fired across the two sittings and was obeyed: §8.2** — the archives were absent
 at §2 step 2, so the first sitting stopped and reported. §8.1 was checked first, both sittings,
@@ -677,11 +782,23 @@ Pushed `c88daa5..e6946c9`, fire-and-forget. No existing pool entry read for cont
 
 ### 11 — Commit
 
-`11d73f3ca3d8e54a79f315d6397c11a67ff5be3e` — two commits this task:
+`41cdeb5` — **seven commits this task**, in order:
 
 ```
-11d73f3  P0.4  CoCo3 corpus: OS-9 reader, image and file manifests
 1edff3e  P0.4a .gitignore: game-data hardening, BEFORE the CoCo3 corpus arrives
+11d73f3  P0.4  CoCo3 corpus: OS-9 reader, image and file manifests
+6da40c6  P0.4 report: CoCo3 corpus processed, M-11 settled, tier-2 scoped
+74d4d74  P0.4 amend: AC-8 PASSED (Jay gate), and the recipe that actually works
+3ad26e0  P0.4 amend: 25.3 upgraded to a LIVE gate - KQ3 interactive
+17d0b93  P0.4: authored coco3.cfg mapping PgDn to CTRL+BREAK in one keypress
+28008da  P0.4 fix: BREAK binds to Insert, not PgDn - MAME's UI eats the nav keys
+41cdeb5  P0.4 retract: idioms 41f over-claimed a cause it had not established
 ```
 
-Pushed to `origin/wip` before this report. This report is a third commit on `wip`.
+★ **Three of those eight correct an earlier one** — `74d4d74` corrects a recipe filed as working
+when it had failed, `28008da` corrects a key binding, and `41cdeb5` retracts a causal claim in
+`28008da`'s own commit message and in the idioms file. **The corrections are in the history
+deliberately rather than squashed away**, because each one is a finding about how the earlier
+conclusion was reached, and §7.9/§7.10 are the reusable part.
+
+Pushed to `origin/wip`. This report update is a further commit on `wip`.
