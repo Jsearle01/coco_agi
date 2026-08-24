@@ -1,0 +1,81 @@
+diff --git a/engines/agi/graphics.cpp b/engines/agi/graphics.cpp
+index 1bb1d202..a04a495f 100644
+--- a/engines/agi/graphics.cpp
++++ b/engines/agi/graphics.cpp
+@@ -514,6 +514,40 @@ byte GfxMgr::getPriority(int16 x, int16 y) const {
+ 	return _priorityScreen[offset];
+ }
+ 
++// coco_agi ORACLE INSTRUMENTATION (P0.2) -- see graphics.h.
++//
++// Emits the two 160x168 buffers as RAW BYTES, one file each, exactly as the engine
++// holds them: _pixels == SCRIPT_WIDTH * SCRIPT_HEIGHT == 26880, flat row-major, one
++// byte per pixel. NO transformation, NO scaling, NO palette application. The display
++// path (_displayScreen, 320x200 or 640x400) is deliberately NOT dumped -- it is a
++// rendering of these buffers, and diffing against a rendering would put ScummVM's
++// upscaler inside our baseline.
++//
++// Files land in the process working directory so the runner controls placement
++// without an env var: ScummVM's forbidden-symbol policy rules out getenv/fopen, and
++// Common::DumpFile is the sanctioned writer.
++void GfxMgr::oracleDumpScreens(int16 resourceNr) const {
++	if (_gameScreen == nullptr || _priorityScreen == nullptr)
++		return;
++
++	const struct { const char *suffix; const byte *buffer; } dumps[] = {
++		{ "visual",   _gameScreen     },
++		{ "priority", _priorityScreen }
++	};
++
++	for (int i = 0; i < 2; i++) {
++		Common::String name = Common::String::format("pic%03d.%s.bin", resourceNr, dumps[i].suffix);
++		Common::DumpFile df;
++		if (!df.open(Common::Path(name))) {
++			warning("oracleDumpScreens: could not open %s", name.c_str());
++			continue;
++		}
++		df.write(dumps[i].buffer, _pixels);
++		df.finalize();
++		df.close();
++	}
++}
++
+ // used, when a control pixel is found
+ // will search downwards and compare priority in case any is found
+ bool GfxMgr::checkControlPixel(int16 x, int16 y, byte viewPriority) const {
+diff --git a/engines/agi/graphics.h b/engines/agi/graphics.h
+index 320019fa..39b0395b 100644
+--- a/engines/agi/graphics.h
++++ b/engines/agi/graphics.h
+@@ -170,6 +170,12 @@ public:
+ 	byte getPriority(int16 x, int16 y) const;
+ 	bool checkControlPixel(int16 x, int16 y, byte newPriority) const;
+ 
++	// coco_agi ORACLE INSTRUMENTATION (P0.2). Writes _gameScreen and _priorityScreen
++	// verbatim. It lives in GfxMgr because those buffers are private and MUST NOT be
++	// copied through an accessor that could transform them -- CLAUDE.md 2O.1: the
++	// baseline may not pass through anything we wrote.
++	void oracleDumpScreens(int16 resourceNr) const;
++
+ 	byte getCGAMixtureColor(byte color) const;
+ 
+ 	void render_Block(int16 x, int16 y, int16 width, int16 height, bool copyToScreen = true);
+diff --git a/engines/agi/picture.cpp b/engines/agi/picture.cpp
+index 70ce126d..774d443e 100644
+--- a/engines/agi/picture.cpp
++++ b/engines/agi/picture.cpp
+@@ -782,6 +782,14 @@ void PictureMgr::decodePicture(int16 resourceNr, bool clearScreen, bool agi256,
+ 		_vm->clearImageStack();
+ 	}
+ 	_vm->recordImageStackCall(ADD_PIC, resourceNr, clearScreen, agi256, 0, 0, 0, 0);
++
++	// coco_agi ORACLE INSTRUMENTATION (P0.2).
++	// The seam is decodePicture() and not drawPicture(), deliberately: drawPicture()
++	// is only ONE of two decoders -- drawPicture_AGI256() is the other -- and both
++	// run under this function. Hooking the decoder would silently miss AGI256, and
++	// hooking a single opcode would miss three of the four call sites
++	// (op_cmd.cpp cmdDrawPic / cmdShowPic / cmdOverlayPic / the AGI256 draw).
++	_gfx->oracleDumpScreens(resourceNr);
+ }
+ 
+ /**

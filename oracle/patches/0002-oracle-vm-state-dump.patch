@@ -1,0 +1,52 @@
+diff --git a/engines/agi/cycle.cpp b/engines/agi/cycle.cpp
+index 3f49e6dc..2267be16 100644
+--- a/engines/agi/cycle.cpp
++++ b/engines/agi/cycle.cpp
+@@ -20,6 +20,7 @@
+  */
+ 
+ #include "common/config-manager.h"
++#include "common/file.h" // coco_agi ORACLE INSTRUMENTATION (P0.2): Common::DumpFile
+ 
+ #include "agi/agi.h"
+ #include "agi/sprite.h"
+@@ -154,7 +155,39 @@ void AgiEngine::resetControllers() {
+ 	}
+ }
+ 
++// coco_agi ORACLE INSTRUMENTATION (P0.2) -- per-cycle VM state.
++//
++// Dumped at cycle ENTRY, which is the state the cycle is about to act on. One line
++// per cycle, hex, fixed width, so a diff against the CoCo3 interpreter is a line
++// diff and the first divergent cycle is the first differing line.
++//
++//   cycle <n> flags <64 hex chars = 32 bytes = 256 flags> vars <512 hex = 256 vars>
++//
++// AgiGame holds flags[] as 32 packed bytes and vars[] as 256 bytes (agi.h:383-384),
++// so this is the engine's own storage emitted verbatim, not a reconstruction.
++static void oracleDumpVmState(uint32 cycleNr, const uint8 *flags, const uint8 *vars) {
++	static Common::DumpFile s_vmLog;
++	if (!s_vmLog.isOpen()) {
++		if (!s_vmLog.open(Common::Path("vmstate.txt")))
++			return;
++	}
++
++	Common::String line = Common::String::format("cycle %06u flags ", cycleNr);
++	for (int i = 0; i < MAX_FLAGS; i++)
++		line += Common::String::format("%02x", flags[i]);
++	line += " vars ";
++	for (int i = 0; i < MAX_VARS; i++)
++		line += Common::String::format("%02x", vars[i]);
++	line += "\n";
++
++	s_vmLog.write(line.c_str(), line.size());
++	s_vmLog.flush();
++}
++
+ void AgiEngine::interpretCycle() {
++	static uint32 s_oracleCycleNr = 0;
++	oracleDumpVmState(s_oracleCycleNr++, _game.flags, _game.vars);
++
+ 	ScreenObjEntry *screenObjEgo = &_game.screenObjTable[SCREENOBJECTS_EGO_ENTRY];
+ 
+ 	if (!_game.playerControl)

@@ -1,0 +1,114 @@
+# scummvm.pin — THE ORACLE PIN (CLAUDE.md §2Q)
+#
+# ★★ THIS PROJECT HAS NO SOURCE. Sierra's AGI interpreter source is not public. ScummVM is a
+# REIMPLEMENTATION, reverse-engineered by people who did not have the source either (§2). It is
+# the best secondary evidence available and it is what this project plans and diffs against —
+# but per §2.1 it is not neutral: it fixes original bugs, works around game-specific quirks and
+# normalises across interpreter versions. "ScummVM does it this way" is a fact about ScummVM.
+#
+# ★ §2Q requires BOTH halves of the oracle to be pinned. Half 1 is below and is settled.
+# Half 2 — the game set — is NOT YET PINNED and is Jay's to supply. See [game-set].
+
+
+[scummvm]
+
+# ★★ v2.9.1 is an ANNOTATED TAG, so `git ls-remote` reports the TAG OBJECT's SHA and
+# `git rev-parse HEAD` reports the COMMIT's. They are different values for the same pin and
+# confusing them will look like drift. Both are recorded; THE COMMIT IS THE PIN.
+commit      = 9d9b9e93108a276c551aeffa390169ccc5148e15
+tag         = v2.9.1
+tag_object  = 4f4258679fd50dac40ed86ad241ab295bb9ebfa6
+verify      = git rev-parse v2.9.1^{commit}   # must print the commit above
+
+# Why a release tag rather than a master commit: a tag is a named, reproducible reference that
+# a second party can resolve without this file, and it is the state ScummVM itself calls
+# shippable. A master SHA pins equally well but names nothing.
+
+repository  = https://github.com/scummvm/scummvm.git
+
+
+[clone]
+
+# ★ TWO CLONES, ONE PIN (dispatch §5.2). The reading clone and the building clone are separate
+# trees and MUST be at the same commit. Both recipes land at the commit above.
+#
+# Reading (this is the one the report's file:line citations were taken from):
+#   git clone --depth 1 --branch v2.9.1 https://github.com/scummvm/scummvm.git scummvm
+#
+# ★ The startup prompt's sparse recipe (--filter=blob:none --sparse + sparse-checkout set
+# engines/agi) reads fine and CANNOT BUILD — configure needs the full tree. Recorded so the
+# next person does not try.
+#
+# Building: the same command. A full depth-1 checkout at the tag is ~21,430 files and builds.
+#
+# ★★ NOT VENDORED (§2Q.1). No ScummVM source is committed to coco_agi — a checked-in copy
+# starts feeling like source, and §2 says there is none. This file plus oracle/patches/ is the
+# whole record.
+
+
+[build]
+
+# ★★ HEADLESS, AGI-ONLY, NO SDL. --backend=null is not a convenience, it is a §2O.1 decision:
+# the dumps come from the engine's own 160x168 buffers, and a build with no display backend
+# cannot accidentally route a baseline through a scaler or a palette.
+#
+# It also removes the only hard blocker on this machine — there is no C++ toolchain on the
+# Windows host at all and no SDL2 anywhere, so an SDL build was never available. See [host].
+
+configure   = ./configure --backend=null --disable-all-engines --enable-engine=agi
+build       = make -j2
+binary      = ./scummvm
+
+# Confirmed at the pin, in config.mk:
+#   BACKEND := null
+#   ENABLE_AGI = STATIC_PLUGIN        (every other engine commented out)
+
+
+[host]
+
+# Recorded because it determines WHERE the build happens, and a second party on this machine
+# needs to know before trying.
+#
+# Windows host  : NO C++ toolchain. No gcc, g++, clang, MSVC, make, cmake or pkg-config; no
+#                 MSYS2 and no MinGW compiler (the git on PATH is Git-for-Windows' mingw64
+#                 bundle, which ships no compiler). No SDL2 anywhere.
+# WSL2 Ubuntu   : g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, GNU Make 4.3, git, python3.
+#                 2 CPUs. No SDL2 dev packages — hence --backend=null.
+#
+# ★ BUILD INSIDE WSL's ext4 (~/scummvm), NOT on /mnt/c. A 21,430-file build over the 9p mount
+# is pathologically slow. The reading clone lives at C:\Projects\scummvm; the build clone at
+# ~/scummvm inside WSL. Both at the commit above — verified, not assumed.
+
+
+[patches]
+
+# ★ INSTRUMENTATION IS PATCHES AGAINST THE PIN, NEVER A MODIFIED VENDORED TREE (§5.4).
+# Reproducible from pin + patch or it is not pinned.
+#
+#   oracle/patches/0001-oracle-room-dump.patch      graphics.h, graphics.cpp, picture.cpp
+#   oracle/patches/0002-oracle-vm-state-dump.patch  cycle.cpp
+#
+# Apply from the clone root:  git apply oracle/patches/0001-*.patch oracle/patches/0002-*.patch
+# Total: 81 inserted lines, 0 deleted. Nothing existing is modified or removed.
+
+
+[game-set]
+
+# ★★ NOT PINNED. THIS HALF OF THE ORACLE IS BLOCKED AND IS JAY'S TO SUPPLY (§2Q, dispatch §5.5).
+#
+# No AGI game data exists on this machine — searched C:\Projects, C:\Games, Documents,
+# Downloads and Desktop for VOL/DIR/LOGDIR/PICDIR/VIEWDIR signatures: nothing.
+#
+# ★ "King's Quest I" IS NOT A SPECIFICATION. AGI games shipped in multiple interpreter versions
+# with different command sets [AGI Specs §3.9-3.10], so a pin needs THREE facts per title:
+#
+#     title · AGI interpreter version · platform · release/disk revision   (+ a checksum)
+#
+# Until this block is filled, the following are NOT EVIDENCE and must not be quoted as such:
+#   - any state-diff against ScummVM (§2Q)
+#   - design spec §11.1's disk-count measurement (M-01)
+#   - AC-7's room dump and AC-8's VM-state dump, which need a game to run at all
+#
+# What unblocks it: one or more AGI game directories, plus Jay's ruling on which are the pinned
+# set. Manifests (checksums + version identification) then go in games/manifests/ — NEVER the
+# game data itself, which is copyrighted and is the user's (§2P).
