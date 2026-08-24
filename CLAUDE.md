@@ -1,7 +1,14 @@
 # CLAUDE.md — AGI Interpreter → CoCo3 Project (Clyde standing rules)
-## Working Agreement v1.0 (forked from POP3_port CLAUDE.md v1.1)
-**Version:** 1.0
+## Working Agreement v1.1 (forked from POP3_port CLAUDE.md v1.1)
+**Version:** 1.1
 **Instantiates:** CODM v0.7. Where this doc and v0.7 overlap, v0.7 governs; this doc adds AGI invariants.
+
+**Changelog v1.0 → v1.1 (2026-08-24, Orchestrator-authored per §2D, from T-P0-001's verdict).** ★ **§2N's
+rule part 4 corrected to load/store/MODIFY** — v1.0 said "load/store" and would have undercounted `clr`,
+`com`, `neg`, `inc`, `dec`, `tst` and the shift/rotate group. **`TC_MMU` added to the alias list** (six,
+not five). **§2N gains the scan window, the `src/harness/` exclusion, §2N.1 (census-not-gate) and §2N.2
+(the pointer-load class).** No other rule changed. **The corrections come from POP P5.17/P5.19, which are
+primary and outranked the dispatch that got them wrong.**
 
 **Provenance (2026-08-23).** Forked from POP's v1.1 rather than written fresh: roughly 70% is
 machine-and-methodology discipline that took thirteen amendments to arrive at, and each rule carries a
@@ -430,15 +437,49 @@ because Karateka never selects mode 1. **It was fixed in both trees as one chang
 
 **A literal `grep '$FF..'` is the instrument P5.17 discredited.** It is wrong in two directions at once:
 it counts register addresses quoted in **comments** (85 of POP's 117 hits) and **misses every access made
-through an `equ` alias** — `CEL_MMU`, `BANK_MMU`, `SAM_SLOW/FAST`, **`PALETTE`**, `msys_player`'s
-`FF90`–`FF95` — **which are the majority of the real ones.**
+through an `equ` alias** — `CEL_MMU`, `BANK_MMU`, **`TC_MMU`**, `SAM_SLOW/FAST`, **`PALETTE`**,
+`msys_player`'s `FF90`–`FF95` — **which are the majority of the real ones.**
 
 ★ **`PALETTE` is on that alias list**, so a literal grep would miss exactly the palette accesses §2F.1
 depends on being HAL-owned.
 
 **The rule.** A line counts only if it is *not a full-line comment, not the inline half after `;`, not an
-`equ` definition, and carries a load/store mnemonic* — **with aliases resolved to their register,
-including `+n` offsets.** Measured under it: **POP 59, Karateka 8.**
+`equ` definition, and carries a **load/store/modify** mnemonic* — **with aliases resolved to their
+register, including `+n` offsets.** Measured under it: **POP 59, Karateka 8.**
+
+★★ **Part 4 is load/store/MODIFY** (corrected T-P0-001, per POP P5.19 §3B — the dispatch said
+"load/store" and was wrong). `clr`, `com`, `neg`, `inc`, `dec`, `tst` and the shift/rotate group **write a
+register with neither a load nor a store**: `clr $FF9C` is an access. ★ **And the word boundary is
+load-bearing in the other direction — `clr` must not match `clra`**, which is the accumulator form and
+touches no register.
+
+**Scope.** The scan window is **`$FF80`–`$FFDF`**, deliberately wider than the ownership claim above. ★ **A
+scanner narrowed to the owned ranges would have been blind to POP's `$FFA4`/`$FFA5` incident entirely** —
+the MMU task slots and the SAM speed pair sit outside both ranges and are where the siblings' real
+contention lives. The PIA at `$FF00`–`$FF7F` is out of scope.
+
+★ **Exclude `src/harness/` as well as `src/hal/` when measuring a sibling.** POP's `src/` less `src/hal/`
+alone gives **132**; the 59 requires both exclusions, because probe accesses are counted separately.
+
+### 2N.1 ★★ The census is not a gate, and it must not become one
+
+**`reg_discipline.py` reports; it does not fail a build.** Zero is not the goal (above), and a gate implies
+one. A tool that failed on a count would push the 71% hot tier through `jsr` — a ~12–14 cycle call
+replacing a 7-cycle write — **which is the worst available conversion.**
+
+★ **The right second instrument is an owner-row ratchet** (POP P5.19, `register_owner_check.py` with a
+hand-annotated baseline at `docs/project/register-owners.tsv`). The census answers *how many*; the ratchet
+answers ***did a new owner arrive without anyone deciding***, which is the question that actually caught
+`$FFA4`/`$FFA5`. **It needs owners to exist, so it lands at first engine source — not at 59.**
+
+### 2N.2 ★ What a line count does and does not measure
+
+**`ldu #$FFB0` followed by N indirect writes counts as ONE.** The number is *"lines that name a register"*,
+not *"times a register is written"*, and the two diverge wherever a pointer is used.
+
+★★ **This is live for AGI specifically.** The 16-entry palette load is exactly this idiom, across sixteen
+registers rather than four. **Characterise it before the palette code is written**; do not read a low
+census as low register traffic.
 
 ★★ **"Engine touches no registers" is NOT the goal.** P5.17 found **71% of POP's accesses are hot** —
 `msys_player`'s 23 are inside the FIRQ handler, and routing those through a `jsr` is the worst conversion
