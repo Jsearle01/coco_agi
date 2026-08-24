@@ -1,0 +1,89 @@
+# CoCo3 OS-9 AGI IMAGE MANIFEST -- harness/tools/game_manifest.py --os9
+# ★ MANIFEST ONLY. No game data is in this repository and none ever may be (§2P).
+# ONE ROW PER IMAGE, not per title: the media variants are different builds.
+# agi_bytes counts AGI resources ONLY -- Sierra's interpreter (CMDS/Sierra, MnLn,
+# Scrn, Shdw, TOCGen) and the OS-9 host (OS9Boot, MODULES/, shell utilities) are
+# CODE our port replaces, and are reported separately.
+# stride 512 = DrivePak container (one 256-byte OS-9 sector per 512-byte block).
+#
+image	sha256	image_bytes	stride	sectors	volume	dd_fmt	version	files	agi_files	agi_bytes	vols	interp_bytes	host_bytes
+King's Quest I (Sierra On-Line) (OS-9) (Coco 3)/Coco SDC/kq1.dsk	b00b0fa14101edb60ed9698f3f3f977c0f383cc0c474ab43d0a37ce3e14644fa	737280	256	2880	King's Quest 1	0x03	v2	28	9	256857	3	37162	41615
+King's Quest I (Sierra On-Line) (OS-9) (Coco 3)/DrivePak/kq1-drivepak.par	67abcda6c8defd76e5c492addbe1075da57fae0e4db18421517f7d80ed555ea3	1474560	512	2880	King's Quest 1	0x02	v2	26	9	256857	3	37162	38532
+King's Quest I (Sierra On-Line) (OS-9) (Coco 3)/Drivewire/kq1-becker.dsk	8dd5f863ffd687713f1c6601315f71acd37a0cac1c93064ce959d0e41654be72	356864	256	1394	King's Quest 1	0x02	v2	27	9	256857	3	37162	42206
+King's Quest I (Sierra On-Line) (OS-9) (Coco 3)/Drivewire/kq1-dw.dsk	c9d18b4f5efaac13a1927753d76593390e988cf316cb2957e4ae346b40cfc8a0	356352	256	1392	King's Quest 1	0x02	v2	27	9	256857	3	37162	41802
+King's Quest I (Sierra On-Line) (OS-9) (Coco 3)/Floppy 360K/kq1.dsk	37ea36c45ce63d771aaa2ebceb57312029d86d003fda9c8d8ef4ebf253efad61	368640	256	1440	King's Quest 1 Disk %d	0x03	v2	19	9	256857	3	37162	31814
+King's Quest I (Sierra On-Line) (OS-9) (Coco 3)/Savegames/kq1-sg.dsk	9d73119d21110f53f95ee803dbd3b4be3e83c71ccd3193570859f1ae69bc7c73	184320	256	720		0x00	none	7	0	0	0	0	0
+King's Quest II (Sierra On-Line) (OS-9) (Coco 3)/Coco SDC/kq2.dsk	f69d2f0b0f46aab3031767ba8fc28341e1d91143f71564a74da1b028cd7502a7	737280	256	2880	King's Quest 2	0x03	v2	28	9	364044	3	37162	41629
+King's Quest II (Sierra On-Line) (OS-9) (Coco 3)/DrivePak/kq2-drivepak.par	bfcce6dba0afb0a63fff468cc42ed63fec1baa70b43cdc7f33f1c2e9ee3c1576	1474560	512	2880	King's Quest 2	0x02	v2	26	9	364044	3	37162	38546
+King's Quest II (Sierra On-Line) (OS-9) (Coco 3)/Drivewire/kq2-becker.dsk	c1343fcae259a1b1a11d6a5d0c7f6cb37c3ecfbdc4a23634c02f8b92670e745a	464128	256	1813	King's Quest 2	0x02	v2	27	9	364044	3	37162	42220
+King's Quest II (Sierra On-Line) (OS-9) (Coco 3)/Drivewire/kq2-dw.dsk	5384201588da5363a7caee056c0c9f2932272293f287341e6c7dbe64a8289c9b	463616	256	1811	King's Quest 2	0x02	v2	27	9	364044	3	37162	41816
+King's Quest II (Sierra On-Line) (OS-9) (Coco 3)/Floppy 360K/kq2-1.dsk	8e5684f2bd90d4bbc6f21312d96023c9350bfb7658b2c5983933e672f7e05545	368640	256	1440	King's Quest 2 Disk 1	0x03	v2	18	8	174077	2	37162	31828
+King's Quest II (Sierra On-Line) (OS-9) (Coco 3)/Floppy 360K/kq2-2.dsk	d6c692fa043625200764a2b5cd991bd8e3d0284e25065ead33151dfb91a4ce99	368640	256	1440	King's Quest 2 Disk 2	0x03	none	3	3	213320	2	0	0
+King's Quest II (Sierra On-Line) (OS-9) (Coco 3)/Floppy 720K/kq2.dsk	d783c6e98912fd20d51db57c706a517e16f7af905fc7c04849b654e92cf0dd11	737280	256	2880	King's Quest 2	0x03	v2	19	9	364044	3	37162	31828
+King's Quest II (Sierra On-Line) (OS-9) (Coco 3)/Savegames/kq2-sg.dsk	b72fcdf7b154726e3d89f717fe8dbbea5df1e92a1361db9d0b9629dc1c4c7edb	184320	256	720		0x00	none	10	0	0	0	0	0
+King's Quest III (Sierra On-Line) (OS-9) (Coco 3)/Coco SDC/kq3.dsk	11633be2a7eb972ffd8b081b41355d214451dca497d9f235462f613a64f0d620	737280	256	2880	King's Quest 3	0x03	v2	37	18	563325	12	37162	41813
+King's Quest III (Sierra On-Line) (OS-9) (Coco 3)/DrivePak/kq3-drivepak.par	2e204e4028fa5cce3d9bf9104a6e9dd46a86de73f2d066449843d58d165ee2c5	1474560	512	2880	King's Quest 3	0x02	v2	35	18	563325	12	37162	38730
+King's Quest III (Sierra On-Line) (OS-9) (Coco 3)/Drivewire/kq3-becker.dsk	f195ecdccf0897301a65289b0733cc4b48d081536e8ac39165f7129db8bd8ad1	667392	256	2607	King's Quest 3	0x02	v2	36	18	563325	12	37162	42404
+King's Quest III (Sierra On-Line) (OS-9) (Coco 3)/Drivewire/kq3-dw.dsk	e47e7db1661d6d27e97ada20bdb7f54c8bb4e28d25fba033010d20573274f137	666880	256	2605	King's Quest 3	0x02	v2	36	18	563325	12	37162	42000
+King's Quest III (Sierra On-Line) (OS-9) (Coco 3)/Floppy 360K/kq3-1.dsk	20ea31a82087da90003dd4a6b1ff5b0e9b36bd65497d9e26598f92655dcbc7ab	368640	256	1440	King's Quest 3 Disk 1	0x03	v2	21	11	225368	5	37162	32012
+King's Quest III (Sierra On-Line) (OS-9) (Coco 3)/Floppy 360K/kq3-2.dsk	e736f7c249179e901cccb695aedfe71e7532c6b45bcb16a62f45251e3a39d96b	368640	256	1440	King's Quest 3 Disk 2	0x03	none	7	7	247353	6	0	0
+King's Quest III (Sierra On-Line) (OS-9) (Coco 3)/Floppy 360K/kq3-3.dsk	b27b08da9e4893e3bfe8285380b89bec3a5ace55f747f058204886cdee2b6be8	368640	256	1440	King's Quest 3 Disk 3	0x03	none	6	6	258727	5	0	0
+King's Quest III (Sierra On-Line) (OS-9) (Coco 3)/Original/KQ3-1-1.DSK	5e9fd9d8637fa80c2496ef431f563927e1b484ba0370dc8752ceb4c994ea970a	161280	256	630	KQ3_D1_S1	0x02	v2	22	6	7092	0	36386	34727
+King's Quest III (Sierra On-Line) (OS-9) (Coco 3)/Original/KQ3-1-2.DSK	6e2cfcfacb7c0a9f169313c909087979762174ec646946d353f5887f430a35b1	161280	256	630	KQ3_D1_S2	0x02	none	3	3	97353	2	0	0
+King's Quest III (Sierra On-Line) (OS-9) (Coco 3)/Original/KQ3-2-1.DSK	ddc6b2cee94d0433715c6205e337525778f35d248133810993e859b803189082	161280	256	630	KQ3_D2_S1	0x02	none	4	4	153769	3	0	0
+King's Quest III (Sierra On-Line) (OS-9) (Coco 3)/Original/KQ3-2-2.DSK	10b060ea59706e0611287512db0a6a87a98a80142af70242461877f09bb28e0f	161280	256	630	KQ3_D2_S2	0x02	none	4	4	131907	3	0	0
+King's Quest III (Sierra On-Line) (OS-9) (Coco 3)/Original/KQ3-3-1.DSK	72239f2a4094878685444153d420f74d77490bceb1981ab4a2e80da6a4dd9f98	161280	256	630	KQ3_D3_S1	0x02	none	5	5	144223	4	0	0
+King's Quest III (Sierra On-Line) (OS-9) (Coco 3)/Original/KQ3-3-2.DSK	e1897ba91ec60cc69b95998b2a2f0d375d65a20e18df799be6ea1e00546f5ea2	161280	256	630	KQ3_D3_S2	0x02	none	5	5	143285	4	0	0
+King's Quest III (Sierra On-Line) (OS-9) (Coco 3)/Original/KQ3-4-1.DSK	6f5e0e38ecf6dbd796a0f74956756e5ae5847c0092a6d4c34564c2c72ff8c1fd	161280	256	630	KQ3_D4_S1	0x02	none	4	4	144411	3	0	0
+King's Quest III (Sierra On-Line) (OS-9) (Coco 3)/Original/KQ3-4-2.DSK	5f2d05e8dedf3a3b7e5266fc45ecff13a43d51d059c1f97c8acd6e05c5ea00f1	161280	256	630	KQ3_D4_S2	0x02	none	4	4	145246	3	0	0
+King's Quest III (Sierra On-Line) (OS-9) (Coco 3)/Original/KQ3-5-1.DSK	513f99310577a2ce122f4bfbd6189820e1c0c608e6733f0a478812f3f93865eb	161280	256	630	KQ3_D5_S1	0x02	none	4	4	133880	3	0	0
+King's Quest III (Sierra On-Line) (OS-9) (Coco 3)/Original/KQ3-5-2.DSK	39f2f14078ac0bc3ad0ce1d11c3e38225433813e64310ab388afa60891e60285	161280	256	630	KQ3_D5_S2	0x02	none	4	4	144610	3	0	0
+King's Quest IV (Sierra On-Line) (OS-9) (Coco 3)/Coco SDC/kq4.dsk	fd90fe5c5cdf6990c4dd06ca0bd8cd7e634e10d1b77570dbed501742a251cd78	2949120	256	11520	King's Quest 4	0x02	v2	35	16	1399859	10	37162	41739
+King's Quest IV (Sierra On-Line) (OS-9) (Coco 3)/DrivePak/kq4-drivepak.par	b7e0dff2a26a7da148d7e1852b96604224c9b8a6d305dce8ed79241a5aebbd72	5898240	512	11520	King's Quest 4	0x02	v2	33	16	1399859	10	37162	38656
+King's Quest IV (Sierra On-Line) (OS-9) (Coco 3)/Drivewire/kq4-becker.dsk	178c2b9986ad05b27b79a53bd4599fddf64258e0ad5f23afb37dca806d470aef	1502208	256	5868	King's Quest 4	0x02	v2	34	16	1399859	10	37162	42330
+King's Quest IV (Sierra On-Line) (OS-9) (Coco 3)/Drivewire/kq4-dw.dsk	4b39a10f18859047532f3d5db4e16a284824464044966b3248a7ae0568bda9ce	1501696	256	5866	King's Quest 4	0x02	v2	34	16	1399859	10	37162	41926
+King's Quest IV (Sierra On-Line) (OS-9) (Coco 3)/Floppy 360K/kq4-1.dsk	69c99a49f13aa4b5f48a36f1bcd975cdb39a874c0ad1ea7ebeea1b67d68dd4f0	368640	256	1440	King's Quest 4 Disk 1	0x03	v2	19	9	186655	3	37162	31938
+King's Quest IV (Sierra On-Line) (OS-9) (Coco 3)/Floppy 360K/kq4-2.dsk	ac6a4392fa60799bda6d72fbcf340429c424608bbabe854feda8ee84e8e17084	368640	256	1440	King's Quest 4 Disk 2	0x03	none	4	4	348159	3	0	0
+King's Quest IV (Sierra On-Line) (OS-9) (Coco 3)/Floppy 360K/kq4-3.dsk	dbe7d3ae0310e5c42ab13f4c9b8a838c2846b37b7b9fd390a1be8bb835be40fb	368640	256	1440	King's Quest 4 Disk 3	0x03	none	5	5	358576	4	0	0
+King's Quest IV (Sierra On-Line) (OS-9) (Coco 3)/Floppy 360K/kq4-4.dsk	27140f9275ddc68a1e2fc711e59d5fde6f072b5bfd5e45dce59a81a279d83a32	368640	256	1440	King's Quest 4 Disk 4	0x03	none	4	4	354154	3	0	0
+King's Quest IV (Sierra On-Line) (OS-9) (Coco 3)/Floppy 360K/kq4-5.dsk	658a48a6b1db575d6bd5c6012d950f2ce2998d9b20d2c7ee950ff4ec2320cf9d	368640	256	1440	King's Quest 4 Disk 5	0x03	none	4	4	229287	3	0	0
+King's Quest IV (Sierra On-Line) (OS-9) (Coco 3)/Floppy 360K/kq4-6.dsk	614e70650b0ea55de38e36d3b668b4812a550ec5b1197d2d5f74732161af4fb9	368640	256	1440	King's Quest 4 Disk 6	0x03	none	5	5	266652	4	0	0
+King's Quest IV (Sierra On-Line) (OS-9) (Coco 3)/Floppy 720K/kq4-1.dsk	2fe5ee53a6d257ac13507ba188ddf4d17f9058e38b71034a1ef3cda2b6ed6fbd	737280	256	2880	King's Quest 4 Disk 1	0x03	v2	21	11	375860	5	37162	31937
+King's Quest IV (Sierra On-Line) (OS-9) (Coco 3)/Floppy 720K/kq4-2.dsk	72d6d05574da610f9b3e3478f313215a7203996603e0949e132ecf187ed0d50e	737280	256	2880	King's Quest 4 Disk 2	0x03	none	6	6	640331	5	0	0
+King's Quest IV (Sierra On-Line) (OS-9) (Coco 3)/Floppy 720K/kq4-3.dsk	6f1f30eea43839887c3f3f916f57d6615096575ea9c95a396f337bc60f356cff	737280	256	2880	King's Quest 4 Disk 3	0x03	none	6	6	531723	5	0	0
+King's Quest IV (Sierra On-Line) (OS-9) (Coco 3)/Savegames/kq4-sg1.dsk	bb54d427ad6e656332c1f2785317846cd68c4a95a038f9e35e7c8518c1379f3d	184320	256	720		0x00	none	12	0	0	0	0	0
+King's Quest IV (Sierra On-Line) (OS-9) (Coco 3)/Savegames/kq4-sg2.dsk	fabc240fa38b15b06ec538d7f3ef9926ba00bf2e56eed1240f800c7a62423e7c	184320	256	720		0x00	none	12	0	0	0	0	0
+King's Quest VI AGI (Brandon Kouri) (OS-9) (Coco 3)/Coco SDC/kq6.dsk	65b2be988ddf91688a86874d7bc0cd150a28b7a0519bbef97da5fcfa8fd7c7df	1474560	256	5760	King's Quest 6	0x02	v2	33	14	1049006	8	37162	41715
+King's Quest VI AGI (Brandon Kouri) (OS-9) (Coco 3)/DrivePak/kq6-drivepak.par	a6a67e3798cea57ff90014bc683ef7702ad514b1579c3ed490be2a2d1d3e8cfc	5898240	512	11520	King's Quest 6	0x02	v2	25	8	218762	2	37162	38632
+King's Quest VI AGI (Brandon Kouri) (OS-9) (Coco 3)/Drivewire/kq6-becker.dsk	db4ba4e5c72affabc3e5911382295119617406070e0a86a2e72a1e7d83638cc8	1150720	256	4495	King's Quest 6	0x02	v2	32	14	1049006	8	37162	42306
+King's Quest VI AGI (Brandon Kouri) (OS-9) (Coco 3)/Drivewire/kq6-dw.dsk	00deec0dbe12ac1f23cae6351a47035b2bbd846e32877ccc0733de1e513b19bf	1150208	256	4493	King's Quest 6	0x02	v2	32	14	1049006	8	37162	41902
+King's Quest VI AGI (Brandon Kouri) (OS-9) (Coco 3)/Floppy 360K/kq6-1.dsk	681b2addc4f2d4dfdf43d6cc04c3624b06485395cb8671a9a4d2797566dbd1c6	368640	256	1440	King's Quest 6 AGI Disk 1	0x03	v2	18	8	218762	2	37162	31914
+King's Quest VI AGI (Brandon Kouri) (OS-9) (Coco 3)/Floppy 360K/kq6-2.dsk	6029ceab4249485b4cea70dbccd92d0136c2bf35b10b0860f03cb6b523d88635	368640	256	1440	King's Quest 6 AGI Disk 2	0x03	none	4	4	356263	3	0	0
+King's Quest VI AGI (Brandon Kouri) (OS-9) (Coco 3)/Floppy 360K/kq6-3.dsk	b6a606871b3ac980332dec4282d5f72cf58d3c65276b19e39e90ffd6b7941633	368640	256	1440	King's Quest 6 AGI Disk 3	0x03	none	3	3	254422	2	0	0
+King's Quest VI AGI (Brandon Kouri) (OS-9) (Coco 3)/Floppy 360K/kq6-4.dsk	df79d074001a261ec4444aea0b69241810e06a96a5a1c84050ce83b5782dab14	368640	256	1440	King's Quest 6 AGI Disk 4	0x03	none	3	3	322710	2	0	0
+King's Quest VI AGI (Brandon Kouri) (OS-9) (Coco 3)/Floppy 360K/kq6-5.dsk	a5ba3382e42bd31b2cfb0a988766321a91f75c2af11df841b5487ff904a301b9	368640	256	1440	King's Quest 6 AGI Disk 5	0x03	none	3	3	276460	2	0	0
+King's Quest VI AGI (Brandon Kouri) (OS-9) (Coco 3)/Floppy 360K/kq6-6.dsk	9e3f9367ea47290798a0983126db208f5eb3282482b00296f48f4075bd147a4a	368640	256	1440	King's Quest 6 AGI Disk 6	0x03	none	4	4	357012	3	0	0
+King's Quest VI AGI (Brandon Kouri) (OS-9) (Coco 3)/Floppy 720K/kq6-1.dsk	18b89588b75cf545aeba0a263e6ba9778f1c8913630960019c1b91be7d87e137	737280	256	2880	King's Quest 6 AGI Disk 1	0x03	v2	21	11	548027	5	37162	31914
+King's Quest VI AGI (Brandon Kouri) (OS-9) (Coco 3)/Floppy 720K/kq6-2.dsk	cb969263a961de2eb139e3dcae3c42fd5dd66e9f8aa8cc2b71c88f09983b19ec	737280	256	2880	King's Quest 6 AGI Disk 2	0x03	none	6	6	674762	5	0	0
+King's Quest VI AGI (Brandon Kouri) (OS-9) (Coco 3)/Savegames/kq6sg-1.dsk	7702e98c04611bacd626f75ba607cd364d271099dcdf4db54e30c20231b7d7dd	161280	256	630		0x00	none	12	0	0	0	0	0
+King's Quest VI AGI (Brandon Kouri) (OS-9) (Coco 3)/Savegames/kq6sg-2.dsk	671a4ef2bdf0454319d542861b74c976a7177c74d2c6d39214b5c05f229ac682	161280	256	630		0x00	none	12	0	0	0	0	0
+King's Quest VI AGI (Brandon Kouri) (OS-9) (Coco 3)/Savegames/kq6sg-3.dsk	14af24b03dbc54189219d3f80df5c4498524eae47a02483ebcdf3b425097964e	161280	256	630		0x00	none	5	0	0	0	0	0
+Leisure Suit Larry (Sierra On-Line) (OS-9) (Coco 3)/Coco SDC/lsl.dsk	70f37fe201dd838b582a6c713f8d2d7da893736da633e88173b94a30142ac41d	737280	256	2880	Leisure Suit Larry 1	0x03	v2	30	11	296454	5	37162	41655
+Leisure Suit Larry (Sierra On-Line) (OS-9) (Coco 3)/DrivePak/lsl-drivepak.par	3695d80c932aad10898f3d41cc5c2a1f34d7910299fdc0abf95edfd2eef70bed	1474560	512	2880	Leisure Suit Larry 1	0x02	v2	28	11	296454	5	37162	38572
+Leisure Suit Larry (Sierra On-Line) (OS-9) (Coco 3)/Drivewire/lsl-becker.dsk	cccc2c0d086e5dbe3f8d1f308fb2bebc6f9a5cf22fb5cabd5f99f4f162b39629	397312	256	1552	Leisure Suit Larry 1	0x02	v2	29	11	296454	5	37162	42246
+Leisure Suit Larry (Sierra On-Line) (OS-9) (Coco 3)/Drivewire/lsl-dw.dsk	7f04ab7c109e2565b66831e671dfc96ef475f4ead8c7c44c4884f43ce0987199	396800	256	1550	Leisure Suit Larry 1	0x02	v2	29	11	296454	5	37162	41842
+Leisure Suit Larry (Sierra On-Line) (OS-9) (Coco 3)/Floppy 360K/lsl-1.dsk	2207f25e8860f3244bee2047401583eb0eb4577ebeddd0a6e05d27589b7797f8	368640	256	1440	Leisure Suit Larry 1 Disk 1	0x03	v2	20	10	188008	4	37162	31854
+Leisure Suit Larry (Sierra On-Line) (OS-9) (Coco 3)/Floppy 360K/lsl-2.dsk	d21f5c8dd9bec2dfa292bad706b6764872c4c80019a0fa7ba558a5880d55af4a	368640	256	1440	Leisure Suit Larry 1 Disk 2	0x03	none	4	4	147462	3	0	0
+Leisure Suit Larry (Sierra On-Line) (OS-9) (Coco 3)/Original/LARRY1.DSK	4b3838c32ce9db5641b16dea685b11c7a0b1c088f55c5cfb9b44f9dec520ee6e	184320	256	720	LL1disk1	0x02	v2	24	8	58640	2	37016	30833
+Leisure Suit Larry (Sierra On-Line) (OS-9) (Coco 3)/Original/LARRY2.DSK	844b0a6d39ad140f48aa1cef993b68ec567824d31ae9b4cd1122b59d7347e44a	161280	256	630	LL1disk2	0x02	none	4	4	153665	3	0	0
+Leisure Suit Larry (Sierra On-Line) (OS-9) (Coco 3)/Original/LARRY3.DSK	4a6950f39481c4ae56836812f6d60905cca71920d1dbdcd3886279d8b497ea03	161280	256	630	LL1disk3	0x02	none	4	4	147462	3	0	0
+Police Quest 1 (Sierra On-Line) (OS-9) (Coco 3)/Coco SDC/pq1.dsk	fc8b5179bf6b454708ce05a23dd52dc080ac6d5f4fecbfd51b9ff6604a730bef	1474560	256	5760	Police Quest 1	0x02	v2	29	10	702192	4	37162	41647
+Police Quest 1 (Sierra On-Line) (OS-9) (Coco 3)/DrivePak/pq1-drivepak.par	b3c3c5534e895946c9bdfe8c2aec7b18a30889061b5292776bbdd66216814244	2949120	512	5760	Police Quest 1	0x02	v2	27	10	702192	4	37162	38564
+Police Quest 1 (Sierra On-Line) (OS-9) (Coco 3)/Drivewire/pq1-becker.dsk	27aaf2b2cd35a816b4b832184e152a9e9b3a032696449f4a09cfa668ca694e1a	802816	256	3136	Police Quest 1	0x02	v2	28	10	702192	4	37162	42238
+Police Quest 1 (Sierra On-Line) (OS-9) (Coco 3)/Drivewire/pq1-dw.dsk	995987be45dd8a299982c3a5adb0dc5835761e30b26855646ed919096f80dabf	802304	256	3134	Police Quest 1	0x02	v2	28	10	702192	4	37162	41834
+Police Quest 1 (Sierra On-Line) (OS-9) (Coco 3)/Floppy 360K/pq1-1.dsk	d232eb62e95ac0e8834db9cb5e2c7a8cfa67242c1899eacd237bf49e9f54fb4d	368640	256	1440	Police Quest 1 Disk 1	0x03	v2	18	8	266788	2	37162	31846
+Police Quest 1 (Sierra On-Line) (OS-9) (Coco 3)/Floppy 360K/pq1-2.dsk	fa4ddb999867b1439be7e34ede2ce5903cf556363a3fbee3f64efa0251def19a	368640	256	1440	Police Quest 1 Disk 2	0x03	none	3	3	253312	2	0	0
+Police Quest 1 (Sierra On-Line) (OS-9) (Coco 3)/Floppy 360K/pq1-3.dsk	175a4312c47916b8cbbd95bc552123f489e885bc4db62ae6198c1d27db3b44f4	368640	256	1440	Police Quest 1 Disk 3	0x03	none	3	3	311554	2	0	0
+Police Quest 1 (Sierra On-Line) (OS-9) (Coco 3)/Savegames/pq1-sg1.dsk	e2742fc8725bd16faf5d925cb6c95437478158481df43cb7dfe014d2ef457ea0	184320	256	720		0x00	none	12	0	0	0	0	0
+Police Quest 1 (Sierra On-Line) (OS-9) (Coco 3)/Savegames/pq1-sg2.dsk	44b59dbc168c6545546238935f9fd086777d072d76fec12a132daa7140a42999	184320	256	720		0x00	none	12	0	0	0	0	0
+Police Quest 1 (Sierra On-Line) (OS-9) (Coco 3)/Savegames/pq1-sg3.dsk	8b26c8d15d1f1c8af2ecf7c55b93a21ab9dcae9ddf80da7ed256865d5e330a48	184320	256	720		0x00	none	3	0	0	0	0	0

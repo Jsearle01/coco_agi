@@ -117,6 +117,9 @@ viewdir
 snddir
 words.tok
 object
+# OS-9 table-of-contents shipped on the Sierra disks (spelled tOC / tOC.txt / toc / toc.txt)
+[Tt][Oo][Cc]
+[Tt][Oo][Cc].txt
 LOGDIR
 PICDIR
 VIEWDIR
@@ -130,6 +133,13 @@ OBJECT
 # through on a prefix nobody predicted. Safety wins here — and an intended file can always be
 # added with `git add -f`, which is a visible act.
 *dir
+*Dir
+*DIR
+# ★★ THE MIXED CASE IS NOT DEFENSIVENESS, IT IS THE MEASURED FILENAME. The CoCo3 corpus names
+# these files `logDir`, `picDir`, `viewDir`, `sndDir` -- capital D, lower-case rest -- and
+# `*dir` would NOT match that on a case-sensitive filesystem. It matched here only because this
+# Windows host compares case-insensitively, which is a property of the host and not of the rule.
+# Found by reading the actual OS-9 directory entries at P0.4, not by guessing.
 #
 # --- Sierra's CoCo3 interpreter and OS-9 modules -------------------------------------------
 # ★ Sierra's shipped interpreter is COPYRIGHTED CODE, not game data, and is likewise never
