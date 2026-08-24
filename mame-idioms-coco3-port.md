@@ -2223,30 +2223,49 @@ mame coco3 -ext fdc \
 - **41e. `-flop3` does not exist on this driver.** `mame coco3 -ext fdc` exposes **`-flop1` and
   `-flop2` only**; a third mount is `Error: unknown option: -flop3`, exit 6. A set of three or
   more disks cannot all be mounted at once, so prefer a single-image variant when one exists.
-- **41f. ★★★ MAME'S UI EATS `End` / `Home` / `PgUp` / `PgDn` / ARROWS, SO THE STOCK `BREAK`
-  BINDING IS UNUSABLE. REBIND TO `Insert`, OR ASSERT THE FIELD.** This cost four attempts and
-  two wrong diagnoses; the root cause is one sentence and everything else follows from it.
+- **41f. CTRL+BREAK: `Insert` works (operator-confirmed); for automation, assert the field.**
 
-  **MAME's UI reserves the navigation keys for menus, and consumes them before the emulated
-  keyboard sees them.** MAME maps CoCo3 `BREAK` to **`End` or `Esc`** (measured from `ioport`),
-  and **neither reaches the machine** — `Esc` is additionally MAME's quit key, so reaching for it
-  as a fallback exits the emulator.
+  ★★ **READ THE EVIDENCE GRADES BELOW BEFORE BUILDING ON THIS.** An earlier draft of this entry
+  asserted flatly that *"MAME's UI eats End/Home/PgUp/PgDn"*. **That was over-claimed on thin
+  evidence and is retracted.** What is actually established, and what is not:
 
-  ★★ **`Insert` IS NOT CLAIMED AND WORKS.** Confirmed by Jay at the P0.4 gate. `dist/mame-cfg/rgb/coco3.cfg`
-  binds it to **both** `BREAK` (`:row6` mask 4) and `CTRL` (mask 16), so **one press of `Insert`
-  = CTRL+BREAK** — a host key may drive more than one emulated field. Verified applied:
+  **MEASURED — trustworthy:**
+  - `natkeyboard:post` **cannot** send BREAK. Post takes **characters**; BREAK is not one. This
+    is definitional, not observational.
+  - **Asserting the ioport field works**, and is what automation should use (code below). Proven
+    by consequence: before the assert the snapshots were byte-identical for 45 emulated seconds;
+    after it every sample differed (627 B → 4438 B → 2755 B) with `PC` moving
+    `$BF71 → $D51B → $F2FF`.
+  - MAME's stock CoCo3 map, read from `ioport`: `BREAK` = `End` or `Esc`, `CLEAR` = `Home`,
+    `CTRL` = `Ctrl`, `ALT` = `Alt`, `ENTER` = `Enter`.
+  - **`Esc` is MAME's own quit key**, so it is an actively bad fallback for BREAK regardless.
+  - A cfg binding **can be present and verified and still not be exercised**: MAME reported
+    `BREAK = "End or Page Down"` from `seq_name`, and the binding survived MAME's own
+    exit-rewrite of the cfg. **`seq_name` tells you the mapping, not that the key arrives.**
+  - The Lua input API is sound — `code_from_token` / `code_pressed` resolved all 12 tokens tried.
+
+  **OPERATOR-CONFIRMED — Jay, at the P0.4 gate:** ★ **`Insert` works.** `dist/mame-cfg/rgb/coco3.cfg`
+  binds it to **both** `BREAK` (`:row6` mask 4) and `CTRL` (mask 16), so one press asserts both —
+  a host key may drive more than one emulated field. Verified applied:
   `BREAK = "Insert"`, `CTRL = "Ctrl or Right Ctrl or Insert"`.
 
-  ★★ **AND THE FALSE DIAGNOSIS IS THE PART WORTH KEEPING: A LOADED, CORRECT cfg CAN STILL LOOK
-  LIKE A BAD BINDING.** `PgDn` was tried first and failed. It was NOT a cfg error — an
-  instrumented run proved the cfg was loaded *and* survived MAME's own exit-rewrite (both
-  `KEYCODE_PGDN` sequences still present in the rewritten file) while the `:row6` BREAK bit never
-  asserted once. **In the same run `Ctrl` asserted correctly**, and that contrast is what isolated
-  it to *specific keys being captured* rather than to input, the cfg, or natural-keyboard mode.
-  **Checking that the binding is present proves nothing about whether the key arrives.**
+  **NOT ESTABLISHED — do not repeat as fact:**
+  - ★ **WHY `End` and `PgDn` did not work is UNKNOWN.** UI capture is a *hypothesis*. The port
+    probe recorded no BREAK assertion in runs where those keys were the nominated key, and did
+    record `CTRL` and `ENTER` — but the probe never captured a confirmed press of `End` or
+    `PgDn` at layer 1, so "pressed and swallowed" is not distinguished from "not pressed at that
+    moment". **Settling it needs a run that logs the host key and the port simultaneously, with
+    the operator pressing the specific key.**
+  - Whether the title screen even requires CTRL+BREAK. **`ENTER` also reaches the port** and was
+    pressed repeatedly in the runs that advanced, so it may be sufficient on its own.
 
-  ★ **`natkeyboard:post` cannot send BREAK at all** — post takes **characters** and BREAK is not
-  one. Toggling natural keyboard does not help either; the UI interception is above it.
+  ★★ **AND THE PROCESS LESSON, which cost more than the bug: THREE CONSECUTIVE DIAGNOSTICS WERE
+  DEFECTIVE, EACH BURNING A LIVE RUN OF THE OPERATOR'S TIME.** (1) The probe armed at frame 3000
+  and the window closed at 45 s, so it recorded nothing — **arm an instrument at frame zero.**
+  (2) Its readout went to stdout, which the operator never sees — **render state into the window
+  the operator is looking at**, via `screen:draw_text`. (3) It printed `#WATCH` under the label
+  "codes resolved", a constant masquerading as a measurement — **never print a figure you have
+  not computed.** Verify the instrument headlessly, alone, before spending a live run on it.
 
   **For automation, assert the field, which is what a real keypress ultimately does anyway:**
 
@@ -2264,23 +2283,24 @@ mame coco3 -ext fdc \
 
   **Measured CoCo3 key map** (`mame coco3`, from the machine's own ioport, P0.4):
 
-  | CoCo3 | host (MAME default) | reaches the machine? |
+  | CoCo3 | host (MAME default) | observed to reach the machine? |
   |---|---|---|
-  | BREAK | `End` or `Esc` | ★ **NO — UI-captured.** Rebind to `Insert` |
-  | CLEAR | `Home` | ★ **NO — UI-captured.** Rebind if needed |
-  | CTRL | `Ctrl` | yes |
-  | ALT | `Alt` | yes |
-  | SHIFT | `Shift` | yes |
-  | ENTER | `Enter` | yes |
+  | CTRL | `Ctrl` | ★ **YES** — asserted `:row6` bit 0x10 |
+  | ENTER | `Enter` | ★ **YES** — asserted bit 0x01 |
+  | BREAK | `End` or `Esc` | **not observed to.** Rebound to `Insert`, which works |
+  | CLEAR | `Home` | **untested** |
+  | ALT | `Alt` | **untested** |
+  | SHIFT | `Shift` | **untested** |
 
-  ★ **Two of the six stock bindings are dead on arrival**, and nothing in MAME says so — the
-  key simply does nothing. `CLEAR` is untested but sits on the same UI-navigation list as
-  `End`, so treat it as suspect until measured.
+  ★ Only the first two rows are measurements. The rest are honest gaps, not implied failures —
+  and `Esc` should be avoided regardless because it is MAME's quit key.
 
-  ★ **The free diagnostic** (`harness/`-less, three lines of Lua): read `:row6` every frame and
-  print on change. A key that arrives moves a bit; a key that is captured moves nothing. That
-  is what separated "binding wrong" from "key never arrives", and it needs no pixels — which
-  matters because CLAUDE.md §3 forbids reading them.
+  ★ **The free diagnostic, and it is the thing to reach for first:** read `:row6` every frame and
+  print on change — a key that arrives moves a bit, a key that does not moves nothing. To tell
+  *why* a key does not arrive, watch **both** layers in one run: `input:code_pressed(code)` for
+  the host side and the port read for the emulated side. Host-moves-but-port-does-not means
+  something between them is consuming it; neither moving means MAME never saw the key at all.
+  **Neither needs pixels**, which matters because CLAUDE.md §3 forbids reading them.
 
   ★ **And the free verification, which is why this was provable without reading a pixel:** before
   the BREAK the snapshots were **byte-identical for 45 emulated seconds**; after it, every sample
