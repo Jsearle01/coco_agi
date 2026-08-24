@@ -18,6 +18,18 @@
 *.sh    text eol=lf
 *.lua   text eol=lf
 
+# ★★ ORACLE INSTRUMENTATION PATCHES — MUST be LF, always. coco_agi addition (P0.2); POP has
+# no .patch files, so this EXTENDS the policy rather than diverging from it.
+#
+# WHY: `git apply` matches context lines BYTE FOR BYTE. A patch checked out CRLF under the
+# `* text=auto` rule above, applied to ScummVM's LF tree, fails with "patch does not apply" on
+# every hunk — MEASURED at P0.2, not assumed. That would break oracle/patches/ for anyone
+# cloning fresh, which is precisely the reproducibility AC-10 exists to guarantee: pin + patch
+# or it is not pinned (CLAUDE.md §2Q). Exactly the same class of load-bearing line-ending
+# failure as the *.bat rule above, pointing the other way.
+*.patch text eol=lf
+*.diff  text eol=lf
+
 # 6809 assembly — LF (lwasm accepts either; keep diffs clean).
 *.s     text eol=lf
 
