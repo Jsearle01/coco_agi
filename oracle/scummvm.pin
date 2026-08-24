@@ -87,28 +87,61 @@ binary      = ./scummvm
 #
 #   oracle/patches/0001-oracle-room-dump.patch      graphics.h, graphics.cpp, picture.cpp
 #   oracle/patches/0002-oracle-vm-state-dump.patch  cycle.cpp
+#   oracle/patches/0003-oracle-row24-probe-and-lzw-trace.patch   op_cmd.cpp, loader_v3.cpp
 #
-# Apply from the clone root:  git apply oracle/patches/0001-*.patch oracle/patches/0002-*.patch
-# Total: 81 inserted lines, 0 deleted. Nothing existing is modified or removed.
+# Apply from the clone root, in order:
+#   git apply oracle/patches/0001-*.patch oracle/patches/0002-*.patch oracle/patches/0003-*.patch
+# Total: 136 inserted lines, 0 deleted. Nothing existing is modified or removed.
+#
+# ★★ THE PATCH FILES MUST STAY LF. .gitattributes pins *.patch to eol=lf because `git apply`
+# matches context BYTE FOR BYTE; a CRLF checkout fails on every hunk (measured at P0.2).
+#
+# ★ OUTPUT FILE NAMES, and one trap: ScummVM's Common::DumpFile writes atomically —
+# backends/fs/stdiostream.cpp appends ".tmp" and renames on close. The picture dumps close
+# explicitly and land as pic<NNN>.visual.bin / pic<NNN>.priority.bin. The long-lived logs
+# (vmstate.txt, row24.txt) are never closed when the process is killed by `timeout`, so they
+# remain as <name>.tmp and the runner renames them. A rename is not a transformation.
 
 
 [game-set]
 
-# ★★ NOT PINNED. THIS HALF OF THE ORACLE IS BLOCKED AND IS JAY'S TO SUPPLY (§2Q, dispatch §5.5).
+# ★★ PINNED AT P0.3. This half of the oracle is no longer blocked.
+
+repository  = https://github.com/lanceewing/agile-gdx.git
+commit      = 81c42ba63b3b7f5fb260d282592681c097d46da9
+path        = html/webapp/games/*.zip
+titles      = 150          (147 v2-shaped, 3 v3-shaped)
+manifest    = games/manifests/agile-gdx-81c42ba.tsv
+regenerate  = python harness/tools/game_manifest.py <corpus-dir> --out games/manifests/agile-gdx-81c42ba.tsv
+
+# ★★ PINNING BY COMMIT DISSOLVES §2Q's PROBLEM RATHER THAN SOLVING IT.
+# §2Q's objection is that *"King's Quest I" is not a specification* — a title names a family of
+# releases with different interpreter versions and different command sets [AGI Specs §3.9-3.10].
+# A COMMIT SHA names an exact set of exact bytes. The whole corpus moves as one pinned unit, and
+# every per-title sha256 is in the manifest above, so identification is per-file and exact.
 #
-# No AGI game data exists on this machine — searched C:\Projects, C:\Games, Documents,
-# Downloads and Desktop for VOL/DIR/LOGDIR/PICDIR/VIEWDIR signatures: nothing.
+# Maintained by Lance Ewing, who authored much of the AGI Specifications this design cites.
+
+# Reading recipe (blobless + sparse; the corpus is 19 MB of the repo):
+#   git clone --filter=blob:none --no-checkout https://github.com/lanceewing/agile-gdx.git
+#   cd agile-gdx && git sparse-checkout init --cone
+#   git sparse-checkout set html/webapp/games && git checkout 81c42ba
 #
-# ★ "King's Quest I" IS NOT A SPECIFICATION. AGI games shipped in multiple interpreter versions
-# with different command sets [AGI Specs §3.9-3.10], so a pin needs THREE facts per title:
+# ★★ GAME DATA LIVES OUTSIDE coco_agi AND ALWAYS WILL (§2P). Corpus at C:\Projects\agi-games\;
+# unpacked working copies at ~/agi-work/games/ inside WSL. The repository holds MANIFESTS ONLY.
+# Archives are opened 'r' and never written back.
+
+# ★ v3 IS EXERCISED, NOT MERELY PRESENT. kq4dem is detected by the pinned ScummVM as
+#   "agi:kq4  King's Quest IV: The Perils of Rosella (Demo 1988-12-20/DOS/English)"
+# — real Sierra v3 data, freely distributed — and its resources are LZW-EXPANDED at
+# loader_v3.cpp:175, confirmed by the trace in patch 0003. That matters because design §9 ranks
+# v3 LZW second and AD-12 puts it on the target's critical path: the 6809 must handle these
+# bytes, so host-side decompression is not an option.
 #
-#     title · AGI interpreter version · platform · release/disk revision   (+ a checksum)
-#
-# Until this block is filled, the following are NOT EVIDENCE and must not be quoted as such:
-#   - any state-diff against ScummVM (§2Q)
-#   - design spec §11.1's disk-count measurement (M-01)
-#   - AC-7's room dump and AC-8's VM-state dump, which need a game to run at all
-#
-# What unblocks it: one or more AGI game directories, plus Jay's ruling on which are the pinned
-# set. Manifests (checksums + version identification) then go in games/manifests/ — NEVER the
-# game data itself, which is copyrighted and is the user's (§2P).
+# The other two v3-shaped titles are demo3 and vtgadv.
+
+# ★ SECONDARY SET — NOT FETCHED. Sierra's own DEMOPACK1/2/3 from agi.sierrahelp.com were
+# optional this task (dispatch §3) and were skipped: the primary corpus covers every AC,
+# including the v3 path, so the fetch bought nothing this task. ★ They remain the nearest
+# available fidelity reference for KQ3 and LSL1 — THE TWO TITLES SIERRA SHIPPED FOR THE CoCo3 —
+# and are worth having before any fidelity comparison is attempted.

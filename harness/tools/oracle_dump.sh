@@ -8,9 +8,12 @@
 # conversion is ever needed it belongs in a SEPARATE tool with a separate name, so that "raw
 # oracle output" and "something we computed" can never be confused for one another.
 #
-# ★ BLOCKED AS OF P0.2: this script cannot be exercised yet. There is no AGI game data on this
-# machine and the game set is Jay's to pin (§2Q, oracle/scummvm.pin [game-set]). Everything
-# below is written and reviewable; it runs the moment a game directory exists.
+# ★ UNBLOCKED AT P0.3. The corpus is pinned at lanceewing/agile-gdx@81c42ba (150 titles) and
+# this script has been exercised against it. See oracle/scummvm.pin [game-set].
+#
+# ★★ DETERMINISM WAS VERIFIED BEFORE ANY DUMP WAS USED (P0.3 AC-3): two separate invocations
+# over the same game produce byte-identical visual and priority buffers. Do not build anything
+# on a dump from a modified oracle until that check has been re-run.
 #
 # Usage:
 #   sh harness/tools/oracle_dump.sh <game-dir> <out-dir> [scummvm-binary]
@@ -44,15 +47,28 @@ cd "$OUT_ABS"
 
 # --auto-detect finds the game in the CWD, so point it at the game by path instead and let
 # ScummVM detect there without us naming a target id we have not pinned yet.
-"$SCUMMVM" \
+SECS=${SECS:-30}
+timeout "$SECS" "$SCUMMVM" \
     --path="$GAME_ABS" \
     --auto-detect \
-    --no-console \
-    2>&1 | tail -20 || true
+    > scummvm.log 2>&1
+echo "scummvm exit=$?  (124 = timeout, which is NORMAL: an AGI game does not end by itself)"
+tail -4 scummvm.log
+
+# ★ ScummVM's Common::DumpFile writes ATOMICALLY: backends/fs/stdiostream.cpp appends ".tmp"
+# and renames on close. `timeout` SIGTERMs the process, so the long-lived logs never close and
+# stay as <name>.tmp. The picture dumps DO finalize, because oracleDumpScreens closes each file
+# explicitly. What follows is the rename close() would have performed.
+#
+# ★ A RENAME IS NOT A TRANSFORMATION. No byte is read, altered or recomputed here, so §2O.1 is
+# untouched -- this remains ScummVM's output, moved, not ours.
+for t in vmstate.txt row24.txt; do
+    [ -f "$t.tmp" ] && mv "$t.tmp" "$t"
+done
 
 echo
 echo "=== dumps produced ==="
-ls -la pic*.visual.bin pic*.priority.bin vmstate.txt 2>/dev/null || echo "(none -- see above)"
+ls -la pic*.visual.bin pic*.priority.bin vmstate.txt row24.txt 2>/dev/null || echo "(none -- see above)"
 
 echo
 echo "=== sizes: each screen must be exactly 26880 bytes (160 x 168) ==="

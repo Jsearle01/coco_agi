@@ -1,0 +1,109 @@
+diff --git a/engines/agi/loader_v3.cpp b/engines/agi/loader_v3.cpp
+index 97530330..f7f4f153 100644
+--- a/engines/agi/loader_v3.cpp
++++ b/engines/agi/loader_v3.cpp
+@@ -175,6 +175,19 @@ uint8 *AgiLoader_v3::loadVolumeResource(AgiDir *agid) {
+ 			lzwExpand(compBuffer, data, agid->len);
+ 			free(compBuffer);
+ 			agid->flags |= RES_COMPRESSED;
++			// coco_agi ORACLE INSTRUMENTATION (P0.3, AC-8). Announced ONCE per run.
++			// ★ This is the evidence that the v3 LZW path actually EXECUTED, as opposed to
++			// the archive merely being v3-SHAPED. The two are different claims and only
++			// this one is a decode. CLAUDE.md §2P puts v3 LZW on the target's critical
++			// path, so "kq4dem is v3" needs to mean "its resources were LZW-expanded".
++			{
++				static bool s_announced = false;
++				if (!s_announced) {
++					s_announced = true;
++					warning("oracle: lzwExpand ran -- v3 COMPRESSED resource (clen=%d len=%d)",
++					        agid->clen, agid->len);
++				}
++			}
+ 		}
+ 	} else {
+ 		// we have a bad volume resource
+diff --git a/engines/agi/op_cmd.cpp b/engines/agi/op_cmd.cpp
+index dad102d3..64e2be0a 100644
+--- a/engines/agi/op_cmd.cpp
++++ b/engines/agi/op_cmd.cpp
+@@ -33,10 +33,41 @@
+ 
+ #include "common/random.h"
+ #include "common/system.h"
++#include "common/file.h" // coco_agi ORACLE (P0.3): Common::DumpFile
+ #include "common/textconsole.h"
+ 
+ namespace Agi {
+ 
++// coco_agi ORACLE INSTRUMENTATION (P0.3, AC-7) -- THE ROW-24 PROBE.
++//
++// ★★ WHY THIS EXISTS. Design AD-01 fixes the CoCo3 display at 192 lines: 8 status + 168 play
++// leaves 16 px = TWO 8-px text rows (22, 23), against AGI's THREE (22, 23, 24). So row 24 is
++// the row the port cannot render, and the question is how often games actually address it.
++//
++// ★ P0.2 established from the code that FOUR mechanisms can reach row 24, and that ALL FOUR
++// take the row from GAME DATA rather than from the engine -- so the answer is a property of
++// the corpus and cannot be read out of ScummVM. This probe measures it.
++//
++// ★ IT IS A LOWER BOUND, BY CONSTRUCTION. Games are booted to their first interactive cycle
++// only, so this observes what happens BEFORE the player does anything. A game that addresses
++// row 24 in a death message or an endgame will not be seen here. Never quote the result as a
++// ceiling.
++//
++// text.screen is logged separately because it is UNCONDITIONAL -- it always clears 0..24, so
++// it says "this game uses the full 25-row text screen", not "this game placed text at 24".
++static void oracleRow24(const char *mechanism, int16 row) {
++	if (row <= 23)
++		return;
++	static Common::DumpFile s_log;
++	if (!s_log.isOpen()) {
++		if (!s_log.open(Common::Path("row24.txt")))
++			return;
++	}
++	Common::String line = Common::String::format("%s row=%d\n", mechanism, row);
++	s_log.write(line.c_str(), line.size());
++	s_log.flush();
++}
++
+ void cmdIncrement(AgiGame *state, AgiEngine *vm, uint8 *parameter) {
+ 	uint16 varNr = parameter[0];
+ 	byte   varVal = vm->getVar(varNr);
+@@ -1805,6 +1836,9 @@ void cmdConfigureScreen(AgiGame *state, AgiEngine *vm, uint8 *parameter) {
+ 	uint16 promptRow = parameter[1];
+ 	uint16 statusRow = parameter[2];
+ 
++	oracleRow24("configure.screen.prompt", promptRow);   // AC-7 mechanism 3
++	oracleRow24("configure.screen.status", statusRow);
++
+ 	textMgr->configureScreen(gameRow);
+ 	textMgr->statusRow_Set(statusRow);
+ 	textMgr->promptRow_Set(promptRow);
+@@ -1820,6 +1854,7 @@ void cmdTextScreen(AgiGame *state, AgiEngine *vm, uint8 *parameter) {
+ 	gfxMgr->setPalette(false); // set text-mode palette
+ 	textMgr->charAttrib_Set(textMgr->_textAttrib.foreground, textMgr->_textAttrib.background);
+ 	gfxMgr->clearDisplay(0);
++	oracleRow24("text.screen.clear0-24", 24);   // AC-7 mechanism 1 -- UNCONDITIONAL, see header
+ 	textMgr->clearLines(0, 24, textMgr->_textAttrib.combinedBackground);
+ }
+ 
+@@ -2001,6 +2036,8 @@ void cmdGetString(AgiGame *state, AgiEngine *vm, uint8 *parameter) {
+ //	if (promptColumn > 39)
+ //		promptColumn = 39;
+ 
++	oracleRow24("get.string", stringRow);   // AC-7 mechanism 2
++
+ 	if (stringRow < 25) {
+ 		textMgr->charPos_Set(stringRow, stringColumn);
+ 	}
+@@ -2153,6 +2190,11 @@ void cmdClearLines(AgiGame *state, AgiEngine *vm, uint8 *parameter) {
+ 		warning("cmdClearLines: RowUpper higher than RowLower");
+ 		textRowLower = textRowUpper;
+ 	}
++	// AC-7 mechanism 4. ★ Both bounds are probed: ScummVM's own comment two lines above
++	// records Residence 44 calling clear.lines(24,0,0) -- i.e. row 24 arriving as the UPPER
++	// bound, which a lower-bound-only probe would miss.
++	oracleRow24("clear.lines.upper", textRowUpper);
++	oracleRow24("clear.lines.lower", textRowLower);
+ 	vm->_text->clearLines(textRowUpper, textRowLower, color);
+ }
+ 
