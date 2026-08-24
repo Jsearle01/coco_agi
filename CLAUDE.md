@@ -1,7 +1,13 @@
 # CLAUDE.md — AGI Interpreter → CoCo3 Project (Clyde standing rules)
-## Working Agreement v1.1 (forked from POP3_port CLAUDE.md v1.1)
-**Version:** 1.1
+## Working Agreement v1.2 (forked from POP3_port CLAUDE.md v1.1)
+**Version:** 1.2
 **Instantiates:** CODM v0.7. Where this doc and v0.7 overlap, v0.7 governs; this doc adds AGI invariants.
+
+**Changelog v1.1 → v1.2 (2026-08-24, from T-P0-002's verdict).** ★ **§2H's two line-count figures
+corrected against the pin** — `op_cmd.cpp` is **2,483** not 2,540, and the engine is **30,066** lines not
+6,369. **The correction strengthens §2H rather than weakening it: the reference is ~5× larger than the
+figure quoted.** ★★ **§2H gains the "319 opcodes" scope note** — the value is confirmed at the pin and a
+v2/v3 target needs **203**. No other rule changed.
 
 **Changelog v1.0 → v1.1 (2026-08-24, Orchestrator-authored per §2D, from T-P0-001's verdict).** ★ **§2N's
 rule part 4 corrected to load/store/MODIFY** — v1.0 said "load/store" and would have undercounted `clr`,
@@ -270,9 +276,16 @@ building on one, run these three checks and **state their results in §3**:
 This is not a mandate to search without bound. It is three bounded checks, and **the third is mechanical.**
 
 ★★ **This matters MORE here than in POP.** POP's version was written against a 6502 source tree. **AGI's
-reference is 6,369 lines of C implementing 319 opcodes** — `op_cmd.cpp` alone is 2,540 — and a
-first-mechanism read of it is very easy to make and hard to catch. **The three checks apply verbatim to
-reading ScummVM.**
+reference is 30,066 lines of C++ at the pin** — `op_cmd.cpp` alone is 2,483 — and a first-mechanism read
+of it is very easy to make and hard to catch. **The three checks apply verbatim to reading ScummVM.**
+
+★ **On "319 opcodes": the number is right and its scope is not.** `opcodes.cpp` holds FOUR tables —
+`opCodesV1Cond` 17, `opCodesV1` 99, `opCodesV2Cond` 20, `opCodesV2` 183 — summing to 319 across **two
+orthogonal axes**: two interpreter-version families (selected at runtime, `opcodes.cpp:381-389`; a game
+uses ONE) and two dispatch classes (tests vs commands, separate opcode spaces). **A v2/v3 target needs
+203, and fewer still** — `opCodesV2` marks entries Apple IIGS-only and AGI3+-only. ★★ **This is the
+worked example of §2H in the reference itself: a figure can be exactly correct and mean something other
+than what quoting it implies. Verify what a number COUNTS, not just its value.**
 
 **The pattern this exists to break** (Jay, 2026-08-15): *"There's been a pattern of Clyde finding a
 mechanism and then going with it as THE mechanism. We've seen several times in this project that there was
