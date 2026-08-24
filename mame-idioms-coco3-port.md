@@ -2181,3 +2181,54 @@ e.g. to dither), add its own latency on top, and note it is not one number:
 **Measure it, do not derive it:** `harness/smoke/song_live.lua` `P_PULSE=1` times the
 `$FF20` writes on the bus and splits the offset by whether `sp_ptr` moved — *by mechanism,
 not by the tick value, which merely correlates with it in one particular song.*
+
+---
+
+## 41. Booting Sierra's OS-9 AGI titles under MAME — the five things that make it work (P0.4)
+
+★ **AGI-VERIFIED for coco_agi.** Established P0.4 by booting `King's Quest III` from the pinned
+CoCo3 corpus. Everything here was found by failing at it first; each item cost a run.
+
+**The working command line:**
+
+```
+mame coco3 -ext fdc \
+    -flop1 <a disk that carries BOTH the boot AND resource volumes> \
+    -flop2 <the next disk in the set> \
+    -autoboot_script <lua> -autoboot_delay 0 \
+    -nothrottle -sound none -seconds_to_run <N> -snapshot_directory <dir>
+```
+
+- **41a. OS-9 boots with `DOS`, not `LOADM`/`EXEC`.** §2 and §14's recipe is for DECB binaries.
+  A Sierra AGI disk is an OS-9 RBF volume with `OS9Boot` on it, and DECB's `DOS` command reads
+  the OS-9 kernel off the boot track. Everything else in §14 still applies — `-ext fdc` is
+  mandatory (14a), `natkeyboard.in_use` must be armed frames early (14b), and posts must be
+  gated on `nk.empty` (14c).
+- **41b. ★★ PICK A DISK THAT ACTUALLY CARRIES THE RESOURCE VOLUMES.** This cost the first run
+  and it is invisible from the filename. `KQ3/Original/KQ3-1-1.DSK` has `OS9Boot` **and**
+  `CMDS/Sierra` and **ZERO `vol.*` files** — a pure boot side. OS-9 comes up, the interpreter
+  starts, and there is nothing to load. **The manifest answers this without booting anything:**
+  `games/manifests/coco3-files.tsv`, filtered to `vol.*` per image. For KQ3 the single-drive
+  choices are `Coco SDC/kq3.dsk` (all 12 volumes) or `Floppy 360K/kq3-1.dsk` (boot + `vol.0,1,2,3,12`).
+- **41c. ★★ SIERRA'S INTERPRETER PROMPTS FOR MONITOR TYPE, AND THE ANSWER IS `R` + ENTER.**
+  A single `R` is NOT enough — the prompt echoes it and waits. Posting `R` alone leaves the
+  machine in a tight poll at `PC=$FD5F` and the frame goes static, which looks exactly like a
+  hang. With `R\r` (or `R` then `\r` as separate posts) `PC` immediately starts varying
+  (`$BF3A → $9EC9 → $F339 → $FC43`) and the game renders.
+  ★ **`PC` stuck at one address across several seconds is the tell for "waiting on a key",
+  and `PC` varying is the tell for "running".** That distinction is free and does not require
+  looking at a pixel — which matters because CLAUDE.md §3 forbids interpreting one.
+- **41d. Past the title it wants CTRL+BREAK.** Reported by Jay at the P0.4 gate. Not needed for
+  a first-screen capture; needed to reach gameplay.
+- **41e. `-flop3` does not exist on this driver.** `mame coco3 -ext fdc` exposes **`-flop1` and
+  `-flop2` only**; a third mount is `Error: unknown option: -flop3`, exit 6. A set of three or
+  more disks cannot all be mounted at once, so prefer a single-image variant when one exists.
+
+★★ **AND THE §2P HAZARD, WHICH IS THE ONE THAT MATTERS: MAME OPENS A FLOPPY READ-WRITE AND JVC
+SAVES BACK** (§3, §24). A raw `.dsk` from the corpus mounted directly is a game file opened for
+writing. **Always mount a COPY**, and re-hash the original afterwards. P0.4 did both; the
+original was unchanged. *Candidates:*
+`os9-boots-with-DOS-not-LOADM`, `pick-a-disk-that-carries-the-volumes-not-just-the-boot`,
+`sierra-agi-monitor-prompt-needs-R-plus-ENTER`,
+`pc-stuck-vs-pc-varying-is-a-free-liveness-test-without-reading-pixels`,
+`never-mount-a-corpus-image-in-mame-mount-a-copy`.

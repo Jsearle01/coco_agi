@@ -268,11 +268,39 @@ Corpus figures at the seven archives Jay supplied, sha256 of each in §5. Siblin
   `CMDS/MnLn` (25,559 B) on 38 images spanning **all seven titles**; KQ3 `Original` and LSL
   `Original` each carry their own smaller build. `MODULES/` is four modules, **one version each,
   byte-identical wherever present**. ✅ **PASS.**
-- **AC-8 [eye-gated] ★ BOUNDED — ONE TITLE, TWO STILLS, THEN STOPPED.** `KQ3/Original/KQ3-1-1.DSK`
-  booted under MAME `coco3` via a real `DOS` off a mounted floppy. **Launch path: `live-disk`**
-  (nothing poked). **Observation mode: `static-png`** — endpoints only, no motion (§4).
-  Screenshots at `C:\Projects\agi-games\coco3\_ac8-screenshots\`. **Surfaced unexamined per §3.**
-  ✅ **DELIVERED — 25.3 pending Jay.**
+- **AC-8 [eye-gated] ★ PASSED — Jay, live-disk, RGB, static-png.** **King's Quest III renders
+  under Sierra's own interpreter**, confirmed by Jay at the gate. **Launch path: `live-disk`**
+  (real `DOS` off a mounted floppy; nothing poked). **Observation mode: `static-png`** —
+  endpoints only, **no motion under gate** (§4). ✅ **PASS.**
+
+  ★★ **CORRECTION — the recipe first published in this report was wrong twice over, and the
+  first two attempts FAILED.** Recorded rather than quietly replaced, because the two errors are
+  the reusable content:
+
+  1. **Wrong disk.** I booted `Original/KQ3-1-1.DSK`, which my own manifest shows carries
+     `OS9Boot` **and** `CMDS/Sierra` and **ZERO `vol.*` files** — a pure boot side. OS-9 came up
+     and the interpreter had no resources to load. **The manifest answered this without booting
+     anything**, and I did not consult it before choosing.
+  2. **Unanswered prompt.** ★ **Sierra's interpreter asks for a MONITOR TYPE at startup**, and
+     the answer is **`R` + ENTER** — `R` alone is echoed and waits. Neither attempt answered it.
+
+  **The recipe that works**, now in the idioms file as §41:
+
+  ```
+  mame coco3 -ext fdc -flop1 "Floppy 360K/kq3-1.dsk" -flop2 "Floppy 360K/kq3-2.dsk"
+             -autoboot_script <lua> ...
+  post "DOS\r"  ->  wait  ->  post "R"  ->  post "\r"
+  ```
+
+  ★ **`PC` behaviour is a free liveness test that needs no pixel** (§3): stuck at `$FD5F` across
+  seconds = waiting on a key; varying `$BF3A → $9EC9 → $F339 → $FC43` = running. That is how the
+  two failures were distinguished from the success without my reading a screenshot.
+
+  ★ **Past the title screen it wants CTRL+BREAK** (Jay). Not pursued — §12 bars playing past the
+  first screen.
+
+  Screenshots at `C:\Projects\agi-games\coco3\_ac8-screenshots\`, **surfaced unexamined per §3**;
+  `rgb-04-after-R-ENTER-settled.png` is the gated frame.
 - **AC-9 [byte-comparable]** — `coco_agi` **0**, POP **59** at `282a65c`, Karateka **8** at
   `072ddcf`; fixture demo rc=0 including its negative control. ✅ **PASS.**
 - **AC-10 [suite]** — one candidate captured and pushed. §10. ✅ **PASS.**
@@ -448,12 +476,36 @@ run_rule_demo.sh                          rc=0  (incl. the --expect 7 negative c
 **25.2 — bundled-artifact grep:** **N/A.** No build artifact was produced; the deliverables are
 a `.gitignore`, two Python tools and two TSV manifests, none of which bundles anything.
 
-**25.3 — operator-runtime-smoke:** **PENDING JAY — `live-disk`, RGB default, `static-png`.**
-Two stills at `C:\Projects\agi-games\coco3\_ac8-screenshots\`:
-`kq3-original-d1s1-boot-frame1500.png`, `kq3-original-d1s1-boot-frame2400.png`.
-★ **Surfaced unexamined (§3). Clyde screenshot analysis is never authoritative for 25.3 (§4).**
-★ **Endpoints only — a static PNG cannot show motion**, so this is not a live gate even once Jay
-looks.
+**25.3 — operator-runtime-smoke: PASSED — Jay, live-disk, RGB, static-png (endpoints only — no
+motion under gate).**
+
+**King's Quest III renders under Sierra's own CoCo3 interpreter.** Confirmed by Jay at the gate;
+I did not read the images (§3, §4 — Clyde screenshot analysis is never authoritative for 25.3).
+
+```
+[f00300] posting DOS
+[f02400] snapshot 1 -- monitor prompt, before any key   PC=$FD5F
+[f02460] posting R
+[f02580] posting ENTER
+[f02820] snapshot 2 -- t+4s  after R+ENTER              PC=$BF3A
+[f03600] snapshot 3 -- t+12s after R+ENTER              PC=$9EC9
+[f05400] snapshot 4 -- t+30s after R+ENTER              PC=$F339
+[f07200] snapshot 5 -- t+48s after R+ENTER              PC=$FC43
+Average speed: 781.26% (120 seconds)                    rc=0
+
+frames:  0000 4310 B bd7101ac  (prompt)
+         0001 4339 B 5993e9ee  (t+4s, transitional)
+         0002 2016 B 76ba1256  (t+12s)  \
+         0003 2016 B 76ba1256  (t+30s)   > byte-identical: settled
+         0004 2016 B 76ba1256  (t+48s)  /
+```
+
+★ **PC varying is what separates this from the two failed attempts**, in which it never left
+`$FD5F`. Structured evidence, no pixel read.
+
+Gated frame: `_ac8-screenshots/rgb-04-after-R-ENTER-settled.png`.
+★ **A static PNG verifies ENDPOINTS ONLY and cannot show motion** — so animation rate,
+room-change latency and any other motion question needs a LIVE run Jay watches, not this.
 
 ---
 
@@ -523,9 +575,19 @@ file sizes, and stops there — no game data or screenshot committed, and no v3 
 4. **Decide what the three interpreter builds mean** (§7.4) — one engine serving all seven modern
    repacks is a strong signal for D-14's eye-gated comparison work, and the two original builds
    are the only Sierra-shipped ones.
-5. **AC-8 follow-up is Jay's**: if the stills show KQ3 running, `KQ3/Original` becomes the
-   reference for the palette and timing questions design §8.1 wants.
-6. **Consider back-porting the ignore hardening to POP and Karateka** (§2G, separate task).
+5. ★★ **THE MONITOR PROMPT IS A DESIGN FINDING, NOT A BOOT DETAIL.** Sierra's own interpreter
+   asks the user to choose a monitor type at startup (§41c). **That is direct evidence Sierra
+   shipped distinct RGB and composite handling** — which is exactly what design §2.2 leaves open
+   and why CLAUDE.md §2B marks the composite palette table as unreproducible-by-tool and
+   PROTECTED from the moment it exists. **It also means the composite table has an ORIGINAL to
+   be gated against**, rather than only Jay's eye. Worth a dispatch of its own.
+6. ★ **A LIVE gate is now possible and this task did not deliver one.** 25.3 passed as
+   `static-png`, which verifies endpoints and cannot show motion (§4). The animation rate,
+   room-change latency and sound questions design v0.4 §8.1 wants tier 2 for **all require a
+   live run**, and the recipe to get there is now written down (§41).
+7. **Reaching gameplay needs CTRL+BREAK past the title** (§41d) — barred from this task by §12,
+   and the obvious first step of any follow-up.
+8. **Consider back-porting the ignore hardening to POP and Karateka** (§2G, separate task).
 
 ---
 
