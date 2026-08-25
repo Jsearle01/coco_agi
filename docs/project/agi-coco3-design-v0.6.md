@@ -662,6 +662,115 @@ table with argument counts in a parallel table is a few hundred bytes.
 composite, display. **The LOGIC re-runs from the top every cycle** — scripts are condition batteries,
 not coroutines.
 
+### 5.1 ★★★ Sound and the completion flag — a correctness requirement
+
+**`sound(resourceNr, flagNr)` is how LOGIC waits for audio.** A script issues it, then tests the flag
+before advancing. ★★★ **A backend that never sets that flag deadlocks the game permanently, in one
+room** — not silently degraded, stuck.
+
+**The reference already carries the rule, in a CoCo3-specific branch** [`op_cmd.cpp:701-719`]:
+
+```c
+if (platform == kPlatformApple2 || platform == kPlatformCoCo3) {
+    // Sound playback is a blocking operation on these platforms.
+    // If sound is off then playback is not started.
+    if (getFlag(VM_FLAG_SOUND_ON)) {
+        startSound(resourceNr, flagNr);
+        waitAnyKeyOrFinishedSound();
+        stopSound();
+    }
+    setFlagOrVar(flagNr, true);      // <-- OUTSIDE the if
+} else {
+    startSound(resourceNr, flagNr);  // <-- asynchronous, flag set on completion
+}
+```
+
+> ★★★ **THE RULE: the completion flag is set unconditionally — sound off, no cartridge, resource
+> missing, resource corrupt, backend unimplemented.** Whether a note was ever played is irrelevant to the
+> VM.
+
+★ **This is what makes PC sound resources safe to feed us before any audio work exists.** A stub emitter
+that decodes nothing and sets the flag is a *correct* interpreter with no sound.
+
+### 5.2 ★★ Blocking vs asynchronous playback — OPEN, and to be investigated
+
+**Sierra's CoCo3 interpreter BLOCKS during sound.** That is why animation and input stop for the duration
+of a song. ★ **It is a documented design, not a defect** — ScummVM encodes it per-platform, alongside the
+Apple II.
+
+★★★ **We are not bound by it** [backlog L-21, and Jay, 2026-08-25]. Every other AGI platform takes the
+`else` branch: **asynchronous playback, flag set on completion, the game continues.** The reasons to
+expect we can do better than 1988:
+
+1. ★★ **The GMC's SN76489A mixes in hardware** (AD-27). The DAC path's cost was always the software
+   mixer; with a PSG the emitter is a few register writes per note change and idles between them.
+2. **POP established a FIRQ-driven player on this machine**, so the interrupt substrate exists.
+3. **Sierra shipped two titles for a machine they abandoned.** *An observed behaviour is not a measured
+   limit* [L-21] — the tradeoff may have been schedule, not cycles, and nothing in the artifact
+   distinguishes them.
+
+**The design intent, to be validated rather than assumed:**
+
+| backend | target |
+|---|---|
+| **GMC (SN76489A)** | ★ **asynchronous** — the chip mixes; the emitter should not need to block |
+| **stock 6-bit DAC** | **measure before choosing.** Async if the mixer fits the cycle budget beside animation; blocking only if measurement says so |
+
+★ **Blocking is the fallback, not the default.** ★★ **And the completion-flag rule in §5.1 holds either
+way** — it is orthogonal to this choice and must not be made conditional on it.
+
+**Measurement: M-14**, at P7 or earlier if the sound seam lands sooner.
+
+### 5.3 ★★ Backend selection — a user setting, and why detection cannot replace it
+
+**Every detection route was examined and all of them fail the same way** [backlog AD-31]:
+
+| route | why it fails |
+|---|---|
+| read the SN76489A | ★★ **write-only silicon.** MAME's GMC implements `scs_write` only, **no read handler at all** [`coco_gmc.cpp:91`]. A write to `$FF41` with no cartridge vanishes into the floating bus. **Neither error announces itself.** |
+| ROM signature at `$C000` | ★ **the GMC is a FLASH cartridge** — the ROM is whatever game was flashed. **No constant to match.** |
+| bank-switch probe (`$FF40`, read `$C000`, change bank, re-read) | real and observable, but detects **a banked cart**, not a GMC — *"exactly like the circuit developed for RoboCop and Predator"* — and **needs `$C000` mapped, so it must run before AD-09's all-RAM switch.** False-negative on a blank or single-bank flash. |
+| CART line via PIA1 | a pak with autostart ties CART to **Q, the system clock** [`coco_pak.cpp:115-120`] — genuinely observable. ★★ **But autostart CLEARs the line when disabled, and a user booting our disk with a GMC installed has almost certainly disabled it. The signal is off in exactly the configuration we need it.** |
+
+> ★★★ **Detection cannot even fail informatively here.** Writing to an absent GMC is silent; not writing
+> to a present one is equally silent. POP's *detection must fail toward asking* [§5.277] applies with
+> unusual force. **The backend is a USER SETTING. Detection is not the mechanism.**
+
+#### 5.3.1 ★★ Where the setting lives — an injected menu, with NO resource modification
+
+★★★ **The menu is interpreter RAM, not game data.** `set.menu` / `set.menu.item` populate a structure the
+interpreter owns; `submit` finalises it. **Appending our own menu at submit time touches nothing on
+disk** and preserves §4.1's unmodified-originals guarantee completely.
+
+**The reference does exactly this** [`menu.cpp:166-190`] — a platform-conditional, config-gated
+interpreter menu injected at submit:
+
+```c
+// WORKAROUND: For Apple II gs we add a Speed menu
+if (platform == kPlatformApple2GS && ConfMan.getBool("apple2gs_speedmenu")) {
+    ... scan for maxControllerSlot ...
+    if (maxControllerSlot >= 0xff - 4)  warning("failed to add 'Speed' menu");
+    else { addMenu("Speed"); addMenuItem("Normal", slot + 2); ... }
+}
+```
+
+★ **Three details to take verbatim, because they are the non-obvious part:**
+
+1. **Scan for the highest controller slot across the menu items AND the key mappings, then allocate
+   above it.** The game assigns slots and does not know ours exist; **a collision fires a game action
+   when the user picks our item.**
+2. **Check for exhaustion and degrade.** A game consuming nearly all 255 slots gets **no sound menu** —
+   correct behaviour, not corruption.
+3. **Gate on config**, so the injection is itself opt-out.
+
+★★ **`submit` returns early when the game defined no menus at all**, so a menu-less game gets no injected
+item. **That case needs a separate route** — a dedicated key opening an interpreter-owned screen — and it
+is also the fallback whenever slot allocation fails.
+
+> **Separate the two concerns: HOW THE SETTING IS EXPRESSED (injected menu, interpreter screen, boot-time
+> config) is independent of HOW THE BACKEND IS CHOSEN (§5.3's user setting). Neither constrains the
+> other.**
+
 ★ **203 opcodes is volume, not difficulty.** ScummVM's `op_cmd.cpp` is 2,483 lines at the pin. The ones with substance are view control, the parser interface, and the window/message system.
 
 ---
