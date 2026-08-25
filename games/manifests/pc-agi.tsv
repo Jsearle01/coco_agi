@@ -1,0 +1,13 @@
+# PC/DOS AGI MANIFEST -- generated at P1.1 by scratch tooling from tools/volread.
+# ★ MANIFEST ONLY. No game data is in this repository and none ever may be (§2P).
+# shape: 'AGI v2' directories are parsed; 'SCI' are recorded and NOT parsed (design §1.1).
+# res_* are resources PRESENT (not slots). slots_* are DIR length / 3, an upper bound.
+# sha256 columns are of the named FILE, so a release can be identified exactly.
+#
+dir	shape	files	bytes	logdir_sha256	object_sha256	words_sha256	res_logic	res_picture	res_view	res_sound	slots_logic	slots_picture	slots_view	slots_sound	vol_count	vol_bytes	res_bytes
+Kingquest1	AGI v2	28	453617	18d53ac02a5457494f03352c36a4a4c2eb8251df70fff8dae6dc3d5b41d55b38	2d1b7a75bb443b4a340cb8d9a2842ff5c834d7d597ea2a1365b6a7a2dfb57985	41d863172326c712c0aebadf12fc63b049ff5d892743f4ee990004c344eb3780	90	82	118	26	105	85	144	48	3	339993	332217
+Kingquest1vga	SCI	40	2825184														
+Kingquest2	AGI v2	22	566314	3fc1e45ab361966bbee09b79baf703d8b83521d40b282071dadafd4afa906e00	14c85b6720fafd5e045416f65246e695bf4966c0ca52bf5f5e678b5c14a56e2a	d404578e135a58dafd390b722e9f7bef57e30a693cf08608c824fc6315c73d93	133	108	207	32	181	118	235	45	3	486230	479894
+Kingquest3	AGI v2	37	760726	c926a1e6157132bd46bb77afdd98969542414a5cca187e99f4a320a6909069ed	d250a92d694b7071a0d64c474405ddd6357d853ef109bc50baf88079da341b93	08256ef851c1560cd1bd9eac7a5c678b22385630e9e66b3c21c5f77f25642b2d	125	97	216	34	130	177	252	40	4	651490	649123
+Kingquest4	SCI	44	2574427														
+Kingquest5	SCI	45	9061669														
