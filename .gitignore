@@ -149,6 +149,52 @@ MODULES/
 OS9Boot
 os9boot
 #
+# --- DOS/PC releases (P1.1) -----------------------------------------------------------------
+# ★ The AGI resource names above already cover the DOS forms — LOGDIR/VOL.0/WORDS.TOK/OBJECT
+# are matched by the uppercase and vol.* rules, verified by check-ignore before the drop. What
+# they do NOT cover is everything else a DOS release ships, all of it equally copyrighted:
+#
+#   Sierra's interpreter and its drivers — .EXE/.COM/.OVL/.DRV/.SYS
+*.exe
+*.EXE
+*.com
+*.COM
+*.ovl
+*.OVL
+*.drv
+*.DRV
+*.sys
+*.SYS
+#   Game text, help, screens and art shipped beside the resources
+*.qa
+*.QA
+*.msg
+*.MSG
+*.scr
+*.SCR
+*.hlp
+*.HLP
+*.gif
+*.GIF
+#
+# ★★ SCI GAME DATA. Some "King's Quest" directories are SCI, not AGI (design §1.1 puts SCI out
+# of scope entirely). Out of scope does NOT mean safe to commit — it is still the user's game.
+# Named exactly rather than as *.map, because a linker map is legitimate build output and a
+# blanket rule would quietly swallow one.
+RESOURCE.MAP
+RESOURCE.map
+resource.map
+RESOURCE.[0-9][0-9][0-9]
+resource.[0-9][0-9][0-9]
+RESOURCE.AGI
+RESOURCE.SFX
+#
+# ★ NOT IGNORED, DELIBERATELY: *.bat. A DOS release ships one, but `build.bat` is this
+# project's build contract (CLAUDE.md §1) and .gitattributes pins it to CRLF because cmd.exe
+# cannot parse an LF-only batch. A blanket *.bat rule would make the eventual build.bat
+# un-addable without `git add -f`. §2E's explicit-path staging is the control here, as it is
+# everywhere else — this block is defence in depth, not the primary guard.
+
 # ★★ WHAT IS STILL ALLOWED THROUGH, and must stay allowed:
 #   games/manifests/*.tsv  — checksums, sizes and version identification. NEVER content.
 # That negation lives in the games/** block above and is not overridden here: no pattern in
