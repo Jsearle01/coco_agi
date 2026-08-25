@@ -1,0 +1,118 @@
+diff --git a/engines/agi/agi.cpp b/engines/agi/agi.cpp
+index 7280068f..28215319 100644
+--- a/engines/agi/agi.cpp
++++ b/engines/agi/agi.cpp
+@@ -54,6 +54,11 @@
+ 
+ namespace Agi {
+ 
++// coco_agi ORACLE INSTRUMENTATION (P1.1, AC-5) -- forward declaration.
++// The definition sits beside loadResource() where it is used most, but agiInit()'s sweep
++// calls it earlier in the file, so C++ needs to have seen it first.
++static void oracleDumpRaw(int16 resourceType, int16 resourceNr, const uint8 *data, uint32 len);
++
+ void AgiEngine::allowSynthetic(bool allow) {
+ 	_allowSynthetic = allow;
+ }
+@@ -159,6 +164,33 @@ int AgiEngine::agiInit() {
+ 	if (ec == errOK)
+ 		ec = loadResource(RESOURCETYPE_LOGIC, 0);
+ 
++	// coco_agi ORACLE INSTRUMENTATION (P1.1, AC-5) -- dump EVERY resource, raw.
++	//
++	// * Calls loadVolumeResource() DIRECTLY rather than loadResource(), deliberately: the
++	//   latter runs each type's decoder, and a decoder that rejects one resource would abort
++	//   the whole sweep. AC-5 compares RAW bytes, so the decoders are not merely unnecessary
++	//   here, they are a liability.
++	// * Order matters for LOGIC only, and this runs before anything decrypts in place.
++	if (ec == errOK) {
++		AgiDir *dirs[4] = { _game.dirLogic, _game.dirView, _game.dirPic, _game.dirSound };
++		const int16 types[4] = { RESOURCETYPE_LOGIC, RESOURCETYPE_VIEW,
++		                         RESOURCETYPE_PICTURE, RESOURCETYPE_SOUND };
++		int dumped = 0;
++		for (int t = 0; t < 4; t++) {
++			for (int16 nr = 0; nr < MAX_DIRECTORY_ENTRIES; nr++) {
++				if (dirs[t][nr].offset == _EMPTY)
++					continue;
++				uint8 *raw = _loader->loadVolumeResource(&dirs[t][nr]);
++				if (raw != nullptr) {
++					oracleDumpRaw(types[t], nr, raw, dirs[t][nr].len);
++					free(raw);
++					dumped++;
++				}
++			}
++		}
++		warning("oracle: dumped %d raw resources", dumped);
++	}
++
+ 	_keyHoldMode = false;
+ 	_keyHoldModeLastKey = Common::KEYCODE_INVALID;
+ 
+@@ -204,6 +236,35 @@ void AgiEngine::agiDeinit() {
+ 	clearImageStack();
+ }
+ 
++// coco_agi ORACLE INSTRUMENTATION (P1.1, AC-5) -- dump the RAW bytes the engine loads.
++//
++// ★★ THIS IS THE BASELINE OUR PYTHON PARSER IS DIFFED AGAINST (CLAUDE.md §2O.1). The whole
++// value is that these bytes did not come from us. So the dump is taken at exactly one point:
++// immediately after loadVolumeResource() returns and BEFORE any decode.
++//
++// ★ FOR LOGIC THAT ORDERING IS NOT A DETAIL, IT IS THE WHOLE THING. decodeLogic() DECRYPTS THE
++// MESSAGE STRINGS IN PLACE. Dumping after it would compare our pre-decode bytes against their
++// post-decode bytes and fail everywhere -- or worse, would tempt someone to "fix" the parser to
++// match, which inverts the validation exactly as tuning to POP's 59 would have.
++static void oracleDumpRaw(int16 resourceType, int16 resourceNr, const uint8 *data, uint32 len) {
++	if (data == nullptr)
++		return;
++	// ★★ INDEXED BY THE REAL ENUM, WHICH STARTS AT 1 AND IS NOT IN THE OBVIOUS ORDER.
++	// agi.h:171-174:  RESOURCETYPE_LOGIC = 1, SOUND = 2, VIEW = 3, PICTURE = 4.
++	// An earlier version of this array assumed {logic,object,view,picture,sound} from 0 and
++	// mislabelled EVERY dump -- LOGIC written as "object", PICTURE compared against VIEW.
++	// The gate then read 0 of 299 matching and looked like a parser failure. Read the enum.
++	static const char *kNames[] = { "other", "logic", "sound", "view", "picture" };
++	const char *nm = (resourceType >= 1 && resourceType <= 4) ? kNames[resourceType] : "other";
++	Common::String path = Common::String::format("oracle_%s_%03d.bin", nm, resourceNr);
++	Common::DumpFile df;
++	if (!df.open(Common::Path(path)))
++		return;
++	df.write(data, len);
++	df.finalize();
++	df.close();
++}
++
+ int AgiEngine::loadResource(int16 resourceType, int16 resourceNr) {
+ 	if (resourceNr >= MAX_DIRECTORY_ENTRIES)
+ 		return errBadResource;
+@@ -217,6 +278,7 @@ int AgiEngine::loadResource(int16 resourceType, int16 resourceNr) {
+ 
+ 			// load raw resource into data
+ 			data = _loader->loadVolumeResource(&_game.dirLogic[resourceNr]);
++			oracleDumpRaw(resourceType, resourceNr, data, _game.dirLogic[resourceNr].len);
+ 			_game.logics[resourceNr].data = data;
+ 
+ 			// uncompressed logic files need to be decrypted
+@@ -239,6 +301,7 @@ int AgiEngine::loadResource(int16 resourceType, int16 resourceNr) {
+ 			// if cached but not loaded, etc
+ 			unloadResource(RESOURCETYPE_PICTURE, resourceNr);
+ 			data = _loader->loadVolumeResource(&_game.dirPic[resourceNr]);
++			oracleDumpRaw(resourceType, resourceNr, data, _game.dirPic[resourceNr].len);
+ 
+ 			if (data != nullptr) {
+ 				_game.pictures[resourceNr].rdata = data;
+@@ -252,6 +315,7 @@ int AgiEngine::loadResource(int16 resourceType, int16 resourceNr) {
+ 	case RESOURCETYPE_SOUND:
+ 		if (~_game.dirSound[resourceNr].flags & RES_LOADED) {
+ 			data = _loader->loadVolumeResource(&_game.dirSound[resourceNr]);
++			oracleDumpRaw(resourceType, resourceNr, data, _game.dirSound[resourceNr].len);
+ 
+ 			// "data" is freed by objects created by createFromRawResource on success
+ 			const bool isAgiV1 = (getVersion() <= 0x2001);
+@@ -273,6 +337,7 @@ int AgiEngine::loadResource(int16 resourceType, int16 resourceNr) {
+ 		if (~_game.dirView[resourceNr].flags & RES_LOADED) {
+ 			unloadResource(RESOURCETYPE_VIEW, resourceNr);
+ 			data = _loader->loadVolumeResource(&_game.dirView[resourceNr]);
++			oracleDumpRaw(resourceType, resourceNr, data, _game.dirView[resourceNr].len);
+ 			if (data) {
+ 				_game.dirView[resourceNr].flags |= RES_LOADED;
+ 				ec = decodeView(data, _game.dirView[resourceNr].len, resourceNr);
