@@ -1,5 +1,5 @@
 diff --git a/engines/agi/agi.cpp b/engines/agi/agi.cpp
-index 7280068f..28215319 100644
+index 7280068f..3ecf2c8b 100644
 --- a/engines/agi/agi.cpp
 +++ b/engines/agi/agi.cpp
 @@ -54,6 +54,11 @@
@@ -14,7 +14,7 @@ index 7280068f..28215319 100644
  void AgiEngine::allowSynthetic(bool allow) {
  	_allowSynthetic = allow;
  }
-@@ -159,6 +164,33 @@ int AgiEngine::agiInit() {
+@@ -159,6 +164,55 @@ int AgiEngine::agiInit() {
  	if (ec == errOK)
  		ec = loadResource(RESOURCETYPE_LOGIC, 0);
  
@@ -43,12 +43,34 @@ index 7280068f..28215319 100644
 +			}
 +		}
 +		warning("oracle: dumped %d raw resources", dumped);
++
++		// coco_agi ORACLE INSTRUMENTATION (P2.1, AC-3) -- RENDER every picture and dump the
++		// resulting buffers. decodePicture() ends by calling oracleDumpScreens() (patch 0001),
++		// which writes pic<NNN>.visual.bin / pic<NNN>.priority.bin -- the 160x168 planes our
++		// renderer is diffed against.
++		//
++		// * clearScreen = true, matching what draw.pic does and what our render() reproduces:
++		//   clear to white/4, then draw. An overlay (overlay.pic) is a different operation and
++		//   is not what AC-3 compares.
++		// * Wrapped so one bad picture cannot abort the sweep -- 150+ pictures are needed and
++		//   losing the tail to a single malformed resource would silently shrink the sample.
++		int rendered = 0;
++		for (int16 nr = 0; nr < MAX_DIRECTORY_ENTRIES; nr++) {
++			if (_game.dirPic[nr].offset == _EMPTY)
++				continue;
++			if (loadResource(RESOURCETYPE_PICTURE, nr) != errOK)
++				continue;
++			_picture->decodePicture(nr, true);
++			unloadResource(RESOURCETYPE_PICTURE, nr);
++			rendered++;
++		}
++		warning("oracle: rendered %d pictures", rendered);
 +	}
 +
  	_keyHoldMode = false;
  	_keyHoldModeLastKey = Common::KEYCODE_INVALID;
  
-@@ -204,6 +236,35 @@ void AgiEngine::agiDeinit() {
+@@ -204,6 +258,35 @@ void AgiEngine::agiDeinit() {
  	clearImageStack();
  }
  
@@ -84,7 +106,7 @@ index 7280068f..28215319 100644
  int AgiEngine::loadResource(int16 resourceType, int16 resourceNr) {
  	if (resourceNr >= MAX_DIRECTORY_ENTRIES)
  		return errBadResource;
-@@ -217,6 +278,7 @@ int AgiEngine::loadResource(int16 resourceType, int16 resourceNr) {
+@@ -217,6 +300,7 @@ int AgiEngine::loadResource(int16 resourceType, int16 resourceNr) {
  
  			// load raw resource into data
  			data = _loader->loadVolumeResource(&_game.dirLogic[resourceNr]);
@@ -92,7 +114,7 @@ index 7280068f..28215319 100644
  			_game.logics[resourceNr].data = data;
  
  			// uncompressed logic files need to be decrypted
-@@ -239,6 +301,7 @@ int AgiEngine::loadResource(int16 resourceType, int16 resourceNr) {
+@@ -239,6 +323,7 @@ int AgiEngine::loadResource(int16 resourceType, int16 resourceNr) {
  			// if cached but not loaded, etc
  			unloadResource(RESOURCETYPE_PICTURE, resourceNr);
  			data = _loader->loadVolumeResource(&_game.dirPic[resourceNr]);
@@ -100,7 +122,7 @@ index 7280068f..28215319 100644
  
  			if (data != nullptr) {
  				_game.pictures[resourceNr].rdata = data;
-@@ -252,6 +315,7 @@ int AgiEngine::loadResource(int16 resourceType, int16 resourceNr) {
+@@ -252,6 +337,7 @@ int AgiEngine::loadResource(int16 resourceType, int16 resourceNr) {
  	case RESOURCETYPE_SOUND:
  		if (~_game.dirSound[resourceNr].flags & RES_LOADED) {
  			data = _loader->loadVolumeResource(&_game.dirSound[resourceNr]);
@@ -108,7 +130,7 @@ index 7280068f..28215319 100644
  
  			// "data" is freed by objects created by createFromRawResource on success
  			const bool isAgiV1 = (getVersion() <= 0x2001);
-@@ -273,6 +337,7 @@ int AgiEngine::loadResource(int16 resourceType, int16 resourceNr) {
+@@ -273,6 +359,7 @@ int AgiEngine::loadResource(int16 resourceType, int16 resourceNr) {
  		if (~_game.dirView[resourceNr].flags & RES_LOADED) {
  			unloadResource(RESOURCETYPE_VIEW, resourceNr);
  			data = _loader->loadVolumeResource(&_game.dirView[resourceNr]);
