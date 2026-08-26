@@ -26,7 +26,14 @@ set -e
 
 GAME_DIR=${1:?usage: oracle_dump.sh <game-dir> <out-dir> [scummvm-binary]}
 OUT_DIR=${2:?usage: oracle_dump.sh <game-dir> <out-dir> [scummvm-binary]}
-SCUMMVM=${3:-$HOME/scummvm/scummvm}
+# ★ P4.2: the oracle is now built NATIVELY on Windows and this script runs under Git Bash,
+# which is itself MINGW64_NT with full coreutils (timeout, sha256sum, diff, mv). WSL is not
+# required for any part of this project. See oracle/scummvm.pin [build-native].
+#
+# The default is the native build; pass $3 to override. The former WSL path
+# ($HOME/scummvm/scummvm) still works if given explicitly, and the two binaries were verified
+# to produce byte-identical dumps — but nothing depends on WSL any more.
+SCUMMVM=${3:-/c/Projects/scummvm/scummvm.exe}
 
 [ -d "$GAME_DIR" ] || { echo "no such game dir: $GAME_DIR" >&2; exit 2; }
 [ -x "$SCUMMVM" ]  || { echo "no scummvm binary: $SCUMMVM" >&2; exit 2; }

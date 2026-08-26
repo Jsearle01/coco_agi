@@ -66,18 +66,98 @@ binary      = ./scummvm
 
 [host]
 
-# Recorded because it determines WHERE the build happens, and a second party on this machine
-# needs to know before trying.
+# ★★ CORRECTED 2026-08-25 (P4.2). THE PREVIOUS ENTRY HERE WAS WRONG and is kept below, struck
+# through, because the way it was wrong is the reusable lesson. It read:
 #
-# Windows host  : NO C++ toolchain. No gcc, g++, clang, MSVC, make, cmake or pkg-config; no
-#                 MSYS2 and no MinGW compiler (the git on PATH is Git-for-Windows' mingw64
-#                 bundle, which ships no compiler). No SDL2 anywhere.
-# WSL2 Ubuntu   : g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, GNU Make 4.3, git, python3.
-#                 2 CPUs. No SDL2 dev packages — hence --backend=null.
+#   "Windows host : NO C++ toolchain. No gcc, g++, clang, MSVC, make, cmake or pkg-config; no
+#    MSYS2 and no MinGW compiler ... No SDL2 anywhere."
 #
-# ★ BUILD INSIDE WSL's ext4 (~/scummvm), NOT on /mnt/c. A 21,430-file build over the 9p mount
-# is pathologically slow. The reading clone lives at C:\Projects\scummvm; the build clone at
-# ~/scummvm inside WSL. Both at the commit above — verified, not assumed.
+# That conclusion came from checking PATH and the standard install roots (C:\msys64,
+# C:\mingw64, Program Files\LLVM, Visual Studio, ...). All of those genuinely are empty. But a
+# COMPLETE MinGW-w64 toolchain was sitting at C:\Projects\2600em\tools\mingw64\bin — vendored
+# into a SIBLING PROJECT's tree, off PATH and in no standard location. A recursive filesystem
+# sweep found it in one pass.
+#
+# ★ This is CLAUDE.md §2A.5 exactly ("before concluding a mode/flag does NOT exist, do an
+# EXHAUSTIVE search ... 'I didn't find it' is valid only after the enumeration"), and it is
+# also §2S ("absence in what you can reach is not absence"). A negative about the ENVIRONMENT
+# deserves the same enumeration discipline as a negative about a tool's feature set. Checking
+# PATH is not an enumeration; it is one place out of many.
+#
+# THE ACTUAL HOST, measured:
+#
+# Windows host  : MinGW-w64 g++/gcc 14.2.0 (x86_64-posix-seh-rev1, MinGW-Builds) with full
+#                 binutils (ar, ld, ranlib, strip, windres) and GNU Make 4.4.1, at
+#                 C:\Projects\2600em\tools\mingw64\bin — NOT on PATH, must be prepended.
+#                 8 CPUs. Git Bash is itself MINGW64_NT with full coreutils (timeout,
+#                 sha256sum, diff, cmp, sed, awk, nproc). Python 3.13 native.
+#                 Still no SDL2 — hence --backend=null, which was always the right call.
+# WSL2 Ubuntu   : g++ 13.3.0, GNU Make 4.3, 2 CPUs. NO LONGER REQUIRED — see [build-native].
+#
+# ★ The reading clone AND the build now both live at C:\Projects\scummvm. The former WSL build
+# clone (~/scummvm) is redundant; it is left in place but nothing depends on it.
+
+
+[build-native]
+
+# ★★ THE NATIVE WINDOWS BUILD. Added P4.2. This is now the build; WSL is not required for any
+# part of this project.
+#
+# Toolchain is not on PATH, so prepend it:
+#   export PATH="/c/Projects/2600em/tools/mingw64/bin:$PATH"
+#
+# Configure (from C:\Projects\scummvm, in Git Bash):
+#   ./configure --backend=null --disable-all-engines --enable-engine=agi \
+#               --disable-taskbar --disable-system-dialogs --disable-cloud \
+#               --disable-tts --disable-sparkle --disable-discord --opengl-mode=none
+#   mingw32-make -j8
+#
+# ★ --disable-taskbar and --disable-system-dialogs ARE REQUIRED, not tidiness. On a Windows
+# host ScummVM compiles backends/dialogs/win32/ and backends/taskbar/win32/ regardless of
+# BACKEND := null, and both #include <SDL.h>, which is not present. These are real configure
+# flags, found by reading ./configure --help rather than by installing SDL to satisfy code the
+# null backend never uses.
+#
+# TWO LOCAL BUILD STEPS ARE STILL NEEDED. Neither modifies the pinned source; both are
+# invocation-level workarounds and both must be re-run after a clean configure:
+#
+#   1. dists/scummvm.o (the Win32 resource). Makefile.common's %.o:%.rc rule runs four seds to
+#      generate a .d file, and GNU sed 4.9 under Git Bash rejects the expression
+#      ("unterminated `s' command"). The resource itself builds fine on its own:
+#          mkdir -p dists/.deps
+#          windres -I. -Idists dists/scummvm.rc -o dists/scummvm.o
+#      Do this BEFORE make; make then sees the .o as up to date and skips the broken rule.
+#      ★ The failure is in DEPENDENCY GENERATION, not in the resource compile — the object is
+#      byte-for-byte what the rule would have produced.
+#
+#   2. backends/platform/sdl/win32/win32_wrapper.o. stdiostream.cpp and midi/windows.cpp call
+#      Win32::stringToTchar / tcharToString / moveFile, but the wrapper defining them lives in
+#      the SDL platform module, which --backend=null excludes. Build it THROUGH MAKE so it gets
+#      the real flags, then add it to the archive:
+#          mingw32-make backends/platform/sdl/win32/win32_wrapper.o
+#          ar r backends/libbackends.a backends/platform/sdl/win32/win32_wrapper.o
+#          ranlib backends/libbackends.a
+#      ★ BUILD IT VIA MAKE, NOT BY HAND. A hand-rolled g++ line that drops -DUNICODE/-D_UNICODE
+#      compiles and links happily and silently changes tchar behaviour. Measured: the
+#      hand-built object was 64115 bytes, the make-built one 63897.
+#
+# ★★ EQUIVALENCE VERIFIED, NOT ASSUMED. A different compiler, C++ library and OS could produce
+# a different oracle, and the oracle IS the baseline (§2O.1) — so swapping it without checking
+# would put the whole gate on an unverified footing. Native vs WSL, Kingquest1, same seed:
+#
+#     262 common cycles, ALL 256 vars and ALL 256 flags identical, zero divergence.
+#
+# And tools/agivm diffs against the native oracle at exactly the same place it diffs against
+# the WSL one (cycle 186, flag 20). Re-run this comparison after any toolchain change.
+#
+# ★ THROUGHPUT: the native build produced 262 cycles where WSL produced 434 in the same 25 s.
+# That is a rate difference, not a fidelity difference — with the deterministic clock
+# ([determinism]) cycle N is cycle N either way. NOT ESTABLISHED: the cause. A plausible
+# candidate is patch 0002's per-cycle s_vmLog.flush() meeting Windows file I/O, but that is a
+# hypothesis and has not been measured. Raise SECS to compensate.
+#
+# Both builds use the SAME configure optimisation settings (neither passes --enable-release),
+# so the difference is not compiler flags.
 
 
 [patches]
