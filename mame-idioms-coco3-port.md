@@ -2320,3 +2320,43 @@ original was unchanged. *Candidates:*
 `sierra-agi-monitor-prompt-needs-R-plus-ENTER`,
 `pc-stuck-vs-pc-varying-is-a-free-liveness-test-without-reading-pixels`,
 `never-mount-a-corpus-image-in-mame-mount-a-copy`.
+
+### 19i. MAME REWRITES `<machine>.cfg` on exit — point `-cfg_directory` away from tracked files
+**A run destroyed an authored file and reported success while doing it.** MAME writes
+`<cfg_directory>/<machine>.cfg` every time it exits, merging in whatever the session's input and
+machine-config state is. `coco_agi`'s default landed on `dist/mame-cfg/rgb/`, which holds a
+**hand-authored** `coco3.cfg` — measured `:row6` port tags and masks, plus a 40-line comment block
+recording the four host keys that do NOT reach the emulated machine and why. The rewrite kept the
+bindings and **deleted every comment**: 70 lines out, 38 in, functionally equivalent XML with all
+of the reasoning gone.
+
+**★★ The tell is that there is no tell.** The emulation is unaffected, so no probe, gate or diff
+can see it. Only `git status` after the run shows anything, and a diff that removes only comments
+reads as tidying. It had already happened at least once before it was noticed.
+
+**Do:** pass `-cfg_directory <scratch>` on every scripted invocation.
+**Do NOT** `.gitignore` the file — that hides the symptom and leaves the destruction happening.
+★ Same reasoning applies to `-snapshot_directory`, `-nvram_directory` and `-diff_directory`; a
+scripted run should own all four rather than inherit them.
+★★ **Related and worse: `-cfg_directory` does NOT carry the Monitor Type** (§11l). A cfg holding
+only an `<input>` block has no `<configuration>` element, so a directory named `rgb/` asserts
+nothing about the monitor — the mode must be set from Lua and LOGGED. *Candidates:*
+`a-tool-that-rewrites-its-config-writes-into-your-repo`.
+
+### 19j. A readback path and a display path are DIFFERENT paths — a byte-identical buffer proves nothing about the screen
+**Two display defects survived a byte-identical gate, in the same task.** `picdiff` reads the
+framebuffer at CPU `$8000` through the MMU window; the GIME feeds the screen from **VOFFSET**,
+an independent physical address. Both defects left the buffer provably correct:
+1. **The wrong flip.** `HAL_gfx_present` (legacy 4-colour, VOFFSET `$F000`/`$F800` → physical
+   `$78000`/`$7C000`) instead of `HAL_gfx_swap` (mode service, `$4000`/`$5000` → `$20000`/
+   `$28000`). The GIME was pointed **352 KB** from the pixels, into the top 64 KB where the
+   running program lives, and displayed **program bytes as pixels**.
+2. **The wrong colour model.** Monitor Type left at MAME's **Composite** default (§11l).
+
+**★★ Both were found by the operator looking at the screen, not by any tool**, and in both cases
+the gate output was `BYTE-IDENTICAL … PASS`. **Do not report a buffer diff as evidence about
+display.** State the two paths separately, and make the capture assert and LOG the monitor mode.
+★ Corollary for reading a HAL: grep for a SECOND routine before calling the first one whose name
+matches (CLAUDE.md §2H check 1). `hal.inc` labelled `HAL_gfx_present` *"a stub"* and left a live
+`[no-ref:]` marker on its VOFFSET derivation — visible without running anything. *Candidates:*
+`the-verification-path-and-the-consumer-path-must-be-the-same-path`.

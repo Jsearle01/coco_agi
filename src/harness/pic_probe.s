@@ -102,10 +102,33 @@ probe_entry:
                 sta     done_flag
 * ★ The rendered picture is in the BACK buffer; the display shows the front one. The flip is
 * assemble-time optional and sits AFTER the sentinel, because the MAME side reads $8000 the
-* moment the sentinel appears and HAL_gfx_present REMAPS that window -- a gate run must never
-* race a remap. Screenshot build: -DPIC_PRESENT. Gate build: omit it.
+* moment the sentinel appears and the flip REMAPS that window -- a gate run must never race a
+* remap. Screenshot build: -DPIC_PRESENT. Gate build: omit it.
+*
+* ★★★ HAL_gfx_swap, NOT HAL_gfx_present. THE HAL HAS TWO FLIPS AND THEY TARGET DIFFERENT RAM.
+*   HAL_gfx_swap    reads HAL_gfx_cur_back, writes VOFFSET $4000/$5000 -> physical
+*                   $20000/$28000. These are the MODE SERVICE's buffers, the ones
+*                   HAL_gfx_set_mode allocates and maps to $8000. This is the right one.
+*   HAL_gfx_present reads page_register at DP $50 and writes VOFFSET $F000/$F800 ->
+*                   physical $78000/$7C000. That is the LEGACY 4-colour single-buffer
+*                   scheme in the TOP 64 KB -- where this running program lives. hal.inc:158
+*                   calls it "a stub" and its VOFFSET derivation still carries a [no-ref:]
+*                   debt marker.
+*
+* ★★ Calling present pointed the GIME 352 KB away from the rendered pixels and displayed
+* PROGRAM BYTES AS PIXELS. The gate did not and could not catch it: picdiff reads $8000
+* through the CPU's MMU window, while the screen is fed from VOFFSET -- two independent
+* address paths. The buffer was byte-identical to the oracle the whole time. Found by Jay
+* looking at the screenshot [CLAUDE.md §2 tier 1; §2H check 1 -- the SECOND mechanism].
+*
+* ★ CC.I CAVEAT, stated rather than hidden: hal.inc's caller sequence for HAL_gfx_swap
+* requires HAL_time_init + `andcc #$EF`, because HAL_time_vbl_wait does NOT wait while CC.I
+* is set -- it synthesises a counter increment and returns. This probe masks interrupts at
+* entry and installs no handler, so the flip is NOT VBL-synced and may tear on the flip
+* frame. Acceptable here and ONLY here: the image is static and the snapshot is taken four
+* frames later, so nothing torn survives to the capture. A moving picture must not copy this.
                 ifdef   PIC_PRESENT
-                jsr     HAL_gfx_present
+                jsr     HAL_gfx_swap
                 endc
 probe_halt:     bra     probe_halt
 

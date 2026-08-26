@@ -38,6 +38,39 @@ local f0 = io.open(OUTDIR .. "/run.log", "w"); if f0 then f0:close() end
 local cpu  = manager.machine.devices[":maincpu"]
 local prog = cpu.spaces["program"]
 
+-- ★★★ MONITOR TYPE -> RGB. MAME's coco3 defaults to COMPOSITE, and the AGI palette is exact
+-- in RGB and UNDEFINED in composite (design §2.2: the table "produces garbage on composite").
+-- A capture taken without this is a gate against the wrong colour model.
+--
+-- ★ It is a MACHINE CONFIG, not a CLI flag -- there is no -monitor/-rgb switch. Port
+-- :screen_config, field "Monitor Type", Composite=0 (default) / RGB=1, set via field.user_value
+-- BEFORE the palette registers are written [idioms §11l]. The poke happens at frame 240, so
+-- doing it at script load is comfortably early.
+--
+-- ★★ This is NOT carried by dist/mame-cfg/rgb/coco3.cfg: that file holds an <input> block only
+-- and has no <configuration> element, so pointing -cfg_directory at it would not have helped.
+local function set_monitor_rgb()
+    local ok, err = pcall(function()
+        local port = manager.machine.ioport.ports[":screen_config"]
+        if not port then
+            logf("WARN: no :screen_config port -- monitor left at MAME default (COMPOSITE)")
+            return
+        end
+        for name, field in pairs(port.fields) do
+            if name == "Monitor Type" then
+                field.user_value = 1
+                logf("MONITOR TYPE -> RGB (:screen_config 'Monitor Type' user_value=1)")
+                return
+            end
+        end
+        -- ★ Enumerate rather than conclude absence (CLAUDE.md §2A.5).
+        for name, _ in pairs(port.fields) do logf("  :screen_config field: %q", name) end
+        logf("WARN: no 'Monitor Type' field -- monitor left at COMPOSITE")
+    end)
+    if not ok then logf("WARN: monitor-type set failed: %s", tostring(err)) end
+end
+set_monitor_rgb()
+
 local function slurp(path)
     local fh = io.open(path, "rb")
     if not fh then return nil end
