@@ -2360,3 +2360,29 @@ display.** State the two paths separately, and make the capture assert and LOG t
 matches (CLAUDE.md §2H check 1). `hal.inc` labelled `HAL_gfx_present` *"a stub"* and left a live
 `[no-ref:]` marker on its VOFFSET derivation — visible without running anything. *Candidates:*
 `the-verification-path-and-the-consumer-path-must-be-the-same-path`.
+
+### 19k. `-snapview` defaults to `native` = SQUARE pixels — every snapshot is aspect-wrong until you fix it
+**Three captures were handed to the operator stretched 2x horizontally before he said so.** MAME's
+`-snapview` documents `native` as *"per-screen pixel-aspect views"*: the raw framebuffer, square
+pixels, display aspect ignored. On `coco3` that is **640x239, ratio 2.678**, where the machine
+displays **4:3 = 1.333** — so a default snapshot is **almost exactly twice as wide as it should
+be**.
+
+```
+-snapview auto -snapsize 640x480 -keepaspect     # verified: 640x480, ratio 1.333
+```
+
+**★★ The gate consequence is the point, not the cosmetics.** KQ1 picture 80's only black is a
+**1-pixel border frame** (652 px = 2x160 + 2x168 - 4 corners, 100% on the outermost row/column,
+332 of 334 horizontal runs a single pixel). At half width in a stretched snap it is effectively
+unresolvable, and the operator correctly reported he could not see it. **A thin feature can be
+present, correct, and invisible in the medium the reviewer was given** — so an eye-gate on a
+raw-aspect snap can fail for a reason that has nothing to do with the render.
+
+**Verify the PNG, do not trust the flag:** read IHDR width/height (bytes 16-23) and check the
+ratio. ★ Metadata only — reading a snapshot's PIXELS is forbidden (CLAUDE.md §3); its dimensions
+are structured text and are fair game.
+★ Also note the CoCo3 mode-2 screen is **320x200 while an AGI picture is 160x168**: rows 168-199
+are not part of the picture and hold whatever `HAL_gfx_set_mode` left. Say so when submitting a
+gate, or it reads as a rendering defect. *Candidates:*
+`check-the-artifact-in-the-form-the-recipient-receives`.

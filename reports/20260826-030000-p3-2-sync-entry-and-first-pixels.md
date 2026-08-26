@@ -1,18 +1,18 @@
-﻿## Form B Report â€” P3.2 â€” the sync entry, and first pixels
+## Form B Report — P3.2 — the sync entry, and first pixels
 **Class:** build.  wip.
 
-### 0 â€” Receipt / status (C-35 stamp)
+### 0 — Receipt / status (C-35 stamp)
 t0=2026-08-26 (dispatch T-P0-011 receipt; HEAD at receipt `bae9e5e`, wip, clean).
 HEAD at first filing: `dbfe82c`. HEAD at this amended filing: `ec67d29` + the `-DPIC_FAULT`
 switch. git status clean apart from this report and `src/harness/pic_probe.s`.
-â˜… **This report was amended in place after the gate was fixed** â€” the first filing had AC-6/AC-7
-FAILING and stopped there. Amended rather than superseded so the wrong call (Â§6) and the
+★ **This report was amended in place after the gate was fixed** — the first filing had AC-6/AC-7
+FAILING and stopped there. Amended rather than superseded so the wrong call (§6) and the
 correction stay in one artifact.
-POP `430a91c`, Karateka `78c8c27` â€” both carry the shared half of Part A.
+POP `430a91c`, Karateka `78c8c27` — both carry the shared half of Part A.
 
 ---
 
-### Pre-dispatch grep (C-13) â€” verbatim, before the summary
+### Pre-dispatch grep (C-13) — verbatim, before the summary
 
 ```
 coco_agi                     wip    bae9e5e229020e40065b320f2f266cf843416ea5
@@ -32,7 +32,7 @@ POP baseline build exit 0; karateka baseline build exit 0. 319 / 104 artifacts s
 hal_sync_check.py  SIBLINGS = {'POP3_port': 'karateka_coco3', 'karateka_coco3': 'POP3_port'}
                    SHARED = 11 entries; PROJECT_LOCAL = {'src/hal/coco3-dsk/hal_globals.s'}
   working-tree sha1: POP 56d5b42, karateka 016408c, coco_agi 56d5b42  -- NOT byte-identical
-  â˜… index blobs: ALL THREE e9514813ba7be77a6deb7089faa94d74844f971f -- IDENTICAL.
+  ★ index blobs: ALL THREE e9514813ba7be77a6deb7089faa94d74844f971f -- IDENTICAL.
     The working-tree difference is EOL only: karateka has no .gitattributes.
 
 coco_agi HAL vs POP's CURRENT head: 9 of 11 SHARED files normalise()-EQUAL.
@@ -41,7 +41,7 @@ hal_globals.s in coco_agi: present; carries NO mode table (POP's pre-POP-HAL-01 
 MAME: dist/mame-cfg/rgb/coco3.cfg present, BREAK+CTRL on :row6 mask 0x0004/0x0010; coco3 rom ok.
 ```
 
-â˜…â˜… **The drift is entirely additive from our side and POP has ZERO lines we lack** â€” measured,
+★★ **The drift is entirely additive from our side and POP has ZERO lines we lack** — measured,
 not assumed:
 
 ```
@@ -49,103 +49,103 @@ src/hal.inc   ONLY in coco_agi (1):  GFX_MODE_320x200x16 equ 2 ...      ONLY in 
 src/hal/gfx.s ONLY in coco_agi (17): GFX_MODE_MAX equ 2 + the 3-row table   ONLY in POP: 0
 ```
 
-So nothing of POP-HAL-01 was missed, and this is the **anticipated transition** (Â§2M.5), not
-Â§8.2's ambiguous drift. **Â§8.2 not triggered** â€” stated with the evidence rather than asserted.
+So nothing of POP-HAL-01 was missed, and this is the **anticipated transition** (§2M.5), not
+§8.2's ambiguous drift. **§8.2 not triggered** — stated with the evidence rather than asserted.
 
-â˜… **Â§2T note (arrived mid-task):** the baseline was rebuilt rather than cited, correctly â€”
-**both** of Â§2T's conditions 1 and 2 hold. POP moved `282a65cf`â†’`e19bbed` and Karateka
-`072ddcf`â†’`1b5ad76` (POP-HAL-01), and Karateka's tree carries a dirty tracked file. Citation
+★ **§2T note (arrived mid-task):** the baseline was rebuilt rather than cited, correctly —
+**both** of §2T's conditions 1 and 2 hold. POP moved `282a65cf`→`e19bbed` and Karateka
+`072ddcf`→`1b5ad76` (POP-HAL-01), and Karateka's tree carries a dirty tracked file. Citation
 applies from the next dispatch.
 
 ---
 
-### 1 â€” Summary
+### 1 — Summary
 **Part A is complete and verified.** `coco_agi` is the third participant in the HAL sync mesh;
 all three repos report OK naming the other two; POP and Karateka rebuild byte-identical; mode 2
 moved out of the shared `gfx.s` into `coco_agi`'s own `hal_globals.s`, so it now touches no
-shared file â€” the property POP-HAL-01 bought.
+shared file — the property POP-HAL-01 bought.
 
-â˜…â˜…â˜… **Part B PASSES.** One AGI PICTURE (KQ1 #80) is interpreted by 6809 code on a real CoCo3 in
+★★★ **Part B PASSES.** One AGI PICTURE (KQ1 #80) is interpreted by 6809 code on a real CoCo3 in
 320x200x16, and both planes read back out of MAME are **BYTE-IDENTICAL to the pinned oracle** --
 visual `ef1556f2...`, priority `98cdf968...`, 26,880 bytes each.
 
-â˜… **This report was first filed with AC-6/AC-7 FAILING and the task stopped there. That stop was
-wrong.** I invoked Â§8.3, whose precondition is *"AC-6 diverges **and the cause is ambiguous**"*,
+★ **This report was first filed with AC-6/AC-7 FAILING and the task stopped there. That stop was
+wrong.** I invoked §8.3, whose precondition is *"AC-6 diverges **and the cause is ambiguous**"*,
 when the cause was not ambiguous -- I had localised it to the assembly and had a reference
 implementation to bisect against. Jay challenged it, I resumed, and the defect fell out of one
-further measurement. Â§3.5a records both the defect and the misjudgement; the second is the more
+further measurement. §3.5a records both the defect and the misjudgement; the second is the more
 useful of the two.
 
-### 2 â€” Files modified
-- `CLAUDE.md` â€” v1.3 committed as given (`499a793`), then **v1.4** (`48d6dd6`) when it arrived mid-task. Both superset-checked.
-- `harness/tools/hal_sync_check.py` â€” three-participant edit, **landed in all three repos**.
-- `src/hal/coco3-dsk/gfx.s` â€” re-synced to POP's current head (the table leaves).
-- `src/hal/coco3-dsk/hal_globals.s` â€” gains `coco_agi`'s own 3-row mode table.
-- `src/hal.inc` (POP + Karateka) â€” the shared mode-number registry gains `GFX_MODE_320x200x16 equ 2`.
-- `src/harness/pic_probe.s`, `pic_draw.s`, `pic_fill.s` â€” NEW, the 6809 picture renderer.
-  â˜… `pic_draw.s` then gained the **pen save/restore** that fixed the gate (Â§3.5); `pic_probe.s`
+### 2 — Files modified
+- `CLAUDE.md` — v1.3 committed as given (`499a793`), then **v1.4** (`48d6dd6`) when it arrived mid-task. Both superset-checked.
+- `harness/tools/hal_sync_check.py` — three-participant edit, **landed in all three repos**.
+- `src/hal/coco3-dsk/gfx.s` — re-synced to POP's current head (the table leaves).
+- `src/hal/coco3-dsk/hal_globals.s` — gains `coco_agi`'s own 3-row mode table.
+- `src/hal.inc` (POP + Karateka) — the shared mode-number registry gains `GFX_MODE_320x200x16 equ 2`.
+- `src/harness/pic_probe.s`, `pic_draw.s`, `pic_fill.s` — NEW, the 6809 picture renderer.
+  ★ `pic_draw.s` then gained the **pen save/restore** that fixed the gate (§3.5); `pic_probe.s`
   gained **`-DPIC_FAULT`**, so AC-8's real-pipeline injection is reproducible from the tree
   rather than an edit that was made and reverted.
-- `harness/tools/pic_probe.lua`, `picdiff.py` â€” NEW, the MAME driver and the diff.
-  â˜…â˜… `pic_probe.lua` then gained the **Monitor Type â†’ RGB** assertion (Â§3.10b), logged on every
-  run. `pic_probe.s`'s flip changed from `HAL_gfx_present` to **`HAL_gfx_swap`** (Â§3.10a).
-- `mame-idioms-coco3-port.md` â€” **two new idioms** (Â§2A.4): **19i** MAME rewrites
+- `harness/tools/pic_probe.lua`, `picdiff.py` — NEW, the MAME driver and the diff.
+  ★★ `pic_probe.lua` then gained the **Monitor Type → RGB** assertion (§3.10b), logged on every
+  run. `pic_probe.s`'s flip changed from `HAL_gfx_present` to **`HAL_gfx_swap`** (§3.10a).
+- `mame-idioms-coco3-port.md` — **two new idioms** (§2A.4): **19i** MAME rewrites
   `<machine>.cfg` on exit, point `-cfg_directory` away from tracked files; **19j** a readback
   path and a display path are different paths, so a byte-identical buffer proves nothing about
   the screen.
 
-`src/engine/**` untouched â€” **0 `.s` files**. No game data, resource bytes or renderings committed.
+`src/engine/**` untouched — **0 `.s` files**. No game data, resource bytes or renderings committed.
 
-### 3 â€” Reasoning
+### 3 — Reasoning
 
-**3.1 CLAUDE.md â€” v1.3 then v1.4, both superset-checked (Â§2D).**
-v1.2â†’v1.3: 8 substantive in-repo lines absent from the provided file, **all intentional
-supersessions** â€” the version banner (2), Â§2G's stale "read-only/copy-and-adapt" wording (3),
-and Â§2M items 5â€“7 renumbered to 6â€“8 to make room for the mode-table seam (3). Verified by
-reading the new Â§2G and Â§2M rather than trusting the count.
-â˜… **v1.4 arrived mid-task** (17:59, after v1.3 at 17:52) adding **Â§2T**. Superset v1.3â†’v1.4:
+**3.1 CLAUDE.md — v1.3 then v1.4, both superset-checked (§2D).**
+v1.2→v1.3: 8 substantive in-repo lines absent from the provided file, **all intentional
+supersessions** — the version banner (2), §2G's stale "read-only/copy-and-adapt" wording (3),
+and §2M items 5–7 renumbered to 6–8 to make room for the mode-table seam (3). Verified by
+reading the new §2G and §2M rather than trusting the count.
+★ **v1.4 arrived mid-task** (17:59, after v1.3 at 17:52) adding **§2T**. Superset v1.3→v1.4:
 only the version banner superseded. Both are committed separately rather than one amended over
 the other, because *which artifact was in force when* is what a reader of this task will need.
 
-**3.2 Part A â€” the three edits, and why none may be per-repo.**
+**3.2 Part A — the three edits, and why none may be per-repo.**
 `PARTICIPANTS` is a list with `others = [p for p in PARTICIPANTS if p != mine]` **derived**; a
 1:1 dict can only ever name ONE sibling, so with three repos a participant would be compared by
 nobody while appearing to pass. `PROJECT_LOCAL` is a per-repo **mapping keyed by repo name**,
-identical in every copy â€” â˜… AC-5's real constraint is that *"a per-repo constant must not be
+identical in every copy — ★ AC-5's real constraint is that *"a per-repo constant must not be
 able to make the copies differ"*, and the script is in its own `SHARED` list and compares
 itself, so the only per-repo input is the directory name discovered at runtime. Graceful skip is
 **per pair**: with two participants an absent sibling meant nothing could be checked; with
 three, one absent repo must not suppress the pair that IS present.
 
-**3.3 Mode 2 moved to `hal_globals.s`, and rows 0â€“1 came with it.** The lookup is **positional**
+**3.3 Mode 2 moved to `hal_globals.s`, and rows 0–1 came with it.** The lookup is **positional**
 (row index = mode id), so mode 2 cannot sit at index 2 unless 0 and 1 exist. They are not AGI's
 modes and AGI does not select them. The registry entry stays in shared `hal.inc` so two projects
-cannot assign the same id to different modes â€” POP-HAL-01 left that for *"coco_agi's change to
+cannot assign the same id to different modes — POP-HAL-01 left that for *"coco_agi's change to
 make when it lands its mode"*, and it landed here.
 
-**3.4 â˜…â˜… Part B's transform, and the direction that can fail.**
+**3.4 ★★ Part B's transform, and the direction that can fail.**
 Mode 2 is 4bpp, so a CoCo3 byte is two screen pixels; AGI's 160 columns double to 320, making
-**one AGI pixel exactly one byte with the colour in both nibbles** â€” and 160 B/row is mode 2's
+**one AGI pixel exactly one byte with the colour in both nibbles** — and 160 B/row is mode 2's
 stride exactly. **The nibble duplication IS the pixel doubling.**
-â˜… We **unpack** the CoCo3 buffer to 160Ã—168 indices and compare those, rather than packing the
+★ We **unpack** the CoCo3 buffer to 160×168 indices and compare those, rather than packing the
 oracle's. Packing the oracle would apply OUR transform to BOTH sides, so a packing bug would
-cancel itself. â˜… And the unpack **verifies the two nibbles agree** before trusting either â€” a
+cancel itself. ★ And the unpack **verifies the two nibbles agree** before trusting either — a
 byte whose halves differ is not a colour index, it is a half-pixel, and AC-8(c) proves the plain
-byte comparison misses exactly that. Priority is 160Ã—168 on both sides (design Â§3.3), so **no
+byte comparison misses exactly that. Priority is 160×168 on both sides (design §3.3), so **no
 transform and nowhere for a transform error to hide**.
 
-**3.5 â˜…â˜…â˜… THE DEFECT: `draw_line` clobbered the caller's pen.**
+**3.5 ★★★ THE DEFECT: `draw_line` clobbered the caller's pen.**
 `draw_line` used `cur_x`/`cur_y` as its plotting cursor, because `put_pixel` reads them -- but
 the CALLERS use those same two bytes as the persistent pen. The vertical and horizontal branches
 **swap their endpoints** before walking, so a line left the pen at the **opposite end** from the
 one the caller set, and every following segment recomputed from the wrong origin.
 
-â˜…â˜… **Measured, after reading the code three times failed.** A synthetic picture of 23 stacked
+★★ **Measured, after reading the code three times failed.** A synthetic picture of 23 stacked
 `(dx=0, dy=-7)` `rel_line` steps entered the vertical branch 23 times and reported **185 visual
 writes -- while only EIGHT distinct pixels existed, rows 160-167, drawn 23 times over.**
 23 x 8 + 1 = 185 exactly. Fixed by saving and restoring the pen across `draw_line`.
 
-â˜…â˜…â˜… **IT WAS INVISIBLE IN THE ALGORITHM, AND THAT IS THE POINT.** The Python transcription
+★★★ **IT WAS INVISIBLE IN THE ALGORITHM, AND THAT IS THE POINT.** The Python transcription
 passes x1,y1,x2,y2 as PARAMETERS and keeps the caller's pen in separate locals, so it **cannot
 express this bug** -- which is exactly why the algorithm matched the oracle perfectly (0
 differences, both planes) while the assembly did not. Sharing the two bytes was an
@@ -161,65 +161,70 @@ Reading the vertical branch against the transcription three times found nothing.
   * Only `visual_writes` differed -- 27,208 against 25,079 -- which says pixels were written
     **more than once**, and pointed straight at the synthetic single-line test that found it.
 
-â˜… Both earlier hypotheses -- "the fills leak", then "vertical lines are missing" -- were
+★ Both earlier hypotheses -- "the fills leak", then "vertical lines are missing" -- were
 consistent with every observation available when I formed them, and both were wrong. A counter
 that could disagree discriminated where a pixel diff could not.
 
 **3.6 Two real defects found and fixed on the way, both against the oracle.**
-- â˜…â˜… **The AGI canvas is visual=15 / priority=4, not black.** `HAL_gfx_set_mode` clears to index 0 â€” right for the HAL, wrong for a picture, because `draw_FillCheck` fills only where the visual is 15. With a black canvas **no fill could ever succeed**. â˜… Row 0 agreed with the oracle throughout anyway, because row 0 is genuinely black: two buffers matching for different reasons, and a gate that checked only row 0 would have passed.
-- â˜…â˜… **`rel_line` deltas are SIGN-MAGNITUDE** [`picture.cpp:640-643`: `if (dx & 0x08) dx = -(dx & 0x07)`]. Bit 3 is the sign and bits 0â€“2 the magnitude, so `$F` is **âˆ’7**; my two's-complement `ora #$F0` made it **âˆ’1**. Every negative delta landed wrong.
-- â˜… **The probe never set `S`.** `hal.inc:357-362` states it outright â€” the CALLER owns the stack and it must live below `$8000` â€” and its suggested `$7F00` is inside this probe's priority plane, so it cannot be taken literally. Leaving `S` where DECB put it aimed the hardware stack into the fill stack; the first deep fill ate a return address and the CPU ran off to `$0211`.
+- ★★ **The AGI canvas is visual=15 / priority=4, not black.** `HAL_gfx_set_mode` clears to index 0 — right for the HAL, wrong for a picture, because `draw_FillCheck` fills only where the visual is 15. With a black canvas **no fill could ever succeed**. ★ Row 0 agreed with the oracle throughout anyway, because row 0 is genuinely black: two buffers matching for different reasons, and a gate that checked only row 0 would have passed.
+- ★★ **`rel_line` deltas are SIGN-MAGNITUDE** [`picture.cpp:640-643`: `if (dx & 0x08) dx = -(dx & 0x07)`]. Bit 3 is the sign and bits 0–2 the magnitude, so `$F` is **−7**; my two's-complement `ora #$F0` made it **−1**. Every negative delta landed wrong.
+- ★ **The probe never set `S`.** `hal.inc:357-362` states it outright — the CALLER owns the stack and it must live below `$8000` — and its suggested `$7F00` is inside this probe's priority plane, so it cannot be taken literally. Leaving `S` where DECB put it aimed the hardware stack into the fill stack; the first deep fill ate a return address and the CPU ran off to `$0211`.
 
-**3.7 Â§2O.1 â€” the baseline is the oracle.** `picdiff.py` does not import `tools/picrender/` and
+**3.7 §2O.1 — the baseline is the oracle.** `picdiff.py` does not import `tools/picrender/` and
 must not. picrender was used **once, as a diagnostic**, to confirm the oracle dump is what we
-think it is â€” it reproduces `pic080` exactly on both planes. That is checking the instrument,
+think it is — it reproduces `pic080` exactly on both planes. That is checking the instrument,
 not moving the baseline.
 
-**3.8 Â§2S.** All refs in the grep block. Siblings written only in the two sanctioned files
+**3.8 §2S.** All refs in the grep block. Siblings written only in the two sanctioned files
 (`hal_sync_check.py`, `hal.inc`); no sibling content touched.
 
-### 4 â€” Verification (AC-by-AC)
+### 4 — Verification (AC-by-AC)
 
-- **AC-1 [byte-comparable] PASS.** v1.3 committed byte-identical (47,944 B, sha256 `8b7528daâ€¦`), then v1.4 (51,067 B, sha256 `02681726â€¦`). Superset output in Â§5.
-- **AC-2 [byte-comparable] â˜…â˜…â˜… PASS.** Karateka **104/104 byte-identical**. POP: **shipped set 7/7 identical, all 292 emitted binaries unchanged**; the sole tree delta is `build/obj/tile.map` +61 B â€” `Symbol: GFX_MODE_320x200x16 (tile_probe.o)`, a bare `equ` in a shared header adding one symbol line to the one map that lists `GFX_MODE_*` at all. **No emitted byte changed.** Reported rather than absorbed: v1.3 scopes byte-identity to the six DECB files plus `probe.dmk`.
-- **AC-3 [byte-comparable] â˜…â˜… PASS.** All three report **OK**, each naming the other two â€” not "skip". Verbatim Ã—3 in Â§5.
-- **AC-4 [byte-comparable] PASS.** Index blobs identical in all three: `ddedd41b5b6b34b7e5422c52901e66905d0ddf06`. â˜… Working-tree sha1 differs for Karateka **only** because it has no `.gitattributes` â€” a pre-existing condition recorded at T-P0-010, not introduced here.
-- **AC-5 [byte-comparable] PASS.** `PARTICIPANTS = ['POP3_port','karateka_coco3','coco_agi']` with `others = [p for p in PARTICIPANTS if p != mine]`; `PROJECT_LOCAL` a per-repo mapping. Lines in Â§5.
-- **AC-6 [byte-comparable] â˜…â˜…â˜… PASS.** Picture **KQ1 #80**. Visual **BYTE-IDENTICAL**, 26,880 bytes, sha256 `ef1556f2ae78156e686a3c987d6817aa...` on both sides. Transform: unpack 4bpp -> indices, and **every byte's nibbles agree**. `visual_writes` 25,079, matching the reference exactly.
-- **AC-7 [byte-comparable] PASS.** Priority **BYTE-IDENTICAL**, 26,880 bytes, sha256 `98cdf968fe6321caf5b88d4831eb85bc...`. No transform applied, as design Â§3.3 requires.
-- **AC-8 [state-comparable] â˜…â˜… PASSES, on the REAL pipeline.** A one-pixel fault injected **into the 6809 renderer** (`-DPIC_FAULT`: a post-render `eora #$11` at (37,42), assemble-time and **off by default**) is caught at **exactly offset 6757 = (x=37, y=42)**, 1 of 26,880, with priority still identical. Also shown on synthetic buffers: a correct render passes, and a **half-pixel** (nibbles disagreeing) is caught by the nibble check **even though the byte comparison alone reported IDENTICAL** -- the transform error Â§5 warned could cancel a rendering error.
-  â˜… **What this gate does NOT catch: a wrong PALETTE.** The diff compares colour INDICES; the 16 GIME palette registers appear in neither buffer. A brown-vs-dark-yellow error at entry 6 would pass here silently. That is Jay's gate (AC-10), not this one.
+- **AC-1 [byte-comparable] PASS.** v1.3 committed byte-identical (47,944 B, sha256 `8b7528da…`), then v1.4 (51,067 B, sha256 `02681726…`). Superset output in §5.
+- **AC-2 [byte-comparable] ★★★ PASS.** Karateka **104/104 byte-identical**. POP: **shipped set 7/7 identical, all 292 emitted binaries unchanged**; the sole tree delta is `build/obj/tile.map` +61 B — `Symbol: GFX_MODE_320x200x16 (tile_probe.o)`, a bare `equ` in a shared header adding one symbol line to the one map that lists `GFX_MODE_*` at all. **No emitted byte changed.** Reported rather than absorbed: v1.3 scopes byte-identity to the six DECB files plus `probe.dmk`.
+- **AC-3 [byte-comparable] ★★ PASS.** All three report **OK**, each naming the other two — not "skip". Verbatim ×3 in §5.
+- **AC-4 [byte-comparable] PASS.** Index blobs identical in all three: `ddedd41b5b6b34b7e5422c52901e66905d0ddf06`. ★ Working-tree sha1 differs for Karateka **only** because it has no `.gitattributes` — a pre-existing condition recorded at T-P0-010, not introduced here.
+- **AC-5 [byte-comparable] PASS.** `PARTICIPANTS = ['POP3_port','karateka_coco3','coco_agi']` with `others = [p for p in PARTICIPANTS if p != mine]`; `PROJECT_LOCAL` a per-repo mapping. Lines in §5.
+- **AC-6 [byte-comparable] ★★★ PASS.** Picture **KQ1 #80**. Visual **BYTE-IDENTICAL**, 26,880 bytes, sha256 `ef1556f2ae78156e686a3c987d6817aa...` on both sides. Transform: unpack 4bpp -> indices, and **every byte's nibbles agree**. `visual_writes` 25,079, matching the reference exactly.
+- **AC-7 [byte-comparable] PASS.** Priority **BYTE-IDENTICAL**, 26,880 bytes, sha256 `98cdf968fe6321caf5b88d4831eb85bc...`. No transform applied, as design §3.3 requires.
+- **AC-8 [state-comparable] ★★ PASSES, on the REAL pipeline.** A one-pixel fault injected **into the 6809 renderer** (`-DPIC_FAULT`: a post-render `eora #$11` at (37,42), assemble-time and **off by default**) is caught at **exactly offset 6757 = (x=37, y=42)**, 1 of 26,880, with priority still identical. Also shown on synthetic buffers: a correct render passes, and a **half-pixel** (nibbles disagreeing) is caught by the nibble check **even though the byte comparison alone reported IDENTICAL** -- the transform error §5 warned could cancel a rendering error.
+  ★ **What this gate does NOT catch: a wrong PALETTE.** The diff compares colour INDICES; the 16 GIME palette registers appear in neither buffer. A brown-vs-dark-yellow error at entry 6 would pass here silently. That is Jay's gate (AC-10), not this one.
 - **AC-9 [byte-comparable] PASS.** `coco_agi` **0** (src/engine holds 0 `.s` files; the probe is in `src/harness/`), POP **59**, Karateka **8**.
-- **AC-10 [eye-gated] â˜…â˜…â˜… PASS â€” Jay, `poke`, RGB.** Jay's observation: *"white and grey clouds
-  on a blue background"*, which names **all four** colours of the oracle's census (Â§3.10a) in
-  their correct roles â€” index 9 light blue 88.1%, 15 white 7.3%, 7 light grey 2.2%, 0 black 2.4%.
-  â˜… **Two prior captures were rejected by Jay**, and both were real defects the byte gate could
-  not see (Â§3.10). **Endpoints only â€” a still, no motion under gate.**
-- **AC-10 â€” the two REJECTED captures, kept on the record.** Capture 1 used `HAL_gfx_present`
-  (VOFFSET â†’ `$78000`): Jay â€” *"completely wrong â€¦ looks like the classic voffset not matching
-  the written pixel buffer"*. Capture 2 fixed the flip but ran in **composite**: Jay â€” *"pink and
-  white clouds on a green background"*. â˜…â˜… **Both were reported by me as ready to gate**, the
+- **AC-10 [eye-gated] ★★★ PASS — Jay, `poke`, RGB.** Jay's observation: *"white and grey clouds
+  on a blue background"*, which names **all four** colours of the oracle's census (§3.10a) in
+  their correct roles — index 9 light blue 88.1%, 15 white 7.3%, 7 light grey 2.2%, 0 black 2.4%.
+  ★ **Two prior captures were rejected by Jay**, and both were real defects the byte gate could
+  not see (§3.10). **Endpoints only — a still, no motion under gate.**
+- **AC-10 — the two REJECTED captures, kept on the record.** Capture 1 used `HAL_gfx_present`
+  (VOFFSET → `$78000`): Jay — *"completely wrong … looks like the classic voffset not matching
+  the written pixel buffer"*. Capture 2 fixed the flip but ran in **composite**: Jay — *"pink and
+  white clouds on a green background"*. ★★ **Both were reported by me as ready to gate**, the
   first with the claim that the only thing left for Jay's eye was the palette. **That claim was
-  wrong and is what Â§3.10 exists to record.**
-  â˜… All captures live **outside the repo** (Â§2P: a rendered room is copyrighted content) and
-  **no PNG was read or interpreted by Clyde** (Â§3) â€” the diagnosis came from Jay's descriptions
+  wrong and is what §3.10 exists to record.**
+  ★ All captures live **outside the repo** (§2P: a rendered room is copyrighted content) and
+  **no PNG was read or interpreted by Clyde** (§3) — the diagnosis came from Jay's descriptions
   plus a census of the ORACLE's index buffer.
-  â˜… Build note: the screenshot build adds `-DPIC_PRESENT`; the gate build must not, because the
+  ★ Build note: the screenshot build adds `-DPIC_PRESENT`; the gate build must not, because the
   flip remaps the `$8000` window the gate reads.
-- **AC-11 [suite]** See Â§10.
+- **AC-10 — the capture that Jay gated is the FOURTH.** Captures 1–3 were all rejected: wrong
+  VOFFSET, then composite, then **all three stretched 2× horizontally** (§3.11). ★★ **Only the
+  fourth was both correct AND legible**, at 640×480 / 1.333 verified from the PNG header.
+  **Three of the four defects were in the harness, not the renderer** — the renderer's counters
+  were identical in every run.
+- **AC-11 [suite]** See §10.
 
-### 5 â€” Verdict-time evidence (v0.7 Â§11)
+### 5 — Verdict-time evidence (v0.7 §11)
 
 ```
-=== AC-1 Â§2D superset checks ===
+=== AC-1 §2D superset checks ===
 v1.2 -> v1.3: in-repo 597 substantive, provided 581.
   8 line(s) absent, ALL intentional supersessions:
     ## Working Agreement v1.2 ... / **Version:** 1.2
     - **Read-only for content.** Never modify a sibling's scene logic, ...
-    - â˜…â˜… **The HAL is the exception and it is NOT read-only â€” it is SYNCHRONISED.** ...
-    5. â˜…â˜… **ENTRY IS AT P3, NOT AT REPO CREATION.** ...
+    - ★★ **The HAL is the exception and it is NOT read-only — it is SYNCHRONISED.** ...
+    5. ★★ **ENTRY IS AT P3, NOT AT REPO CREATION.** ...
     6. **Joining requires three edits to the script, ...**
-    7. â˜… **Graceful skip must survive.** ...
+    7. ★ **Graceful skip must survive.** ...
 v1.3 -> v1.4: SUPERSET CHECK PASS -- only the v1.3 version banner superseded.
 CLAUDE.md now: 51067 bytes  sha256 02681726fefd2e46576cdf59dff9c22b  Version: 1.4
 ```
@@ -246,7 +251,7 @@ PROJECT_LOCAL = {
 ```
 === AC-2 POP, baseline vs after Part A ===
   baseline artifacts: 319   current: 319
-  â˜… CHANGED (1):
+  ★ CHANGED (1):
       build/obj/tile.map   11684 B 3b00940f668942f0 -> 11745 B 5664452b5e7e8a82
   mechanism: Symbol: GFX_MODE_320x200x16 (build/obj/tile_probe.o) = 2002
              tile.map is the ONLY map listing GFX_MODE_* symbols; every other lists none.
@@ -255,7 +260,7 @@ PROJECT_LOCAL = {
 
 === AC-2 karateka ===
   baseline artifacts: 104   current: 104
-  â˜… ALL 104 ARTIFACTS BYTE-IDENTICAL
+  ★ ALL 104 ARTIFACTS BYTE-IDENTICAL
 ```
 
 ```
@@ -273,8 +278,8 @@ picture 80
   oracle visual / priority : 26880 / 26880 bytes
 
   unpack: every byte's nibbles agree -- the doubling is intact
-  VISUAL    â˜… BYTE-IDENTICAL   26880 bytes   sha256 ef1556f2ae78156e686a3c987d6817aa
-  PRIORITY  â˜… BYTE-IDENTICAL   26880 bytes   sha256 98cdf968fe6321caf5b88d4831eb85bc
+  VISUAL    ★ BYTE-IDENTICAL   26880 bytes   sha256 ef1556f2ae78156e686a3c987d6817aa
+  PRIORITY  ★ BYTE-IDENTICAL   26880 bytes   sha256 98cdf968fe6321caf5b88d4831eb85bc
 
 AC-6/AC-7: PASS
 ```
@@ -312,17 +317,17 @@ assembled build/pic_probe.bin  2459 bytes
 MONITOR TYPE -> RGB (:screen_config 'Monitor Type' user_value=1)
 probe completed at frame 901, bad_op=$00
 DIAGNOSTIC counters: vertical=10 horizontal=16 diagonal=130 visual_writes=25079
-  VISUAL    â˜… BYTE-IDENTICAL   26880 bytes   sha256 ef1556f2ae78156e686a3c987d6817aa
-  PRIORITY  â˜… BYTE-IDENTICAL   26880 bytes   sha256 98cdf968fe6321caf5b88d4831eb85bc
+  VISUAL    ★ BYTE-IDENTICAL   26880 bytes   sha256 ef1556f2ae78156e686a3c987d6817aa
+  PRIORITY  ★ BYTE-IDENTICAL   26880 bytes   sha256 98cdf968fe6321caf5b88d4831eb85bc
 AC-6/AC-7: PASS
 
-â˜… The counters are IDENTICAL across all three captures and the gate. Nothing about the
+★ The counters are IDENTICAL across all three captures and the gate. Nothing about the
   RENDERER changed while the display path was being fixed twice -- only where the GIME was
   told to look, and by which colour model it decoded what it found.
 ```
 
 ```
-=== the colour census that diagnosed it -- from the ORACLE, not from a PNG (Â§3) ===
+=== the colour census that diagnosed it -- from the ORACLE, not from a PNG (§3) ===
 KQ1 PICTURE 80 -- colour census from the PINNED ORACLE's visual plane
 (26880 pixels, 160 x 168)
 
@@ -333,10 +338,10 @@ KQ1 PICTURE 80 -- colour census from the PINNED ORACLE's visual plane
     0  black                    652    2.4%      $00 -> (0,0,0)          black
     7  light grey               586    2.2%      $38 -> (2,2,2)          light grey
 
-â˜… TOP THIRD (reads as 'sky'):     79.1% index 9, 13.4% index 15, 4.4% index 7
-â˜… BOTTOM THIRD (reads as 'ground'): 97.0% index 9, 3.0% index 0
+★ TOP THIRD (reads as 'sky'):     79.1% index 9, 13.4% index 15, 4.4% index 7
+★ BOTTOM THIRD (reads as 'ground'): 97.0% index 9, 3.0% index 0
 
-â˜…â˜… ONLY FOUR OF SIXTEEN ENTRIES ARE EXERCISED. Twelve have never been displayed.
+★★ ONLY FOUR OF SIXTEEN ENTRIES ARE EXERCISED. Twelve have never been displayed.
 ```
 
 ```
@@ -344,24 +349,24 @@ KQ1 PICTURE 80 -- colour census from the PINNED ORACLE's visual plane
 assembled build/pic_fault.bin  2467 bytes  (-DPIC_FAULT)
 picture 80
   unpack: every byte's nibbles agree -- the doubling is intact
-  VISUAL    â˜… DIFFERS          1 of 26880 bytes (0.004%)
+  VISUAL    ★ DIFFERS          1 of 26880 bytes (0.004%)
       ours   sha256 1b1b8e8afbe7f257ee860d79067d899678d4cc7aac69e8e4e66c59a4d80d8b66
       oracle sha256 ef1556f2ae78156e686a3c987d6817aa15fe38d9cddd0211423caae4d5c84468
       first differing pixel: offset 6757 = (x=37, y=42)  ours 8, oracle 9
-  PRIORITY  â˜… BYTE-IDENTICAL   26880 bytes   sha256 98cdf968fe6321caf5b88d4831eb85bc
+  PRIORITY  ★ BYTE-IDENTICAL   26880 bytes   sha256 98cdf968fe6321caf5b88d4831eb85bc
 AC-6/AC-7: FAIL
-â˜… --expect-fail: a FAIL here is the expected result (the gate caught the fault).
+★ --expect-fail: a FAIL here is the expected result (the gate caught the fault).
 picdiff exit=0   (0 = the gate CAUGHT the injected fault)
 
-â˜… Priority stayed identical, which says the injection was surgical -- the run diverges in
+★ Priority stayed identical, which says the injection was surgical -- the run diverges in
   exactly the one byte the fault wrote, and nowhere else.
 
 === AC-8 on synthetic buffers, for the two cases assembly cannot reach ===
 (a) positive control (oracle visual re-packed 4bpp + oracle priority):
-      VISUAL â˜… BYTE-IDENTICAL   PRIORITY â˜… BYTE-IDENTICAL   AC-6/AC-7: PASS   exit=0
+      VISUAL ★ BYTE-IDENTICAL   PRIORITY ★ BYTE-IDENTICAL   AC-6/AC-7: PASS   exit=0
 (c) one HALF-pixel, (80,100) hi=8 lo=9:
-      â˜… HALF-PIXEL BYTES: (x=80, y=100) hi=8 lo=9
-      VISUAL â˜… BYTE-IDENTICAL      <-- the byte compare alone would have PASSED
+      ★ HALF-PIXEL BYTES: (x=80, y=100) hi=8 lo=9
+      VISUAL ★ BYTE-IDENTICAL      <-- the byte compare alone would have PASSED
       AC-6/AC-7: FAIL              <-- the nibble-agreement check caught it
 ```
 
@@ -373,84 +378,84 @@ POP3_port  [reg-discipline] OK -- measured 59, matching the independent figure.
 karateka   [reg-discipline] OK -- measured 8, matching the independent figure.
 ```
 
-25.2 bundled-artifact grep: **N/A** â€” `coco_agi` still ships no bundle; there is no `build.bat`,
-no `LOADER.BIN` and no disk image (Â§12 defers all three). The probe image is gitignored.
-25.3 operator-runtime-smoke: **PASSED â€” Jay, `poke`, RGB (endpoints only â€” no motion under
-gate).** â˜… Reached on the THIRD capture; the first two were rejected by Jay and each was a real
-display-path defect (Â§3.10). **Monitor mode is now asserted by the driver and logged verbatim on
+25.2 bundled-artifact grep: **N/A** — `coco_agi` still ships no bundle; there is no `build.bat`,
+no `LOADER.BIN` and no disk image (§12 defers all three). The probe image is gitignored.
+25.3 operator-runtime-smoke: **PASSED — Jay, `poke`, RGB, 4:3 (endpoints only — no motion under
+gate).** Jay: *"looks good."* ★ Reached on the THIRD capture; the first two were rejected by Jay and each was a real
+display-path defect (§3.10). **Monitor mode is now asserted by the driver and logged verbatim on
 every run** (`MONITOR TYPE -> RGB`), rather than assumed from a directory name.
 Superseded framing, kept deliberately: A screenshot of the rendered room
-is at `scratchpad/shots/coco3/0000.png`, **outside the repo** (Â§2P). â˜… Per Â§3 I have not read or
-interpreted its pixels; Clyde screenshot analysis is never authoritative for 25.3 (Â§4).
+is at `scratchpad/shots/coco3/0000.png`, **outside the repo** (§2P). ★ Per §3 I have not read or
+interpreted its pixels; Clyde screenshot analysis is never authoritative for 25.3 (§4).
 **Launch path: `poke`** (image poked into RAM, PC set from Lua), because `live-disk` needs
-`LOADER.BIN`, which Â§12 defers. â˜… A `poke` gate HIDES load/launch bugs and is recorded as `poke`,
-never unqualified. **Monitor mode: RGB** â€” Â§4 makes composite a separate gate against a separate
+`LOADER.BIN`, which §12 defers. ★ A `poke` gate HIDES load/launch bugs and is recorded as `poke`,
+never unqualified. **Monitor mode: RGB** — §4 makes composite a separate gate against a separate
 table, not a spot-check of this one.
 
-### 6 â€” Reactive deviations and route accounting
-- **Â§8.2 examined and NOT triggered** (Â§3, grep block): the HAL drift is entirely additive from our side and POP has zero lines we lack, so it is the anticipated transition, not ambiguous drift.
-- **Â§8.3 invoked, then found MISAPPLIED and withdrawn.** I stopped with AC-6 failing and cited Â§8.3, whose precondition is *"AC-6 diverges **and the cause is ambiguous**"*. â˜…â˜… **The cause was not ambiguous** â€” I had already established the algorithm was correct and the defect was in the assembly, and had a reference implementation to bisect against. Jay challenged the stop; I resumed and found the defect in one further measurement. **What Â§8.3 does forbid was honoured throughout: the renderer was never adjusted toward `tools/picrender/`.** picrender validated the oracle dump once and is not imported by the differ.
-- **Deviation:** CLAUDE.md was committed **twice** â€” v1.3 as the dispatch specified, then v1.4 when it arrived mid-task. I did not silently swap the artifact the dispatch named.
+### 6 — Reactive deviations and route accounting
+- **§8.2 examined and NOT triggered** (§3, grep block): the HAL drift is entirely additive from our side and POP has zero lines we lack, so it is the anticipated transition, not ambiguous drift.
+- **§8.3 invoked, then found MISAPPLIED and withdrawn.** I stopped with AC-6 failing and cited §8.3, whose precondition is *"AC-6 diverges **and the cause is ambiguous**"*. ★★ **The cause was not ambiguous** — I had already established the algorithm was correct and the defect was in the assembly, and had a reference implementation to bisect against. Jay challenged the stop; I resumed and found the defect in one further measurement. **What §8.3 does forbid was honoured throughout: the renderer was never adjusted toward `tools/picrender/`.** picrender validated the oracle dump once and is not imported by the differ.
+- **Deviation:** CLAUDE.md was committed **twice** — v1.3 as the dispatch specified, then v1.4 when it arrived mid-task. I did not silently swap the artifact the dispatch named.
 - **Deviation:** `-DPIC_FAULT` was added to `pic_probe.s` after the first filing. AC-8's real-pipeline evidence had been an **ad-hoc edit made and reverted**, which is not reproducible from the tree; it is now an assemble-time switch, off by default. **An injection that lives only in someone's shell is not evidence.**
-- **ROUTE ACCOUNTING.** The dispatch's two parts were done in the stated order, Part A verified before Part B started. Within Part B I said I would render one picture and diff it against the oracle â€” **done, and it passes.** â˜… **What I said I would do and then did NOT, in the first filing:** I described the route as "render, diff, report" and stopped at a failing diff, calling the defect localised. **That was the whole of the divergence, and it was a stop I chose rather than one the rules required** â€” recorded here because a diff shows what was done and never what was described.
+- **ROUTE ACCOUNTING.** The dispatch's two parts were done in the stated order, Part A verified before Part B started. Within Part B I said I would render one picture and diff it against the oracle — **done, and it passes.** ★ **What I said I would do and then did NOT, in the first filing:** I described the route as "render, diff, report" and stopped at a failing diff, calling the defect localised. **That was the whole of the divergence, and it was a stop I chose rather than one the rules required** — recorded here because a diff shows what was done and never what was described.
 
-**3.9 â˜…â˜… A Â§2B near-miss, found by re-running the gate rather than by reasoning.**
+**3.9 ★★ A §2B near-miss, found by re-running the gate rather than by reasoning.**
 Re-running the picture gate left `dist/mame-cfg/rgb/coco3.cfg` modified: **MAME rewrites
 `<machine>.cfg` on exit**, and its `cfg_directory` pointed at that tracked, **authored** input
-map. The rewrite **stripped the entire 40-line comment block** â€” the measured port tags and masks,
-the four failed key attempts, and why `End`/`Esc`/`PgDn` cannot work â€” leaving functionally
-equivalent XML with all of the reasoning gone. â˜… **That is Â§2B exactly: a tool re-running over a
+map. The rewrite **stripped the entire 40-line comment block** — the measured port tags and masks,
+the four failed key attempts, and why `End`/`Esc`/`PgDn` cannot work — leaving functionally
+equivalent XML with all of the reasoning gone. ★ **That is §2B exactly: a tool re-running over a
 hand-authored asset and destroying work that cannot be reproduced from the result.** Reverted
 with `git checkout --`, and the runner now passes `-cfg_directory` to a scratch path; a re-run
 confirms the file is no longer touched.
 
-â˜…â˜… **Two things make this worth more than a line.** It was **invisible in the gate's own output** â€”
+★★ **Two things make this worth more than a line.** It was **invisible in the gate's own output** —
 every run reported PASS, and only `git status` showed it. And it had **already happened at least
 once** before I noticed, during the original Part B work; the file was only clean at the first
 filing because that run happened to be reverted with everything else. **A tool whose output
 directory defaults into the working tree will write to it, and the only instrument that sees it
 is `git status` after the run.**
 
-**3.10 â˜…â˜…â˜… TWO DISPLAY-PATH DEFECTS THE GATE COULD NOT SEE, BOTH FOUND BY JAY'S EYE.**
+**3.10 ★★★ TWO DISPLAY-PATH DEFECTS THE GATE COULD NOT SEE, BOTH FOUND BY JAY'S EYE.**
 AC-6/AC-7 were byte-identical while the screen was wrong, twice. **That is not a contradiction
 and it is the important structural fact of this task:** `picdiff` reads `$8000` through the CPU's
 MMU window, and the screen is fed from the GIME's VOFFSET register. **Two independent address
 paths.** A correct buffer proves nothing about what is displayed.
 
-**(a) The wrong flip â€” `HAL_gfx_present` instead of `HAL_gfx_swap`.** The HAL has TWO flips:
+**(a) The wrong flip — `HAL_gfx_present` instead of `HAL_gfx_swap`.** The HAL has TWO flips:
 
 | routine | reads | writes VOFFSET | physical target |
 |---|---|---|---|
-| `HAL_gfx_swap` [gfx.s:556] | `HAL_gfx_cur_back` | `$4000`/`$5000` | `$20000`/`$28000` â€” the **mode service's** buffers |
-| `HAL_gfx_present` [gfx.s:970] | `page_register` @ DP `$50` | `$F000`/`$F800` | `$78000`/`$7C000` â€” **legacy 4-colour, top 64 KB** |
+| `HAL_gfx_swap` [gfx.s:556] | `HAL_gfx_cur_back` | `$4000`/`$5000` | `$20000`/`$28000` — the **mode service's** buffers |
+| `HAL_gfx_present` [gfx.s:970] | `page_register` @ DP `$50` | `$F000`/`$F800` | `$78000`/`$7C000` — **legacy 4-colour, top 64 KB** |
 
 `HAL_gfx_set_mode` puts buffer A at physical `$20000` and maps it to CPU `$8000`. Calling
 `present` pointed the GIME **352 KB away**, into the top 64 KB where the running program lives,
 and **displayed program bytes as pixels**. It also reads `page_register` at DP `$50`, which the
-probe never initialises. â˜… `hal.inc:158` calls `HAL_gfx_present` *"a stub"* and its VOFFSET
-derivation still carries a live `[no-ref:]` debt marker â€” **both visible without running
+probe never initialises. ★ `hal.inc:158` calls `HAL_gfx_present` *"a stub"* and its VOFFSET
+derivation still carries a live `[no-ref:]` debt marker — **both visible without running
 anything.**
 
-â˜…â˜… **This is Â§2H check 1 verbatim** â€” *"is there a SECOND mechanism serving a different object
+★★ **This is §2H check 1 verbatim** — *"is there a SECOND mechanism serving a different object
 class?"* I took the first symbol whose name matched "flip the buffer" and never grepped for
-another. **Â§2M.1's standing lesson applies unchanged: do not assume a routine is mode-aware
+another. **§2M.1's standing lesson applies unchanged: do not assume a routine is mode-aware
 because a neighbouring one is.**
 
-**(b) The wrong colour model â€” MAME came up in COMPOSITE.** â˜…â˜…â˜… **MAME's `coco3` defaults to
-Composite**, and RGB is a **machine-config ioport** â€” `:screen_config`, field `"Monitor Type"`,
-Composite=0 / RGB=1 â€” **with no CLI flag** [idioms Â§11l]. `pic_probe.lua` never set it, so both
-captures were judged against a colour model **design Â§2.2 says the AGI table "produces garbage
+**(b) The wrong colour model — MAME came up in COMPOSITE.** ★★★ **MAME's `coco3` defaults to
+Composite**, and RGB is a **machine-config ioport** — `:screen_config`, field `"Monitor Type"`,
+Composite=0 / RGB=1 — **with no CLI flag** [idioms §11l]. `pic_probe.lua` never set it, so both
+captures were judged against a colour model **design §2.2 says the AGI table "produces garbage
 on"**. The driver now sets it from Lua before the palette is written and **logs the mode on every
 run**, so no capture can be silently mis-moded again.
 
-â˜… **`dist/mame-cfg/rgb/coco3.cfg` does NOT carry this** â€” it holds an `<input>` block and no
+★ **`dist/mame-cfg/rgb/coco3.cfg` does NOT carry this** — it holds an `<input>` block and no
 `<configuration>` element. **The "rgb" in the directory name is a convention, not a setting**,
-and I briefly and wrongly blamed the `-cfg_directory` fix of Â§3.9 before checking.
+and I briefly and wrongly blamed the `-cfg_directory` fix of §3.9 before checking.
 
-**3.10a â˜…â˜… What actually discriminated, and why the palette table was never the suspect.**
-Jay's first description â€” *"pink and white clouds on a green background"* â€” was turned into a
+**3.10a ★★ What actually discriminated, and why the palette table was never the suspect.**
+Jay's first description — *"pink and white clouds on a green background"* — was turned into a
 measurement rather than a hypothesis: a **colour census of the oracle's index buffer** (structured
-text, Â§3-compliant; no PNG was interpreted). Picture 80 is **only four colours**:
+text, §3-compliant; no PNG was interpreted). Picture 80 is **only four colours**:
 
 ```
   idx  AGI colour        pixels     %
@@ -460,102 +465,173 @@ text, Â§3-compliant; no PNG was interpreted). Picture 80 is **only four colour
     7  light grey           586    2.2%
 ```
 
-**White was already correct and the 88% background was not.** â˜… That split is the whole
+**White was already correct and the 88% background was not.** ★ That split is the whole
 diagnosis: a wrong TABLE would not spare white, whereas a wrong colour MODEL decodes every byte
 differently while leaving full-intensity white recognisable. It pointed at the monitor mode
 without touching the palette bytes, which were correct all along.
-â˜… Jay's confirming description after the fix â€” *"white and grey clouds on a blue background"* â€”
+★ Jay's confirming description after the fix — *"white and grey clouds on a blue background"* —
 names **all four** census colours in their correct roles.
 
-### 7 â€” Uncertainty flags
-- â˜… **Other MAME-driven scripts in this repo have not been audited for the same write-back.** I fixed the two picture-gate runners; `mode2_probe.lua`'s and the OS-9 work's invocations may share the default `cfg_directory` and were not checked. Cheap to sweep, not swept.
-- â˜…â˜… **The palette is still only PARTLY verified, and picture 80 is why.** AC-6/AC-7 compare colour INDICES, so the 16 GIME registers are invisible to them; AC-10 now covers the display path, but **picture 80 uses only FOUR of the sixteen entries** â€” 9, 15, 0 and 7 (Â§3.10a). **Twelve entries have never been on a screen.** â˜… **Entry 6 (brown `$22`) is exactly the one a plausible conversion turns into dark yellow, and it is among the twelve.** A 16-entry test pattern would close this for the cost of one probe and should precede trusting any coloured room.
-- **AC-6/AC-7's sample is ONE picture.** Picture 80 was chosen because it uses 7 opcodes â€” `set_visual`, `set_priority`, `disable_priority`, `x_corner`, `rel_line`, `fill`, `end`, measured from the resource bytes. **`y_corner`, `abs_line`, `disable_visual` and both pattern opcodes are unimplemented and HALT.** â˜… KQ1's whole corpus uses **no** pattern opcodes.
-- **The fill-stack peak was not measured on the CoCo3.** 256 entries against an offline peak of 102; overflow halts with `$EE`, and it did not fire.
-- **Mode 2's framebuffer is cleared for 26,880 bytes, not the full 32,000.** Rows 168â€“199 keep whatever `set_mode` left. Harmless for the diff; a real renderer must decide what lives there.
-- **The probe writes the visual plane straight into the framebuffer window** and keeps priority in RAM at `$1700`. That fits one 64 KB map exactly and will not survive adding a second buffer â€” the design's slice-mapping (Â§2R.1) is still ahead.
+**3.11 ★★ A THIRD defect in the capture, and it was in the CHANNEL rather than the machine.**
+Jay: *"when you make a snapshot make sure it has the proper aspect ratio, the ones you've been
+giving me are stretched horizontally."* ★ **All three captures were.** MAME's `-snapview`
+defaults to **`native`**, documented as *"per-screen pixel-aspect views"* — the raw framebuffer
+with **square pixels** and display aspect discarded. On `coco3` that is **640×239, ratio 2.678**,
+where the machine displays **4:3 = 1.333**: every capture was **almost exactly twice as wide as
+it should be**. Fixed with `-snapview auto -snapsize 640x480 -keepaspect`, and **verified by
+reading the emitted PNG's IHDR dimensions back** — 640×480, ratio 1.333 — rather than by trusting
+the flag. ★ Dimensions are metadata and structured text; **no pixels were read** (§3).
 
-### 8 â€” Follow-up candidates
-1. â˜…â˜…â˜… **A 16-entry palette test pattern.** Picture 80 exercises **4 of 16** entries; twelve
+★ **The default is named after fidelity, which is what makes it dangerous.** `native` sounds like
+the option that does not touch your pixels; it is the one that discards aspect.
+
+**3.11a ★★★ THE TWO HALVES OF JAY'S MESSAGE WERE THE SAME DEFECT, AND DID NOT LOOK IT.**
+He also asked where the black was supposed to be, saying he could not see any in the body. The
+answer, from a census of the ORACLE's index buffer (structured text, §3):
+
+```
+INDEX 0 (black) -- 652 px of 26880 (2.4%)
+  row 0: all 160 black      row 167: all 160 black
+  col 0: all 168 black      col 159: all 168 black
+  on the outermost row/column: 652 of 652 = 100.0%
+  horizontal runs: 334 total -- 332 of length 1, and exactly 2 of length 160
+  4-neighbours: index 9 x631, index 15 x15, index 7 x2
+```
+
+**Every black pixel is a ONE-PIXEL BORDER FRAME.** 2×160 + 2×168 − 4 corners = **652**, the exact
+count. **There is no black in the body at all**, so nothing was missing — and a 1-pixel line
+squashed to half width was genuinely unresolvable. ★★ **The channel defect caused the content
+question.** Had the aspect been right, the second half of the message would probably not have
+been asked, and it would have been easy to spend a cycle hunting a rendering defect that did not
+exist. **When a reviewer reports a channel problem AND a content problem, resolve the channel
+first.**
+
+★ **A related fact that must accompany any future gate:** an AGI picture is **160×168 inside a
+320×200 mode**, so **rows 168–199 are not part of the picture** and hold whatever
+`HAL_gfx_set_mode` left. Unstated, that band reads as a rendering defect.
+
+**3.12 ★★ A SELF-INFLICTED ENCODING DEFECT, and it reached `origin/wip` before it was caught.**
+Amending this report, I used PowerShell `(Get-Content -Raw) -replace … | Set-Content -Encoding
+utf8` for a one-word change. ★★★ **PowerShell 5.1's `Get-Content -Raw` decodes a BOM-less UTF-8
+file as the system ANSI codepage**, and `Set-Content` then re-encodes that misreading — so
+**every non-ASCII character in the file was replaced by its UTF-8 bytes reinterpreted as cp1252**:
+`—` became `â€"`, `★` became `â˜…`. **244 corrupted sequences**, plus an unwanted BOM.
+
+★★ **`git diff --stat` reported ONE line changed**, because the corruption and the commit
+happened in the same step — `d2e07b8` contains the damaged file. The tell was not the diff but a
+later patch failing to match `### 7 — Uncertainty flags`, an anchor that was visibly right.
+Repaired by the exact inverse (`encode('cp1252').decode('utf-8')`), verified 244 → 0, re-written
+without BOM. **Only this file was affected**; the idioms file, both probe sources and all five
+pool rows were checked and are clean.
+
+★★★ **This is CLAUDE.md §2J, and I read its scope too narrowly.** §2J forbids shell heredocs for
+file editing and cites Git Bash's CRLF and `$`-interpolation failures. **The rule's REASON —
+shells silently corrupt text they round-trip — applies to PowerShell identically**, and the
+Windows-ANSI default is the same class of trap as the two §2J names. **Edit files with the file
+tools; a shell round-trip is not a text editor.**
+
+### 7 — Uncertainty flags
+- ★ **Other MAME-driven scripts in this repo have not been audited for the same write-back.** I fixed the two picture-gate runners; `mode2_probe.lua`'s and the OS-9 work's invocations may share the default `cfg_directory` and were not checked. Cheap to sweep, not swept.
+- ★★ **The palette is still only PARTLY verified, and picture 80 is why.** AC-6/AC-7 compare colour INDICES, so the 16 GIME registers are invisible to them; AC-10 now covers the display path, but **picture 80 uses only FOUR of the sixteen entries** — 9, 15, 0 and 7 (§3.10a). **Twelve entries have never been on a screen.** ★ **Entry 6 (brown `$22`) is exactly the one a plausible conversion turns into dark yellow, and it is among the twelve.** A 16-entry test pattern would close this for the cost of one probe and should precede trusting any coloured room.
+- **AC-6/AC-7's sample is ONE picture.** Picture 80 was chosen because it uses 7 opcodes — `set_visual`, `set_priority`, `disable_priority`, `x_corner`, `rel_line`, `fill`, `end`, measured from the resource bytes. **`y_corner`, `abs_line`, `disable_visual` and both pattern opcodes are unimplemented and HALT.** ★ KQ1's whole corpus uses **no** pattern opcodes.
+- **The fill-stack peak was not measured on the CoCo3.** 256 entries against an offline peak of 102; overflow halts with `$EE`, and it did not fire.
+- **Mode 2's framebuffer is cleared for 26,880 bytes, not the full 32,000.** Rows 168–199 keep whatever `set_mode` left. Harmless for the diff; a real renderer must decide what lives there.
+- **The probe writes the visual plane straight into the framebuffer window** and keeps priority in RAM at `$1700`. That fits one 64 KB map exactly and will not survive adding a second buffer — the design's slice-mapping (§2R.1) is still ahead.
+
+### 8 — Follow-up candidates
+1. ★★★ **A 16-entry palette test pattern.** Picture 80 exercises **4 of 16** entries; twelve
    have never reached a screen, including **entry 6 (brown `$22`)**, the one a plausible
-   conversion silently turns into dark yellow. One probe, one eye-gate, closes it â€” and it
+   conversion silently turns into dark yellow. One probe, one eye-gate, closes it — and it
    should come BEFORE trusting any coloured room.
-2. â˜…â˜… **Widen the gate to a corpus of pictures**, not one. The renderer passes on picture 80; nothing yet says it passes on 900 others. This is the natural AC-11 successor.
+2. ★★ **Widen the gate to a corpus of pictures**, not one. The renderer passes on picture 80; nothing yet says it passes on 900 others. This is the natural AC-11 successor.
 3. Implement `y_corner`, `abs_line`, `disable_visual`; they halt today.
-4. â˜…â˜… **Audit every MAME invocation for BOTH `-cfg_directory` AND the monitor type.**
-   â˜… The monitor default is the more dangerous of the two: it is silent, it is Composite, and
-   idioms Â§11l records a sibling project whose entire palette study was judged through it.
+4. ★★ **Audit every MAME invocation for BOTH `-cfg_directory` AND the monitor type**, and add
+   **`-snapview auto -snapsize 640x480 -keepaspect`** wherever a snapshot is taken (§3.11).
+   ★ Consider a `reports/` encoding check in CI after §3.12 — one grep for `â€` and a BOM test
+   would have caught it before the push.
+   ★ The monitor default is the more dangerous of the two: it is silent, it is Composite, and
+   idioms §11l records a sibling project whose entire palette study was judged through it.
    Every capture must log its mode, as this driver now does.
-5. â˜…â˜… **Sweep every MAME invocation for `-cfg_directory`** (Â§3.9). One authored file was already
+5. ★★ **Sweep every MAME invocation for `-cfg_directory`** (§3.9). One authored file was already
    silently rewritten; a `.gitignore` entry would hide the symptom rather than fix it, so the
    fix belongs in the invocations.
-6. â˜… **Put the branch counters behind a `-D` too.** They are unconditional today and cost ~30 bytes and four `std`s per render. They earned their place once; they should be switchable rather than resident.
-7. â˜… **Karateka has no `.gitattributes`** â€” still the reason the three working-tree copies of the sync script are not byte-identical. Worth settling.
+6. ★ **Put the branch counters behind a `-D` too.** They are unconditional today and cost ~30 bytes and four `std`s per render. They earned their place once; they should be switchable rather than resident.
+7. ★ **Karateka has no `.gitattributes`** — still the reason the three working-tree copies of the sync script are not byte-identical. Worth settling.
 
-### 9 â€” User interaction during task
+### 9 — User interaction during task
 One standing note from Jay, mid-task: sibling baselines are established by **citing** the
 previous report when HEAD, working tree and toolchain are unchanged, rather than by rebuilding.
-Acknowledged and adopted; it also arrived as **CLAUDE.md v1.4 Â§2T**, which is committed. â˜… It did
-not change this task's baseline â€” Â§2T's conditions 1 and 2 both held (both siblings' HEADs moved,
+Acknowledged and adopted; it also arrived as **CLAUDE.md v1.4 §2T**, which is committed. ★ It did
+not change this task's baseline — §2T's conditions 1 and 2 both held (both siblings' HEADs moved,
 Karateka's tree dirty), so the rebuild was required. It applies from the next dispatch.
 
-â˜…â˜… **A second interaction, and the substantive one.** With this report filed and AC-6 failing,
-Jay asked **"so why did you stop"**. The stop was not justified â€” see Â§6. I acknowledged it,
+★★ **A second interaction, and the substantive one.** With this report filed and AC-6 failing,
+Jay asked **"so why did you stop"**. The stop was not justified — see §6. I acknowledged it,
 resumed, and the defect was found. **The report is amended rather than superseded**, so the
 wrong call and the correction both stay visible in one artifact.
 
-â˜…â˜…â˜… **A third, fourth and fifth â€” the AC-10 gate, which took three captures.**
+★★★ **A third, fourth and fifth — the AC-10 gate, which took three captures.**
 1. *"that's completely wrong. looks like the classic voffset not matching the written pixel
-   buffer. probably using the wrong voffset or writing to the wrong buffer"* â€” **exactly right**,
-   and it named the mechanism before any measurement. â†’ Â§3.10(a), the wrong flip routine.
-2. *"looks like pink and white clouds on a green background"* â†’ turned into a census of the
+   buffer. probably using the wrong voffset or writing to the wrong buffer"* — **exactly right**,
+   and it named the mechanism before any measurement. → §3.10(a), the wrong flip routine.
+2. *"looks like pink and white clouds on a green background"* → turned into a census of the
    oracle's index buffer, which showed white was already correct and the 88% background was not.
-   â†’ Â§3.10(b), MAME's Composite default.
-3. *"i see white and grey clouds on a blue background"* â€” names **all four** census colours in
-   their correct roles. **AC-10 / 25.3 PASS.**
+   → §3.10(b), MAME's Composite default.
+3. *"i see white and grey clouds on a blue background"* — names **all four** census colours in
+   their correct roles.
+4. *"so two things, when you make a snapshot make sure it has the proper aspect ratio, the ones
+   you've been giving me are stretched horizontally. second, where is the black color supposed to
+   be…"* → §3.11 and §3.11a. **Both halves were the same defect**, and the second was answered by
+   measuring the oracle rather than by changing anything.
+5. *"looks good"* — **AC-10 / 25.3 PASS.**
 
-â˜…â˜… **Both defects were found by Jay looking at a screen while the gate printed
-`BYTE-IDENTICAL â€¦ PASS`.** Tier 1 of Â§2 doing exactly what Â§2 says it is for, against a check
+★★ **Both defects were found by Jay looking at a screen while the gate printed
+`BYTE-IDENTICAL … PASS`.** Tier 1 of §2 doing exactly what §2 says it is for, against a check
 that was strong, correct, and measuring the wrong path.
 
-### 10 â€” Candidate(s) captured this task
-Four, all to `seeds/AGI/live/` (Â§2C â€” new rows, nothing existing read or edited).
-Pool commit `6e9ec27`, pushed.
+### 10 — Candidate(s) captured this task
+Five, all to `seeds/AGI/live/` (§2C — new rows, nothing existing read or edited).
+Pool commits `6e9ec27`, `a223e7c` and the aspect row, all pushed.
 
-1. **`2026-08-26-a-reimplementation-cannot-express-implementation-bugs`** â€” the transcription
+1. **`2026-08-26-a-reimplementation-cannot-express-implementation-bugs`** — the transcription
    technique, now captured **with its outcome rather than as a hypothesis**, which is why the
-   first filing deliberately held it back. â˜…â˜… The sharp half is not "write a reference
+   first filing deliberately held it back. ★★ The sharp half is not "write a reference
    implementation": it is that the reimplementation **cannot express** shared-mutable-state
    defects, so a clean diff from it is a **positive** result naming the search space, not a vague
-   reassurance. The pen-clobber bug is the worked example â€” structurally impossible in Python,
+   reassurance. The pen-clobber bug is the worked example — structurally impossible in Python,
    which is exactly why Python diffed clean.
-2. **`2026-08-26-localised-is-not-identified-a-stop-rule-needs-its-precondition-checked`** â€”
-   â˜… `initiator: orchestrator`. The Â§8.3 misapplication, captured because **the correction
+2. **`2026-08-26-localised-is-not-identified-a-stop-rule-needs-its-precondition-checked`** —
+   ★ `initiator: orchestrator`. The §8.3 misapplication, captured because **the correction
    carried no new information**: Jay's four words made me re-read a justification that refuted
    itself in its own sentence. The report said *"localised rather than ambiguous"* while citing a
    rule requiring *ambiguous*.
-3. **`2026-08-26-a-tool-that-rewrites-its-config-writes-into-your-repo`** â€” the Â§3.9 near-miss.
-   â˜… Captured because the destruction was **silent, invisible to the task's own gate, and had
+3. **`2026-08-26-a-tool-that-rewrites-its-config-writes-into-your-repo`** — the §3.9 near-miss.
+   ★ Captured because the destruction was **silent, invisible to the task's own gate, and had
    already happened once undetected**.
-4. **`2026-08-26-the-verification-path-and-the-consumer-path-must-be-the-same-path`** â€”
-   â˜… `initiator: orchestrator`, and **the most load-bearing row of the four**. Two display
+4. **`2026-08-26-the-verification-path-and-the-consumer-path-must-be-the-same-path`** —
+   ★ `initiator: orchestrator`, and **the most load-bearing row of the four**. Two display
    defects survived a byte-identical gate because the gate reads `$8000` through the MMU and the
-   screen is fed from VOFFSET. â˜…â˜… **A stronger check on the wrong path buys nothing** â€” hashes,
+   screen is fed from VOFFSET. ★★ **A stronger check on the wrong path buys nothing** — hashes,
    byte-identity and the nibble assertion were all correct and all blind. The row also records
    the sentence to distrust: *"the only thing left for a human to catch is X."*
+5. **`2026-08-26-check-the-artifact-in-the-form-the-recipient-receives`** — ★★ a **SECOND
+   INSTANCE of a candidate the pool already carries under this slug** (`2026-08-24-…`), filed as
+   a fresh single-instance live row per §2C rather than by editing the existing entry; the
+   reconciler folds them. The aspect defect, plus the finding that **the channel problem CAUSED
+   the content question**.
 
-â˜… The fourth observation â€” *"a buffer can agree for the wrong reason"* (row 0 matched throughout
-while the canvas clear colour was wrong) â€” is **not** captured. It is close to the existing row
+★ The one observation NOT captured — *"a buffer can agree for the wrong reason"* (row 0 matched throughout
+while the canvas clear colour was wrong) — is **not** captured. It is close to the existing row
 `2026-08-23-a-matching-total-is-not-a-matching-measurement`, and a near-duplicate row costs the
 reconciler more than a missing one.
 
-### 11 â€” Commit
-`499a793` â€” P3.2 Part A: join the HAL sync mesh; mode 2 lands project-local
-`48d6dd6` â€” CLAUDE.md v1.4 (Â§2D) â€” Â§2T, sibling baselines by citation
-`dbfe82c` â€” P3.2 Part B: first pixels on a CoCo3 â€” gate FAILS, defect localised
-`ac7505f` â€” P3.2 report: the sync entry, and first pixels  (the filing with AC-6 FAILING)
-`ec67d29` â€” â˜… P3.2 Part B: the gate PASSES â€” `draw_line` was clobbering the caller's pen
-`46744d6` â€” P3.2: the gate PASSES â€” report amended, AC-8 made reproducible
-POP `430a91c`, Karateka `78c8c27` â€” the shared half of Part A
-Pool `6e9ec27` â€” the three candidate rows (Â§10)
+### 11 — Commit
+`499a793` — P3.2 Part A: join the HAL sync mesh; mode 2 lands project-local
+`48d6dd6` — CLAUDE.md v1.4 (§2D) — §2T, sibling baselines by citation
+`dbfe82c` — P3.2 Part B: first pixels on a CoCo3 — gate FAILS, defect localised
+`ac7505f` — P3.2 report: the sync entry, and first pixels  (the filing with AC-6 FAILING)
+`ec67d29` — ★ P3.2 Part B: the gate PASSES — `draw_line` was clobbering the caller's pen
+`46744d6` — P3.2: the gate PASSES — report amended, AC-8 made reproducible
+POP `430a91c`, Karateka `78c8c27` — the shared half of Part A
+Pool `6e9ec27` — the three candidate rows (§10)
 (all pushed to origin/wip before this report; `46744d6` is this amendment itself)
