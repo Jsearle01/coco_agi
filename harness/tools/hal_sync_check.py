@@ -58,7 +58,11 @@ import pathlib
 
 # Sibling map. DERIVED, not configured — this is what keeps the two copies of this
 # file byte-identical so it can check itself.
-SIBLINGS = {'POP3_port': 'karateka_coco3', 'karateka_coco3': 'POP3_port'}
+# ★★ PARTICIPANTS, not pairs. A 1:1 dict was correct for two repos and silently wrong for
+# three -- it can only ever name ONE sibling, so a third participant would be compared by
+# nobody while appearing to pass. "Everyone but me" is DERIVED below, so adding a fourth repo
+# is one list entry and no logic change.
+PARTICIPANTS = ['POP3_port', 'karateka_coco3', 'coco_agi']
 
 # The shared kernel source. Compared file-by-file; missing on BOTH sides is fine,
 # missing on ONE side is drift (unless declared POP-local below).
@@ -71,7 +75,20 @@ SHARED = ['src/hal.inc',
           'harness/tools/hal_sync_check.py']          # <-- checks itself
 
 # Sanctioned per-project files (see note 5 above).
-PROJECT_LOCAL = {'src/hal/coco3-dsk/hal_globals.s'}
+# ★★ PER-REPO, and keyed by repo name rather than read from a per-repo constant. The script
+# is in its own SHARED list and compares ITSELF, so a value that differed between copies would
+# be drift by definition -- the table is identical everywhere and only the lookup differs.
+#
+# hal_globals.s is project-local in every participant, but for DIFFERENT reasons, and the
+# reasons matter to whoever edits it next:
+#   POP       DP allocations + its own gfx_mode_table (POP-HAL-01)
+#   karateka  DP allocations; no table, it does not take the mode service
+#   coco_agi  DP allocations + its own table carrying the 320x200x16 mode
+PROJECT_LOCAL = {
+    'POP3_port':      {'src/hal/coco3-dsk/hal_globals.s'},
+    'karateka_coco3': {'src/hal/coco3-dsk/hal_globals.s'},
+    'coco_agi':       {'src/hal/coco3-dsk/hal_globals.s'},
+}
 
 GUARD_DIRECTIVES = ('ifdef', 'endc', 'else')
 
@@ -129,6 +146,11 @@ def normalise(path):
     return body, exports
 
 
+def project_local(repo_name):
+    """The files repo_name is allowed to diverge on. Unknown repo -> nothing is local."""
+    return PROJECT_LOCAL.get(repo_name, set())
+
+
 def compare(a_root, b_root, a_name, b_name):
     drift = []
     for rel in SHARED:
@@ -136,7 +158,10 @@ def compare(a_root, b_root, a_name, b_name):
         if not pa.exists() and not pb.exists():
             continue
         if not pa.exists() or not pb.exists():
-            if rel in PROJECT_LOCAL:
+            # ★ Project-local for EITHER side excuses the asymmetry. Checking only one side's
+            # list would report drift the moment two participants declared the same file local,
+            # which is exactly the normal case for hal_globals.s.
+            if rel in project_local(a_name) or rel in project_local(b_name):
                 continue
             missing = a_name if not pa.exists() else b_name
             drift.append((rel, f'present in one repo, MISSING in {missing}'))
@@ -166,27 +191,48 @@ def compare(a_root, b_root, a_name, b_name):
 def main():
     here = pathlib.Path(__file__).resolve().parents[2]
     mine = here.name
-    sibling_name = SIBLINGS.get(mine)
-    if sibling_name is None:
+    if mine not in PARTICIPANTS:
         print(f'[hal-sync] WARNING: unrecognised repo "{mine}" -- check SKIPPED')
         return 0
-    sibling = here.parent / sibling_name
-    # Graceful skip. A structurally impossible check must never block a legitimate
-    # build, or it gets ripped out of build.bat and enforces nothing thereafter.
-    if not (sibling / 'src' / 'hal').is_dir():
-        print(f'[hal-sync] WARNING: sibling repo not found at {sibling} '
-              f'-- HAL-sync check SKIPPED')
+
+    # ★ "Everyone but me", derived. With three participants this is two comparisons, and a
+    # fourth repo costs one list entry rather than a logic change.
+    others = [p for p in PARTICIPANTS if p != mine]
+
+    drift, checked, skipped = [], [], []
+    for other in others:
+        other_root = here.parent / other
+        # ★★ GRACEFUL SKIP, PER PAIR. With two participants an absent sibling meant nothing
+        # could be checked; with three, one absent repo must not suppress the pair that IS
+        # present. A structurally impossible check must never block a legitimate build, or it
+        # gets ripped out of build.bat and enforces nothing thereafter -- but it must also not
+        # skip MORE than the part that is impossible.
+        if not (other_root / 'src' / 'hal').is_dir():
+            skipped.append(other)
+            continue
+        checked.append(other)
+        drift.extend((other, rel, why)
+                     for rel, why in compare(here, other_root, mine, other))
+
+    for other in skipped:
+        print(f'[hal-sync] WARNING: {other} not found at {here.parent / other} '
+              f'-- that PAIR skipped')
+
+    if not checked:
+        print('[hal-sync] WARNING: no participant available to compare against '
+              '-- HAL-sync check SKIPPED')
         return 0
-    drift = compare(here, sibling, mine, sibling_name)
+
     if not drift:
-        print(f'[hal-sync] OK -- HAL source aligned with {sibling_name} '
+        print(f'[hal-sync] OK -- HAL source aligned with {", ".join(checked)} '
               f'({len(SHARED)} files compared, EOL/guard/export-placement normalised)')
         return 0
+
     print('[hal-sync] *** HAL DRIFT -- BUILD BLOCKED ***')
-    print(f'[hal-sync] {mine} vs {sibling_name}')
-    for rel, why in drift:
+    for other, rel, why in drift:
+        print(f'[hal-sync] {mine} vs {other}')
         print(f'[hal-sync]   {rel}: {why}')
-    print('[hal-sync] The HAL is ONE kernel in two copies. Reconcile the two files, '
+    print('[hal-sync] The HAL is ONE kernel in several copies. Reconcile the files, '
           'then rebuild.')
     return 1
 

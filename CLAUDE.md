@@ -1,7 +1,14 @@
 # CLAUDE.md — AGI Interpreter → CoCo3 Project (Clyde standing rules)
-## Working Agreement v1.2 (forked from POP3_port CLAUDE.md v1.1)
-**Version:** 1.2
+## Working Agreement v1.3 (forked from POP3_port CLAUDE.md v1.1)
+**Version:** 1.3
 **Instantiates:** CODM v0.7. Where this doc and v0.7 overlap, v0.7 governs; this doc adds AGI invariants.
+
+**Changelog v1.2 → v1.3 (2026-08-26, from T-P0-010 and POP-HAL-01).** ★★★ **§2G's "read-only /
+copy-and-adapt / no build-time dependency / never an automatic sync" wording was inherited from POP's
+v1.1 and is STALE** — all four are false of the current tree. **§2M already had it right**; §2G now
+agrees with it. ★★ **The byte-identity rule's scope corrected**: POP ships **six DECB files plus
+`probe.dmk`**, not "three prod artifacts", and `build.bat` writes **125 files**. ★ **§2M gains the
+mode-table seam** — shared mechanism, project-local data. No other rule changed.
 
 **Changelog v1.1 → v1.2 (2026-08-24, from T-P0-002's verdict).** ★ **§2H's two line-count figures
 corrected against the pin** — `op_cmd.cpp` is **2,483** not 2,540, and the engine is **30,066** lines not
@@ -244,10 +251,17 @@ against the tree. Bypass = failed verdict.
 | **POP** | **the architecture oracle.** MMU cost, GIME modes, the page flip, save-under, blocks-vs-bytes, the disk cost model, DMK interleave. Design spec §1.3 tabulates what it is authoritative on. |
 | **Karateka** | the original substrate, and a **HAL co-client** whose build must keep working (§2M). |
 
-- **Read-only for content.** Never modify a sibling's scene logic, sprite content, behavioural models or
+- **Read-only for CONTENT.** Never modify a sibling's scene logic, sprite content, behavioural models or
   game data. **Reuse the SUBSTRATE, not the game.**
-- ★★ **The HAL is the exception and it is NOT read-only — it is SYNCHRONISED.** See §2M. This is the one
-  place a change to `coco_agi` is a change to both siblings.
+- ★★★ **The HAL is NOT read-only and NOT copied — it is SYNCHRONISED, and POP HAS a build-time
+  dependency on it.** `hal_sync_check.py` runs inside `build.bat` and **fails the build on drift.** See
+  §2M.
+  > ★★ **POP's own CLAUDE.md §2G still says "read-only", "copy-and-adapt, don't depend", "POP has no
+  > build-time dependency on it", and "back-ports are never an automatic sync". ALL FOUR ARE FALSE of the
+  > current tree** [POP-HAL-01 §3.1]. **Stale, not contradicted** — the bridge arrived at `dd1cec4` P2.4,
+  > after that text was written.
+  ★ **Third instance of the same error class** (with X-33 and AD-28): **a document describing how
+  something ARRIVED, read as describing how it is MAINTAINED.**
 - **Confirm each reuse for AGI** — reuse the mechanism, but verify the constant for AGI. **AGI is 16-colour
   and both siblings are 4-colour**; a constant that transferred between POP and Karateka may not transfer
   here.
@@ -418,14 +432,21 @@ contents.** Exports are compared as a **set**, independent of placement.
    the mechanism that lets identical source assemble differently.**
 4. **New AGI-only exports go in `hal_globals.s`** or arrive in all three trees together. **An AGI-only
    export in a shared file is drift even when guarded.**
-5. ★★ **ENTRY IS AT P3, NOT AT REPO CREATION.** `compare()` skips a file missing on BOTH sides but reports
+5. ★★★ **THE MODE TABLE IS PROJECT-LOCAL — shared mechanism, project-local data.** `gfx_mode_table` and
+   `GFX_MODE_MAX` live in `hal_globals.s` (PROJECT_LOCAL); the mode service **code** stays in `gfx.s`
+   (SHARED). ★ **A project may add a mode without touching any shared file** [POP-HAL-01, landed
+   2026-08-26]. **This exists because POP ASSEMBLES the table**: a 7-byte row shifted 27 artifacts and
+   made §1.4's byte-identity rule unsatisfiable for the one change D-13 required.
+   ★ **A project that defines `HAL_GFX_MODE_SERVICE` but supplies no table will not assemble** — a
+   documented requirement, not a guard.
+6. ★★ **ENTRY IS AT P3, NOT AT REPO CREATION.** `compare()` skips a file missing on BOTH sides but reports
    drift when it is missing on ONE. **Adding `coco_agi` to `SIBLINGS` before its HAL exists reads as ten
    files `MISSING in coco_agi` and BLOCKS BOTH SIBLINGS' BUILDS.** Until P3, `coco_agi` has no `src/hal/`,
    no sync call in `build.bat`, and the siblings continue as a two-party check.
-6. **Joining requires three edits to the script, landed in all three repos simultaneously:** `SIBLINGS`
+7. **Joining requires three edits to the script, landed in all three repos simultaneously:** `SIBLINGS`
    from a 1:1 dict to a participant list with "everyone but me" derived; `PROJECT_LOCAL` from a flat set
    to a per-repo mapping; graceful skip made per-pair.
-7. ★ **Graceful skip must survive.** *A structurally impossible check must never block a legitimate build,
+8. ★ **Graceful skip must survive.** *A structurally impossible check must never block a legitimate build,
    or it gets ripped out and enforces nothing thereafter.* With three participants a partial checkout is
    normal: compare what is present, warn on the rest, never block.
 
