@@ -60,6 +60,10 @@ FB_BASE         equ     $8000           ; GFX_DB_WINDOW
 PIC_DATA        equ     $1200           ; picture resource, poked in by the MAME side.
                                         ;   $1200..$16EF = 1,264 B; picture 80 is 211 B.
 STATUS          equ     $16F0           ; +0 done sentinel, +1 bad opcode / $EE stack overflow
+CNT_VERT        equ     $16F2           ; DIAGNOSTIC: draw_line vertical-branch entries
+CNT_HORIZ       equ     $16F4           ;             horizontal-branch entries
+CNT_DIAG        equ     $16F6           ;             diagonal-branch entries
+CNT_PIX         equ     $16F8           ;             put_pixel writes to the visual plane
 
                 org     $0800
 * ═══════════════════════════════════════════════════════════════════
@@ -71,6 +75,11 @@ probe_entry:
                 lda     #GFX_MODE_320x200x16    ; = 2, by contract name not literal
                 jsr     HAL_gfx_set_mode        ; clears both buffers, loads mode 2's palette
 
+                ldd     #0                      ; DIAGNOSTIC counters
+                std     CNT_VERT
+                std     CNT_HORIZ
+                std     CNT_DIAG
+                std     CNT_PIX
                 jsr     pal_load                ; ★ AGI's 16 EGA colours, from a TABLE
                 jsr     vis_clear               ; visual plane = 15 (white)
                 jsr     pri_clear               ; priority plane = 4 (red)
@@ -78,6 +87,13 @@ probe_entry:
 
                 lda     #$A5                    ; sentinel LAST: a partial run is visible
                 sta     done_flag
+* ★ The rendered picture is in the BACK buffer; the display shows the front one. The flip is
+* assemble-time optional and sits AFTER the sentinel, because the MAME side reads $8000 the
+* moment the sentinel appears and HAL_gfx_present REMAPS that window -- a gate run must never
+* race a remap. Screenshot build: -DPIC_PRESENT. Gate build: omit it.
+                ifdef   PIC_PRESENT
+                jsr     HAL_gfx_present
+                endc
 probe_halt:     bra     probe_halt
 
 * ═══════════════════════════════════════════════════════════════════
@@ -198,6 +214,11 @@ put_pixel:
                 pshs    b
                 ora     ,s+                     ; ★ colour in BOTH nibbles = the pixel doubling
                 sta     ,x
+                pshs    d
+                ldd     CNT_PIX
+                addd    #1
+                std     CNT_PIX
+                puls    d
 pp_pri:         lda     pri_on
                 beq     pp_out
                 lda     pri_color

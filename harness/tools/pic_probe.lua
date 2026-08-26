@@ -93,7 +93,19 @@ _G._pp_notifier = emu.add_machine_frame_notifier(function()
             for i = 0, PLANE - 1 do pr:write(string.char(prog:read_u8(PRI_BASE + i))) end
             pr:close()
 
+            local function rd16(a) return prog:read_u8(a) * 256 + prog:read_u8(a + 1) end
+            logf("DIAGNOSTIC counters: vertical=%d horizontal=%d diagonal=%d visual_writes=%d",
+                 rd16(0x16F2), rd16(0x16F4), rd16(0x16F6), rd16(0x16F8))
             logf("wrote fb.bin and pri.bin (%d bytes each)", PLANE)
+
+            -- ★ AC-10 only, and env-gated so a gate run is byte-for-byte the run it was.
+            -- The screenshot goes to Jay, never into the repo (§2P: a rendered room is
+            -- copyrighted content).
+            if os.getenv("PIC_SNAP") then
+                for _ = 1, 4 do emu.wait_next_frame() end   -- let the flip reach the screen
+                manager.machine.video:snapshot()
+                logf("snapshot taken")
+            end
             _G._pp_done = true
             manager.machine:exit()
         elseif _G._pp_frames > 1800 then

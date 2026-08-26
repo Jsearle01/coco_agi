@@ -13,7 +13,25 @@
 * in:  ln_x1, ln_y1, ln_x2, ln_y2   (bytes)
 * uses cur_x / cur_y as the pen position, so put_pixel needs no arguments.
 
+* ★★★ draw_line USES cur_x/cur_y AS ITS PLOTTING CURSOR, because put_pixel reads them -- but
+* the CALLERS use the same two bytes as the persistent PEN position. Without the save/restore
+* below, a line leaves the pen wherever the walk ended, and the VERTICAL/HORIZONTAL branches
+* SWAP their endpoints first, so the walk ends at the OTHER end from the one the caller set.
+*
+* Measured: a synthetic picture of 23 stacked (dx=0, dy=-7) rel_line steps entered the vertical
+* branch 23 times and wrote 185 pixels -- but only EIGHT distinct pixels existed, rows 160-167,
+* drawn 23 times over. 23 x 8 + 1 = 185 exactly. Each step recomputed from a pen the previous
+* line had left at the swapped end, so every segment redrew the first one.
+*
+* ★ This is the defect that made the whole picture wrong, and it is invisible in the algorithm:
+* the Python transcription passes x1,y1,x2,y2 as PARAMETERS and keeps the caller's pen in
+* separate locals, so it cannot express the bug. Sharing the two bytes was an assembly-level
+* decision, and this is what it cost.
 draw_line:
+                lda     cur_x                   ; ★ the caller's pen -- restored on every exit
+                pshs    a
+                lda     cur_y
+                pshs    a
 * --- clip both endpoints to the picture, as the oracle does before walking ---
                 lda     ln_x1
                 cmpa    #PIC_W
@@ -42,6 +60,11 @@ dl_y2ok:
                 cmpa    ln_x2
                 bne     dl_nvert
                 sta     cur_x
+                pshs    d
+                ldd     CNT_VERT
+                addd    #1
+                std     CNT_VERT
+                puls    d
                 lda     ln_y1
                 cmpa    ln_y2
                 bls     dl_vord
@@ -64,6 +87,11 @@ dl_nvert:       lda     ln_y1
                 cmpa    ln_y2
                 bne     dl_diag
                 sta     cur_y
+                pshs    d
+                ldd     CNT_HORIZ
+                addd    #1
+                std     CNT_HORIZ
+                puls    d
                 lda     ln_x1
                 cmpa    ln_x2
                 bls     dl_hord
@@ -80,10 +108,19 @@ dl_hlp:         sta     cur_x
                 bhs     dl_done
                 inca
                 bra     dl_hlp
-dl_done:        rts
+dl_done:        puls    a
+                sta     cur_y
+                puls    a
+                sta     cur_x
+                rts
 
 * --- the general case -------------------------------------------
 dl_diag:
+                pshs    d
+                ldd     CNT_DIAG
+                addd    #1
+                std     CNT_DIAG
+                puls    d
                 lda     #1
                 sta     dl_stepx
                 lda     ln_x2
@@ -175,7 +212,11 @@ dl_nox:
                 beq     dl_end
                 lda     dl_i
                 bpl     dl_lp
-dl_end:         rts
+dl_end:         puls    a
+                sta     cur_y
+                puls    a
+                sta     cur_x
+                rts
 
 ln_x1           fcb     0
 ln_y1           fcb     0
