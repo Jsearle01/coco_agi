@@ -1,7 +1,11 @@
 # CLAUDE.md — AGI Interpreter → CoCo3 Project (Clyde standing rules)
-## Working Agreement v1.3 (forked from POP3_port CLAUDE.md v1.1)
-**Version:** 1.3
+## Working Agreement v1.4 (forked from POP3_port CLAUDE.md v1.1)
+**Version:** 1.4
 **Instantiates:** CODM v0.7. Where this doc and v0.7 overlap, v0.7 governs; this doc adds AGI invariants.
+
+**Changelog v1.3 → v1.4 (2026-08-26, Jay).** ★ **§2T ADDED — sibling baselines are established by
+CITING the previous report when the inputs are unchanged**, rather than by rebuilding. No other rule
+changed.
 
 **Changelog v1.2 → v1.3 (2026-08-26, from T-P0-010 and POP-HAL-01).** ★★★ **§2G's "read-only /
 copy-and-adapt / no build-time dependency / never an automatic sync" wording was inherited from POP's
@@ -640,6 +644,69 @@ made three times in one session:
 2. ★★ **The public repo is not the working tree.** Gitignored and unpushed material is real.
 3. **When a claim about a sibling is load-bearing, state which ref and which scope it was measured at** —
    in the report, not in the Orchestrator's head.
+
+---
+
+## 2T. ★★ Sibling baselines — verify the INPUTS, do not re-derive the outputs
+
+**When a dispatch asks for a POP/Karateka baseline "before any change", do NOT rebuild them if nothing
+about them has moved since the last dispatch recorded the hashes.**
+
+★ **Artifacts are a function of their inputs.** Establishing the inputs are unchanged establishes the
+outputs are too, and costs seconds instead of two full builds:
+
+| verify | against |
+|---|---|
+| POP and Karateka **HEAD + branch** | the previous report |
+| **`git status` clean** in both | — |
+| the **recorded artifact hashes** | quoted from that report, by filename |
+| ★ the **toolchain** | lwasm version, and anything vendored |
+
+**Then cite the previous report as the baseline** — filename, section, hashes — rather than reproducing
+them from a build.
+
+★★★ **THE AFTER-BUILD IS STILL REQUIRED IN FULL.** This changes how the baseline is ESTABLISHED, not
+whether the comparison happens. **The rule under test is that your change did not move a sibling's
+artifacts; that needs a real build on the after side.**
+
+### 2T.1 Rebuild anyway when
+
+1. **Either sibling's HEAD has moved.** ★ POP moved between T-P0-010's copy and T-P0-011 — **this is not
+   hypothetical.**
+2. **Either working tree is dirty.**
+3. ★★ **The toolchain changed.** **A build is a function of its tools as much as its source** — X-32 is
+   the precedent, where `scummvm.pin` asserted *"no C++ toolchain"* for four tasks while a complete
+   MinGW-w64 sat vendored in a sibling tree.
+4. **The previous report did not record the hashes**, or recorded a different file set.
+5. ★ **Your judgement says so.** **A rebuild is never wrong, only sometimes wasteful.**
+
+### 2T.2 Why this is not a weakening
+
+★★ **It makes the provenance chain checkable.** A rebuilt baseline says *"these were the hashes just
+now"* — unverifiable by a reader. A citation says *"these were the hashes in report X, and here is the
+evidence nothing has moved since."*
+
+★ **And it removes a real hazard**: a baseline rebuilt at the top of a task can be taken *after* an
+earlier step already touched something — which is why T-P0-010 §2 had to spell out *"before any change"*.
+**A citation cannot be contaminated that way.**
+
+★★★ **Unchanged either way: a baseline taken after the change proves nothing** [L-30].
+
+### 2T.3 In the report
+
+Under **25.1**, in place of the before-build output:
+
+```
+Baseline cited from <report filename> §<n>:
+  POP <artifact hashes>   karateka <artifact hashes>
+POP HEAD <sha> unchanged, clean.  karateka HEAD <sha> unchanged, clean.
+lwasm <version> unchanged.
+```
+
+Then the after-build output in full, and the comparison.
+
+★ **If you cite and the after-build differs, say plainly whether you believe the CHANGE caused it or the
+BASELINE was stale — and if there is any doubt, rebuild the before side and report both.**
 
 ---
 
