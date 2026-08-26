@@ -376,7 +376,8 @@ resumed, and the defect was found. **The report is amended rather than supersede
 wrong call and the correction both stay visible in one artifact.
 
 ### 10 — Candidate(s) captured this task
-Two, both to `seeds/AGI/live/` (§2C — new rows, nothing existing read or edited):
+Three, all to `seeds/AGI/live/` (§2C — new rows, nothing existing read or edited).
+Pool commit `6e9ec27`, pushed.
 
 1. **`2026-08-26-a-reimplementation-cannot-express-implementation-bugs`** — the transcription
    technique, now captured **with its outcome rather than as a hypothesis**, which is why the
@@ -390,7 +391,6 @@ Two, both to `seeds/AGI/live/` (§2C — new rows, nothing existing read or edit
    carried no new information**: Jay's four words made me re-read a justification that refuted
    itself in its own sentence. The report said *"localised rather than ambiguous"* while citing a
    rule requiring *ambiguous*.
-
 3. **`2026-08-26-a-tool-that-rewrites-its-config-writes-into-your-repo`** — the §3.9 near-miss.
    ★ Captured because the destruction was **silent, invisible to the task's own gate, and had
    already happened once undetected**.
@@ -406,5 +406,7 @@ reconciler more than a missing one.
 `dbfe82c` — P3.2 Part B: first pixels on a CoCo3 — gate FAILS, defect localised
 `ac7505f` — P3.2 report: the sync entry, and first pixels  (the filing with AC-6 FAILING)
 `ec67d29` — ★ P3.2 Part B: the gate PASSES — `draw_line` was clobbering the caller's pen
+`46744d6` — P3.2: the gate PASSES — report amended, AC-8 made reproducible
 POP `430a91c`, Karateka `78c8c27` — the shared half of Part A
-(all pushed to origin/wip before this report)
+Pool `6e9ec27` — the three candidate rows (§10)
+(all pushed to origin/wip before this report; `46744d6` is this amendment itself)
