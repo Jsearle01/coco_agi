@@ -85,6 +85,19 @@ probe_entry:
                 jsr     pri_clear               ; priority plane = 4 (red)
                 jsr     pic_render              ; interpret the picture
 
+* ★★ AC-8 -- PROVE THE GATE CAN FAIL, ON THE REAL PIPELINE.
+* A gate that has only ever reported PASS has not been shown to be a gate. -DPIC_FAULT flips
+* both nibbles of ONE pixel, (37,42), AFTER a correct render; picdiff.py --expect-fail then
+* requires that the diff CATCH it at exactly that offset. Assemble-time and off by default, so
+* a gate run cannot accidentally carry it and so the check is REPRODUCIBLE rather than an
+* ad-hoc edit -- an injection that lives only in someone's shell is not evidence.
+* offset = 42*160 + 37 = 6757.
+                ifdef   PIC_FAULT
+                lda     FB_BASE+6757
+                eora    #$11                    ; both nibbles: still a legal doubled pixel
+                sta     FB_BASE+6757
+                endc
+
                 lda     #$A5                    ; sentinel LAST: a partial run is visible
                 sta     done_flag
 * ★ The rendered picture is in the BACK buffer; the display shows the front one. The flip is
