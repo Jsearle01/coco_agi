@@ -200,3 +200,20 @@ RESOURCE.SFX
 # That negation lives in the games/** block above and is not overridden here: no pattern in
 # this section matches a .tsv, a .md or a .json.
 # ═══════════════════════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ORACLE RUNTIME DROPPINGS (P4.2)
+#
+# ★ ScummVM writes its configuration file into the PROCESS WORKING DIRECTORY. Since P4.2 the
+# oracle is a native Windows binary that gets invoked from wherever the shell happens to be,
+# so running it with the repo as CWD drops a scummvm.ini here. Observed exactly that way.
+#
+# It arrived empty, but a populated one records GAME PATHS pointing into the user's corpus.
+# That is not game data (§2P) and is not dangerous, but it is machine-local state that has no
+# business being tracked, and the file reappears every time the oracle is run from the repo.
+# Ignored rather than deleted-and-forgotten, because deleting it does not stop it coming back.
+#
+# ★ oracle_dump.sh is NOT the source of these: it cd's to the output directory first, which is
+# precisely why it does that. Ad-hoc invocations are the source.
+scummvm.ini
+scummvm.log
