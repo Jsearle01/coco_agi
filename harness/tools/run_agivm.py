@@ -9,9 +9,14 @@ Usage:
         [--version 0x2917] [--cycles 800] [--seed 12345] [--platform dos]
 """
 import argparse
+import io
 import pathlib
 import sys
 import traceback
+
+# ★ The Windows console defaults to cp1252 and cannot encode the ★ this project's reports use.
+# Without this the runner dies AFTER doing all its work, losing the output it just computed.
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
@@ -68,6 +73,26 @@ def main():
             status = 3
         print()
         print("cycles emitted : %d" % tr.count)
+
+    # ── AC-5: motion mode coverage. Modes REACHED and modes NOT reached, both named.
+    MODE_NAMES = {0: "normal", 1: "wander", 2: "follow.ego", 3: "move.obj", 4: "ego(mouse)"}
+    print()
+    print("motion modes reached (checkMotion calls):")
+    if vm.motion_modes_seen:
+        for m in sorted(vm.motion_modes_seen):
+            print("   %-12s (%d) : %d" % (MODE_NAMES.get(m, "UNKNOWN"), m,
+                                          vm.motion_modes_seen[m]))
+    else:
+        print("   none")
+    missing = [MODE_NAMES[m] for m in sorted(MODE_NAMES) if m not in vm.motion_modes_seen]
+    print("   NOT reached this run: %s" % (", ".join(missing) if missing else "none"))
+    print("   ★ every mode above is implemented; an unhandled mode raises rather than")
+    print("     silently no-opping (motion.py check_motion).")
+
+    # ── AC-6: compositing cost
+    print()
+    print("compositing cost (blit.py -- cost model, not pixels):")
+    print(vm.blit_cost.report())
 
     if vm.modelled_calls:
         top = sorted(vm.modelled_calls.items(), key=lambda kv: -kv[1])[:10]

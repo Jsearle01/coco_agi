@@ -351,22 +351,26 @@ def cmdSetViewF(vm, p):
 
 @_impl()
 def cmdSetLoop(vm, p):
-    _obj(vm, p[0]).loop = p[1]
+    from . import objects
+    objects.set_loop(vm, _obj(vm, p[0]), p[1])
 
 
 @_impl()
 def cmdSetLoopF(vm, p):
-    _obj(vm, p[0]).loop = vm.get_var(p[1])
+    from . import objects
+    objects.set_loop(vm, _obj(vm, p[0]), vm.get_var(p[1]))
 
 
 @_impl()
 def cmdSetCel(vm, p):
-    _obj(vm, p[0]).cel = p[1]
+    from . import objects
+    objects.set_cel(vm, _obj(vm, p[0]), p[1])
 
 
 @_impl()
 def cmdSetCelF(vm, p):
-    _obj(vm, p[0]).cel = vm.get_var(p[1])
+    from . import objects
+    objects.set_cel(vm, _obj(vm, p[0]), vm.get_var(p[1]))
 
 
 @_impl()
@@ -523,39 +527,52 @@ def cmdStartCycling(vm, p):
 def cmdNormalCycle(vm, p):
     o = _obj(vm, p[0])
     o.cycle = kCycleNormal
-    o.flags |= fCycling
+    if vm.version >= 0x2000:
+        o.flags |= fCycling
 
 
 @_impl()
 def cmdReverseCycle(vm, p):
     o = _obj(vm, p[0])
     o.cycle = kCycleReverse
-    o.flags |= fCycling
+    if vm.version >= 0x2000:
+        o.flags |= fCycling
 
 
 @_impl()
 def cmdEndOfLoop(vm, p):
+    from . import motion
     o = _obj(vm, p[0])
     o.cycle = kCycleEndOfLoop
     o.flags |= (fDontUpdate | fUpdate | fCycling)
+    # ★ setLoopFlag() sets loop_flag AND CLEARS ignore_loop_flag. P4.1 set only the number;
+    # a stale ignore_loop_flag from an earlier motion would then suppress this cycler's flag.
     o.loop_flag = p[1]
-    vm.state.set_flag(p[1], False)
+    o.ignore_loop_flag = False
+    vm.state.set_flag(o.loop_flag, False)
+    motion.cycler_activated(vm, o)
 
 
 @_impl()
 def cmdReverseLoop(vm, p):
+    from . import motion
     o = _obj(vm, p[0])
     o.cycle = kCycleRevLoop
     o.flags |= (fDontUpdate | fUpdate | fCycling)
     o.loop_flag = p[1]
-    vm.state.set_flag(p[1], False)
+    o.ignore_loop_flag = False
+    vm.state.set_flag(o.loop_flag, False)
+    motion.cycler_activated(vm, o)
 
 
 @_impl()
 def cmdCycleTime(vm, p):
+    # ★ BOTH fields take the value: `cycleTime = cycleTimeCount = getVar(varNr)`.
+    # P4.1 set cycleTimeCount to 0 instead, which stalls the cycler for ever -- the update
+    # only advances a counter that is already non-zero, so 0 never decrements to 0. Unreachable
+    # until cycling mattered, and it is exactly why KQ2's flag 33 never fired.
     o = _obj(vm, p[0])
-    o.cycleTime = vm.get_var(p[1])
-    o.cycleTimeCount = 0
+    o.cycleTime = o.cycleTimeCount = vm.get_var(p[1])
 
 
 @_impl()
@@ -589,53 +606,65 @@ def cmdStepTime(vm, p):
     o.stepTimeCount = o.stepTime
 
 
+def _move_obj(vm, obj_nr, move_x, move_y, step_size, move_flag):
+    """Shared body of move.obj / move.obj.v -- they differ only in operand fetch."""
+    from . import motion
+    o = _obj(vm, obj_nr)
+    o.motionType = kMotionMoveObj
+    o.move_x = move_x
+    o.move_y = move_y
+    o.move_stepSize = o.stepSize      # ★ saves the CURRENT step size, before the override
+    o.move_flag = move_flag
+    if step_size != 0:
+        o.stepSize = step_size
+    vm.state.set_flag(o.move_flag, False)
+    o.flags |= fUpdate                # ★ P4.1 omitted this; without it the object is never
+                                      #   active in checkAllMotions and never moves
+    motion.motion_activated(vm, o)
+    if obj_nr == 0:
+        vm.state.player_control = False
+    # ★ AGI 2.272 (ddp, xmas) does NOT call moveObj here. A real per-version difference.
+    if vm.version > 0x2272:
+        motion.motion_move_obj(vm, o)
+
+
 @_impl()
 def cmdMoveObj(vm, p):
-    o = _obj(vm, p[0])
-    o.motionType = kMotionMoveObj
-    o.move_x = p[1]
-    o.move_y = p[2]
-    o.move_stepSize = o.stepSize
-    o.move_flag = p[4]
-    if p[3] != 0:
-        o.stepSize = p[3]
-    vm.state.set_flag(p[4], False)
-    if p[0] == 0:
-        vm.state.player_control = False
+    _move_obj(vm, p[0], p[1], p[2], p[3], p[4])
 
 
 @_impl()
 def cmdMoveObjF(vm, p):
-    o = _obj(vm, p[0])
-    o.motionType = kMotionMoveObj
-    o.move_x = vm.get_var(p[1])
-    o.move_y = vm.get_var(p[2])
-    o.move_stepSize = o.stepSize
-    o.move_flag = p[4]
-    step = vm.get_var(p[3])
-    if step != 0:
-        o.stepSize = step
-    vm.state.set_flag(p[4], False)
-    if p[0] == 0:
-        vm.state.player_control = False
+    _move_obj(vm, p[0], vm.get_var(p[1]), vm.get_var(p[2]),
+              vm.get_var(p[3]), p[4])
 
 
 @_impl()
 def cmdFollowEgo(vm, p):
+    from . import motion
     o = _obj(vm, p[0])
     o.motionType = kMotionFollowEgo
-    o.follow_stepSize = max(p[1], o.stepSize)
+    # ★ transcribed as the oracle writes it: <= keeps the object's own step size
+    if p[1] <= o.stepSize:
+        o.follow_stepSize = o.stepSize
+    else:
+        o.follow_stepSize = p[1]
     o.follow_flag = p[2]
-    o.follow_count = 0xFF
-    vm.state.set_flag(p[2], False)
+    o.follow_count = 255
+    vm.state.set_flag(o.follow_flag, False)
+    o.flags |= fUpdate
+    motion.motion_activated(vm, o)
 
 
 @_impl()
 def cmdWander(vm, p):
+    from . import motion
     o = _obj(vm, p[0])
-    o.motionType = kMotionWander
     if p[0] == 0:
         vm.state.player_control = False
+    o.motionType = kMotionWander
+    o.flags |= fUpdate
+    motion.motion_activated(vm, o)
 
 
 @_impl()

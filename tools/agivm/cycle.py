@@ -17,7 +17,7 @@ The state diff is the instrument that says how far that gets, and it is not fudg
 
 import sys
 
-from . import anim, commands, tests
+from . import blit, commands, motion, objects, tests
 from .dispatch import DispatchTable, OpcodeError, UNIMPLEMENTED
 from .optable import (VM_VAR_CURRENT_ROOM, VM_VAR_PREVIOUS_ROOM,
                       VM_VAR_BORDER_TOUCH_OBJECT, VM_VAR_BORDER_CODE,
@@ -79,6 +79,7 @@ class Vm:
         self.should_quit = False
         self.cycle_nr = 0
         self.modelled_calls = {}
+        self.motion_modes_seen = {}
         self.instruction_counter = 0
 
         self.table = DispatchTable(version, platform, game_id, features)
@@ -91,6 +92,8 @@ class Vm:
         self._last_seconds = 0
 
         self._logic_cache = {}
+        self._view_cache = {}
+        self.blit_cost = blit.BlitCost()
 
     # ── variables ──────────────────────────────────────────────────────────────────────────
     def get_var(self, n):
@@ -164,38 +167,32 @@ class Vm:
             return ""
         return lg.messages[text_nr]
 
-    def set_view(self, obj, view_nr):
-        """view.cpp setView() -> setLoop() -> setCel() -> clipViewCoordinates().
-
-        ★★ setView IS NOT AN ASSIGNMENT. It walks into setCel, which ends in
-        clipViewCoordinates() -- and THAT applies the horizon clamp. This is how KQ1's ego
-        acquires y=37 before logic 0 ever calls get.posn, and a stub that only recorded the
-        view number left the state diff reporting exactly that one difference for 434 cycles.
-
-        ★ DECLARED GAP: loopCount/celCount/xSize/ySize come from the VIEW resource, which this
-        VM does not parse. So:
-          - last.cel / number.of.loops / current.cel read 0 and will diverge;
-          - clipViewCoordinates' two SIZE-dependent clamps cannot fire.
-        For an object at y <= horizon the horizon clamp lands on the same value whatever ySize
-        is (the size clamp would move it to ySize-1, still <= horizon, and the horizon clamp
-        then takes it to horizon+1), so this case is exact rather than approximate. That is
-        specific to y <= horizon and is not a general claim.
-        """
-        obj.view = view_nr
+    def load_view(self, view_nr):
+        """Decode a VIEW resource, cached. ★ P4.1 could not do this and declared the gap;
+        objects.py now depends on real loopCount/celCount/xSize/ySize."""
+        if view_nr not in self._view_cache:
+            from . import view as view_mod
+            raw = self.game.load("VIEW", view_nr)
+            self._view_cache[view_nr] = view_mod.decode_view(
+                raw, version=self.version, view_nr=view_nr)
         self.state.loaded_views.add(view_nr)
-        self.clip_view_coordinates(obj)
+        return self._view_cache[view_nr]
 
-    def clip_view_coordinates(self, o):
-        st = self.state
-        if o.xSize and o.x + o.xSize > 160:
-            o.flags |= fUpdatePos
-            o.x = 160 - o.xSize
-        if o.ySize and o.y - o.ySize + 1 < 0:
-            o.flags |= fUpdatePos
-            o.y = o.ySize - 1
-        if o.y <= st.horizon and not (o.flags & fIgnoreHorizon):
-            o.flags |= fUpdatePos
-            o.y = st.horizon + 1
+    def get_cel(self, obj):
+        """The cel an object currently shows, or None if it has no usable view."""
+        try:
+            v = self.load_view(obj.view)
+        except Exception:                                   # noqa: BLE001
+            return None
+        if obj.loop >= len(v.loops):
+            return None
+        loop = v.loops[obj.loop]
+        if obj.cel >= len(loop.cels):
+            return None
+        return loop.cels[obj.cel]
+
+    def set_view(self, obj, view_nr):
+        objects.set_view(self, obj, view_nr)
 
     def object_get_location(self, n):
         if n < len(self.state.object_rooms):
@@ -315,8 +312,7 @@ class Vm:
         else:
             ego.direction = self.get_var(VM_VAR_EGO_DIRECTION)
 
-        # checkAllMotions() would run here -- motion types (wander/follow/move.obj) are not
-        # implemented, so an object under script-driven motion does not advance. Declared.
+        motion.check_all_motions(self)
 
         st.exit_all_logics = False
         while self.run_logic(0) == 0 and not self.should_quit:
@@ -337,7 +333,9 @@ class Vm:
         st.set_flag(VM_FLAG_RESTORE_JUST_RAN, False)
 
         if st.gfx_mode:
-            anim.update_screen_obj_table(self)
+            objects.update_screen_obj_table(self)
+            # ★ Cost only, no pixels (blit.py). Placed where the oracle composites sprites.
+            self.blit_cost.composite(self, self.cycle_nr - 1)
 
     def reset_controllers(self):
         for i in range(len(self.state.controller_occurred)):

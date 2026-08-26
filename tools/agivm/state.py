@@ -41,7 +41,7 @@ class ScreenObj:
                  "priority", "flags", "direction",
                  "stepSize", "stepTime", "stepTimeCount",
                  "cycleTime", "cycleTimeCount", "cycle", "motionType",
-                 "loop_flag", "wander_count",
+                 "loop_flag", "ignore_loop_flag", "wander_count",
                  "follow_count", "follow_stepSize", "follow_flag",
                  "move_x", "move_y", "move_stepSize", "move_flag")
 
@@ -62,6 +62,9 @@ class ScreenObj:
         self.cycle = 0                 # kCycleNormal
         self.motionType = 0            # kMotionNormal
         self.loop_flag = 0
+        # ★ ScummVM's ScreenObjEntry.ignoreLoopFlag: suppresses the completion flag when a
+        # motion overwrote the cycler's flag field. A §2.1 deviation, reproduced (motion.py).
+        self.ignore_loop_flag = False
         self.wander_count = 0
         self.follow_count = 0
         self.follow_stepSize = 0

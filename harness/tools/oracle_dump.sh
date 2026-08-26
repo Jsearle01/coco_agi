@@ -52,6 +52,17 @@ echo "out      : $OUT_ABS"
 # of the game directory.
 cd "$OUT_ABS"
 
+# ★ ScummVM reads its config from the process working directory, which is this one. Writing the
+# key here is how patch 0006's sweep is switched on without inventing a command-line option.
+# When CEL_DUMP is off we write NOTHING, so a baseline run is bit-for-bit the run it was before
+# patch 0006 existed.
+if [ "$CEL_DUMP" = "1" ]; then
+    printf '[scummvm]\ncoco_view_sweep=true\n' > scummvm.ini
+    echo "cel dump : ON  -- ★ this run's vmstate.txt is NOT a valid baseline"
+else
+    echo "cel dump : off (CEL_DUMP=1 to enable; that run's vmstate is not a baseline)"
+fi
+
 # --auto-detect finds the game in the CWD, so point it at the game by path instead and let
 # ScummVM detect there without us naming a target id we have not pinned yet.
 # ★ DETERMINISM CONTROLS (P4.1). Both are required for a state diff to mean anything; see
@@ -64,6 +75,15 @@ cd "$OUT_ABS"
 #                  drift is INVISIBLE on an idle machine, so its absence is not reassurance.
 SECS=${SECS:-30}
 SEED=${SEED:-12345}
+
+# ★★ CEL_DUMP=1 enables patch 0006's VIEW sweep, which decodes every view so the cel dump is a
+# complete sample. IT CHANGES THE GAME -- measured at P5.1, Kingquest1's flag 20 completes one
+# cycle earlier because the sweep tears down resource state patch 0004 established.
+#
+# So a cel-dump run is a SEPARATE run and its vmstate.txt IS NOT A VALID BASELINE. The oracle
+# is what everything else is diffed against (CLAUDE.md §2O.1); an instrumentation switch that
+# perturbs it must never be on for a run whose state anyone consumes.
+CEL_DUMP=${CEL_DUMP:-0}
 timeout "$SECS" "$SCUMMVM" \
     --path="$GAME_ABS" \
     --auto-detect \
@@ -88,7 +108,11 @@ tail -4 scummvm.log
 # ★ The `|| true` matters for the same reason: under `set -e` a missing .tmp made the test
 # return 1 and killed the script. row24.txt is only produced by patch 0003's probe, so its
 # absence is the NORMAL case and it was aborting the rename of vmstate.txt behind it.
-for t in vmstate.txt row24.txt; do
+# ★ P5.1: cels.txt/cels.bin join the list for exactly the reason the other two are here --
+# Common::DumpFile renames on close, and a timeout-killed process never closes. Forgetting to
+# add a new dump to this list does not error; it silently produces no artifact, which is how
+# the first cel-dump run appeared to succeed while writing nothing.
+for t in vmstate.txt row24.txt cels.txt cels.bin; do
     if [ -f "$t.tmp" ]; then mv "$t.tmp" "$t"; fi
 done || true
 

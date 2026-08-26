@@ -1,0 +1,122 @@
+--- a/engines/agi/view.cpp
++++ b/engines/agi/view.cpp
+@@ -19,12 +19,62 @@
+  *
+  */
+ 
++#include "common/config-manager.h" // coco_agi ORACLE INSTRUMENTATION (P5.1): the gate
++#include "common/file.h"             // coco_agi ORACLE INSTRUMENTATION (P5.1): Common::DumpFile
++
+ #include "agi/agi.h"
+ #include "agi/graphics.h"
+ #include "agi/sprite.h"
+ 
+ namespace Agi {
+ 
++// coco_agi ORACLE INSTRUMENTATION (P5.1) -- decoded VIEW cel dump.
++//
++// Emitted AFTER decodeView() has fully decoded a view, so what lands is the oracle's own
++// rawBitmap: RLE expanded, mirroring already applied, one byte per pixel. That is exactly the
++// buffer tools/agivm/view.py must reproduce.
++//
++// Two files, because hashes alone cannot localise a mismatch and raw bytes alone cannot be
++// summarised:
++//   cels.txt  one line per cel: view loop cel width height clearKey mirrored blobOffset
++//   cels.bin  the concatenated pixel buffers, at the offsets the manifest names
++//
++// ★ Neither is ever committed (CLAUDE.md §2P): a decoded cel is copyrighted game content. They
++// live in the run's output directory and the report carries counts and hashes only.
++// ★★ GATED, LIKE THE SWEEP IN agi.cpp, AND FOR A MEASURED REASON. Gating only the sweep was
++// tried first and was not enough: with the sweep off but this dump still firing for the views
++// the game loads normally, Kingquest1 STILL diverged from the pre-0006 baseline at cycle 185.
++// The whole patch has to be inert unless asked for, so the gate is here too.
++static void oracleDumpCel(int16 viewNr, int16 loopNr, int16 celNr, const AgiViewCel *cel) {
++	if (!(ConfMan.hasKey("coco_view_sweep") && ConfMan.getBool("coco_view_sweep")))
++		return;
++
++	static Common::DumpFile s_celManifest;
++	static Common::DumpFile s_celBlob;
++	static uint32 s_blobOffset = 0;
++
++	if (!s_celManifest.isOpen()) {
++		if (!s_celManifest.open(Common::Path("cels.txt")))
++			return;
++	}
++	if (!s_celBlob.isOpen()) {
++		if (!s_celBlob.open(Common::Path("cels.bin")))
++			return;
++	}
++
++	uint32 size = (uint32)cel->width * (uint32)cel->height;
++
++	Common::String line = Common::String::format("%d %d %d %d %d %d %d %u\n",
++		viewNr, loopNr, celNr, cel->width, cel->height,
++		cel->clearKey, cel->mirrored ? 1 : 0, s_blobOffset);
++	s_celManifest.write(line.c_str(), line.size());
++	s_celManifest.flush();
++
++	s_celBlob.write(cel->rawBitmap, size);
++	s_celBlob.flush();
++	s_blobOffset += size;
++}
++
+ // Apple II V2+ views use different color values.
+ static const byte apple2ViewColorMap[16] = {
+ 	/*00*/ 0x00,
+@@ -289,6 +339,11 @@
+ 				} else {
+ 					unpackViewCelDataAGI256(celData, celCompressedData, celCompressedSize, viewNr);
+ 				}
++				// coco_agi ORACLE INSTRUMENTATION (P5.1): dump the decoded cel. Placed AFTER
++				// the unpack so rawBitmap is populated, and INSIDE the cel loop so loopNr and
++				// celNr are the ones actually being walked -- the mirrored flag is per
++				// (loop, cel) and reading it anywhere else would lose that.
++				oracleDumpCel(viewNr, loopNr, celNr, celData);
+ 				celData++;
+ 			}
+ 		}
+--- a/engines/agi/agi.cpp
++++ b/engines/agi/agi.cpp
+@@ -211,6 +211,42 @@
+ 			rendered++;
+ 		}
+ 		warning("oracle: rendered %d pictures", rendered);
++
++		// coco_agi ORACLE INSTRUMENTATION (P5.1) -- decode EVERY view, so oracleDumpCel() in
++		// view.cpp sees a reproducible, representative sample rather than whatever the first
++		// few seconds of play happened to touch (which under-reports mirrored loops badly --
++		// they cluster in walking sprites).
++		//
++		// ★★ OPT-IN, AND THAT IS NOT OPTIONAL. Measured at P5.1: running this sweep
++		// unconditionally CHANGES THE GAME. Kingquest1's flag 20 completes one cycle earlier
++		// (divergence at cycle 185 instead of 186) against an otherwise byte-identical
++		// pre-sweep oracle. The cause is an interaction with patch 0004, which has already
++		// called loadVolumeResource() for every VIEW; this sweep's unloadResource() then tears
++		// down state 0004 established, and the game behaves differently afterwards.
++		//
++		// The oracle is the BASELINE (CLAUDE.md §2O.1). Instrumentation that changes it is not
++		// instrumentation, it is a different oracle. So the sweep runs only when explicitly
++		// asked for, and a cel-dump run is a SEPARATE run from any run whose vmstate is used.
++		//
++		// Enable by putting `coco_view_sweep=true` in the [scummvm] section of the scummvm.ini
++		// in the process working directory. harness/tools/oracle_dump.sh does this when
++		// CEL_DUMP=1.
++		if (ConfMan.hasKey("coco_view_sweep") && ConfMan.getBool("coco_view_sweep")) {
++			int viewsDecoded = 0;
++			int viewsFailed = 0;
++			for (int16 nr = 0; nr < MAX_DIRECTORY_ENTRIES; nr++) {
++				if (_game.dirView[nr].offset == _EMPTY)
++					continue;
++				if (loadResource(RESOURCETYPE_VIEW, nr) != errOK) {
++					viewsFailed++;
++					continue;
++				}
++				unloadResource(RESOURCETYPE_VIEW, nr);
++				viewsDecoded++;
++			}
++			warning("oracle: decoded %d views (%d failed)", viewsDecoded, viewsFailed);
++			warning("oracle: VIEW SWEEP WAS ACTIVE -- this run's vmstate is NOT a valid baseline");
++		}
+ 	}
+ 
+ 	_keyHoldMode = false;
