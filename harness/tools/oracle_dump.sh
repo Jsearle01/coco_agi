@@ -61,8 +61,14 @@ timeout "$SECS" "$SCUMMVM" \
     --path="$GAME_ABS" \
     --auto-detect \
     --random-seed="$SEED" \
-    > scummvm.log 2>&1
-echo "scummvm exit=$?  (124 = timeout, which is NORMAL: an AGI game does not end by itself)"
+    > scummvm.log 2>&1 || RC=$?
+RC=${RC:-0}
+# ★★ `|| RC=$?` IS LOAD-BEARING, NOT DEFENSIVE NOISE. This script runs under `set -e` and the
+# EXPECTED exit code here is 124 (timeout) -- an AGI game does not end by itself. Without the
+# guard, set -e aborted the script the instant ScummVM was killed, so the rename below never
+# ran and every long-lived dump was left as a .tmp file. Measured at P4.1 on Kingquest1: the
+# script printed its three header lines and stopped, and vmstate.txt.tmp sat there unrenamed.
+echo "scummvm exit=$RC  (124 = timeout, which is NORMAL: an AGI game does not end by itself)"
 tail -4 scummvm.log
 
 # ★ ScummVM's Common::DumpFile writes ATOMICALLY: backends/fs/stdiostream.cpp appends ".tmp"
@@ -72,9 +78,12 @@ tail -4 scummvm.log
 #
 # ★ A RENAME IS NOT A TRANSFORMATION. No byte is read, altered or recomputed here, so §2O.1 is
 # untouched -- this remains ScummVM's output, moved, not ours.
+# ★ The `|| true` matters for the same reason: under `set -e` a missing .tmp made the test
+# return 1 and killed the script. row24.txt is only produced by patch 0003's probe, so its
+# absence is the NORMAL case and it was aborting the rename of vmstate.txt behind it.
 for t in vmstate.txt row24.txt; do
-    [ -f "$t.tmp" ] && mv "$t.tmp" "$t"
-done
+    if [ -f "$t.tmp" ]; then mv "$t.tmp" "$t"; fi
+done || true
 
 echo
 echo "=== dumps produced ==="
