@@ -47,10 +47,20 @@ cd "$OUT_ABS"
 
 # --auto-detect finds the game in the CWD, so point it at the game by path instead and let
 # ScummVM detect there without us naming a target id we have not pinned yet.
+# ★ DETERMINISM CONTROLS (P4.1). Both are required for a state diff to mean anything; see
+# oracle/scummvm.pin [determinism].
+#   --random-seed  pins Common::RandomSource, which otherwise seeds from the time of day.
+#                  Costs nothing for a game that never calls random, and is the difference
+#                  between reproducible and not for one that does.
+#   patch 0005     replaces the wall-clock in-game timer with a virtual clock. WITHOUT IT the
+#                  dump is host-speed dependent and vars 11/72/73 drift under load -- and the
+#                  drift is INVISIBLE on an idle machine, so its absence is not reassurance.
 SECS=${SECS:-30}
+SEED=${SEED:-12345}
 timeout "$SECS" "$SCUMMVM" \
     --path="$GAME_ABS" \
     --auto-detect \
+    --random-seed="$SEED" \
     > scummvm.log 2>&1
 echo "scummvm exit=$?  (124 = timeout, which is NORMAL: an AGI game does not end by itself)"
 tail -4 scummvm.log

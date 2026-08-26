@@ -1,0 +1,79 @@
+--- a/engines/agi/global.cpp
++++ b/engines/agi/global.cpp
+@@ -189,19 +189,48 @@
+ 	_getVarSecondsHeuristicLastInstructionCounter = _instructionCounter;
+ }
+ 
++// coco_agi ORACLE INSTRUMENTATION (P4.1) -- DETERMINISTIC VIRTUAL CLOCK.
++//
++// ★★ WHY THIS EXISTS. The in-game timer is driven by getTotalPlayTime(), i.e. by REAL
++// WALL-CLOCK MILLISECONDS. VM_VAR_SECONDS/MINUTES/HOURS/DAYS (vars 11-14) are computed from
++// it in inGameTimerUpdate() below, so their values depend on how fast the host happened to
++// run. Anything a game's LOGIC derives from them inherits that nondeterminism.
++//
++// Measured, not assumed (P4.1): two runs of the UNMODIFIED oracle over kq4dem, one on an idle
++// machine and one under load, diverge at vars 11, 72 and 73 -- 11 being the clock and 72/73
++// being kq4dem's own script values derived from it. That reproduces the P0.3 finding exactly.
++//
++// ★★ THE ALTERNATIVE WAS TO EXCLUDE 11/72/73 FROM THE STATE DIFF, AND THAT IS THE WRONG
++// TRADE. 72 and 73 are ordinary game variables; excluding them puts real interpreter state
++// permanently outside the gate to work around a harness problem. Removing the nondeterminism
++// at its source keeps them under test. (CLAUDE.md §2O.1 in spirit: fix the harness, never
++// weaken the baseline.)
++//
++// The clock advances 25 ms per main-loop iteration -- exactly the unit cycle.cpp's pacing gate
++// already counts in ("Our cycle counter runs at 25 milliseconds", cycle.cpp) -- so the
++// cycle:time relationship is the one the engine already assumes, now exact instead of
++// approximate. Nothing else about timing behaviour changes.
++//
++// ★ §2.1: this is a DEVIATION FROM THE ORACLE'S OWN BEHAVIOUR, adopted for determinism. It is
++// not a claim about what Sierra's interpreter did. It happens to sit CLOSER to the CoCo3
++// target, whose clock will be driven by a 60 Hz VBL count rather than by a host clock, but
++// that is a convenience and not the justification.
++uint32 g_oracleVirtualMs = 0;
++
+ // In-Game timer, used for timer VM Variables
+ void AgiEngine::inGameTimerReset(uint32 newPlayTime) {
+ 	_lastUsedPlayTimeInCycles = newPlayTime / 50;
+ 	_lastUsedPlayTimeInSeconds = newPlayTime / 1000;
+ 	_playTimeInSecondsAdjust = 0; // no adjust for now
+ 	setTotalPlayTime(newPlayTime);
++	g_oracleVirtualMs = newPlayTime; // coco_agi P4.1: keep the virtual clock consistent
+ 	inGameTimerResetPassedCycles();
+ }
+ void AgiEngine::inGameTimerResetPassedCycles() {
+ 	_passedPlayTimeCycles = 0;
+ }
+ uint32 AgiEngine::inGameTimerGet() {
+-	return getTotalPlayTime();
++	return g_oracleVirtualMs; // coco_agi P4.1: was getTotalPlayTime()
+ }
+ uint32 AgiEngine::inGameTimerGetPassedCycles() {
+ 	return _passedPlayTimeCycles;
+--- a/engines/agi/cycle.cpp
++++ b/engines/agi/cycle.cpp
+@@ -155,6 +155,10 @@
+ 	}
+ }
+ 
++// coco_agi ORACLE INSTRUMENTATION (P4.1): the deterministic virtual clock, defined in
++// global.cpp. Advanced once per main-loop iteration in playGame() below.
++extern uint32 g_oracleVirtualMs;
++
+ // coco_agi ORACLE INSTRUMENTATION (P0.2) -- per-cycle VM state.
+ //
+ // Dumped at cycle ENTRY, which is the state the cycle is about to act on. One line
+@@ -406,6 +410,13 @@
+ 	do {
+ 		processAGIEvents();
+ 
++		// coco_agi ORACLE INSTRUMENTATION (P4.1): advance the deterministic virtual clock by
++		// one 25 ms tick per main-loop iteration. See global.cpp for why the clock is virtual.
++		// This is the unit the pacing gate below already counts in, so the ratio between loop
++		// iterations and interpreted cycles is unchanged -- only its dependence on the host's
++		// speed is removed.
++		g_oracleVirtualMs += 25;
++
+ 		inGameTimerUpdate();
+ 
+ 		byte timeDelay;

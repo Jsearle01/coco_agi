@@ -88,10 +88,21 @@ binary      = ./scummvm
 #   oracle/patches/0001-oracle-room-dump.patch      graphics.h, graphics.cpp, picture.cpp
 #   oracle/patches/0002-oracle-vm-state-dump.patch  cycle.cpp
 #   oracle/patches/0003-oracle-row24-probe-and-lzw-trace.patch   op_cmd.cpp, loader_v3.cpp
+#   oracle/patches/0004-oracle-raw-resource-dump.patch           agi.cpp, op_cmd.cpp
+#   oracle/patches/0005-oracle-deterministic-clock.patch         global.cpp, cycle.cpp
 #
-# Apply from the clone root, in order:
-#   git apply oracle/patches/0001-*.patch oracle/patches/0002-*.patch oracle/patches/0003-*.patch
-# Total: 136 inserted lines, 0 deleted. Nothing existing is modified or removed.
+# ★ 0004 WAS ADDED AT P1.1 AND NOT RECORDED HERE UNTIL P4.1. Found by re-reading this file
+# against the tree rather than trusting it. The list above is now checked against
+# `ls oracle/patches/`, not maintained from memory.
+#
+# Apply from the clone root, IN ORDER (0005 was generated against pin+0001..0004, and its
+# cycle.cpp hunk sits directly above 0002's -- out of order it will not apply):
+#   git apply oracle/patches/0001-*.patch oracle/patches/0002-*.patch \
+#             oracle/patches/0003-*.patch oracle/patches/0004-*.patch \
+#             oracle/patches/0005-*.patch
+# 0001-0004 total 136 inserted lines, 0 deleted. 0005 adds 38 and deletes 1 -- it is the ONLY
+# patch that changes existing behaviour rather than purely adding instrumentation, and that is
+# called out in [determinism] below.
 #
 # ★★ THE PATCH FILES MUST STAY LF. .gitattributes pins *.patch to eol=lf because `git apply`
 # matches context BYTE FOR BYTE; a CRLF checkout fails on every hunk (measured at P0.2).
@@ -139,6 +150,48 @@ regenerate  = python harness/tools/game_manifest.py <corpus-dir> --out games/man
 # bytes, so host-side decompression is not an option.
 #
 # The other two v3-shaped titles are demo3 and vtgadv.
+
+[determinism]
+
+# ★★ ESTABLISHED AT P4.1 BY MEASUREMENT, and it is the precondition for every state diff.
+#
+# THE PROBLEM. The in-game timer ran on wall-clock milliseconds (getTotalPlayTime), so
+# VM_VAR_SECONDS/MINUTES/HOURS/DAYS (vars 11-14) depended on host speed, and any LOGIC value
+# derived from them inherited that. Measured on kq4dem, unmodified oracle, 20 s, idle run vs
+# a run under 3x-nproc load: vars 11, 72 and 73 diverge (first at cycles 38, 39, 39).
+# 11 is the clock; 72 and 73 are kq4dem script values that track it. This reproduces the
+# P0.3 finding exactly and explains it.
+#
+# ★ TWO IDLE RUNS DO NOT SHOW THIS. On an unloaded machine the pacing gate keeps cycle N
+# pinned to wall time N/40 and the pair is byte-identical, which looks like determinism and is
+# not. THE LOAD IS WHAT MAKES THE COUPLING OBSERVABLE. A determinism check run only on an idle
+# machine cannot fail and therefore establishes nothing (backlog L-23).
+#
+# THE FIX, AND WHY IT IS NOT AN EXCLUSION LIST. The obvious move is to exclude 11/72/73 from
+# the diff. That is wrong: 72 and 73 are ordinary game variables, and excluding them puts real
+# interpreter state permanently outside the gate to work around a harness defect. Patch 0005
+# instead removes the nondeterminism at source -- a virtual clock advancing 25 ms per main-loop
+# iteration, which is the unit the pacing gate already counts in.
+#
+# RESULT, same idle-vs-loaded comparison, 807 common cycles:
+#   ALL 256 vars and ALL 256 flags identical. Exclusion set: EMPTY.
+#
+# ★ AND THE FAILURE MODE IS STILL REACHABLE, so that is a result and not a vacuum: over the
+# run var 11 takes 22 distinct values (72 and 73 track it), and the live surface -- state that
+# actually changes -- is 6 vars {0,11,30,70,72,73} and 3 flag bytes {0,5,28}.
+#
+# ★★ §2.1 STATUS: patch 0005 is a DEVIATION FROM THE ORACLE, adopted for determinism. It is
+# NOT a claim about Sierra's interpreter. It happens to sit closer to the CoCo3 target, whose
+# clock will be a 60 Hz VBL count rather than a host clock, but that is a convenience, not the
+# justification. It is the only patch that changes existing behaviour.
+#
+# ★ RNG. Common::RandomSource seeds from the time of day unless ConfMan has "random_seed"
+# (common/random.cpp:42-54), and --random-seed=N is a first-class CLI option
+# (base/commandLine.cpp:187,932). Runs pass --random-seed so a game that calls the random
+# opcode is deterministic too. NOT YET MEASURED: whether kq4dem consumes the RNG at all.
+# The algorithm, if it ever has to be reproduced: xorshift (>>13, <<21, >>11) then
+# (seed * 0xDEADBF03) % (max+1).
+
 
 # ★ SECONDARY SET — NOT FETCHED. Sierra's own DEMOPACK1/2/3 from agi.sierrahelp.com were
 # optional this task (dispatch §3) and were skipped: the primary corpus covers every AC,
