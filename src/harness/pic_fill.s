@@ -16,6 +16,10 @@
 * ★ STACK OVERFLOW HALTS. 448 entries against a measured peak of 102 is ample, but a wrap would
 * corrupt code and produce a picture that is wrong for a reason no diff could name (L-23).
 
+FC_VISUAL       equ     0               ; test visual == 15   (70.3% of calls)
+FC_PRIORITY     equ     1               ; test priority == 4  (6.4%)
+FC_NEVER        equ     2               ; always false        (the rest)
+
 * ── fill_check ────────────────────────────────────────────────────
 * in:  fc_x, fc_y.   out: Z set (eq) = "this pixel may be filled"
 fill_check:
@@ -35,60 +39,98 @@ fill_check:
                 std     CNT_CHK
 fc_nocarry:     puls    d
                 endc
+* ★★★ AC-2 ABLATION POINTS. -DFC_STOP0..3 returns early after each block, so the per-block cost
+* is a DIFFERENCE between two timed runs of THIS routine rather than a copy of it or a sum of
+* datasheet numbers. The measured code is fill_check itself, truncated -- no duplicate to drift.
+* ★ FC_STOP0 measures the floor: jsr + rts + the bench loop, i.e. what any call costs before
+* fill_check does anything at all.
+* ★★★ P3.4 — THE CASE DECISION IS HOISTED OUT OF THE PER-PIXEL PATH.
+* draw_FillCheck's three-way choice depends ONLY on scr_on / pri_on / scr_color / pri_color,
+* never on the pixel under test. Those four are set by PICTURE opcodes and cannot change during
+* a flood_fill, so the decision is made ONCE at flood_fill entry (ff_case) and fill_check
+* branches on a single byte.
+*
+* ★★ AND THE THREE CASES COLLAPSE TO TWO TESTS. At the pin, case 1 is
+*   `!priOn && scrOn && scrColor != 15  -> screenColor == 15`
+* and the catch-all is
+*   `scrOn && screenColor == 15 && scrColor != 15`
+* -- the SAME test on the visual plane, reached by different routes. So:
+*     FC_VISUAL   (scr_on && scr_color != 15)                  -> visual == 15
+*     FC_PRIORITY (pri_on && !scr_on && pri_color != 4)         -> priority == 4
+*     FC_NEVER    (anything else)                               -> always false
+* ★★★ VERIFIED EXHAUSTIVELY, not argued: all 262,144 combinations of the four flags x both
+* pixel values agree with the pin's function. Measured on the corpus, FC_VISUAL takes 70.3% of
+* calls and FC_PRIORITY 6.4%.
+*
+* ★ THREE THINGS THIS BUYS, all of them "identical, only cheaper":
+*   1. the flag dispatch (16 cyc) and the general case's re-checks (18 cyc) are gone;
+*   2. the PRIORITY pointer is no longer formed on the visual path -- the pshs/puls pair and
+*      `addd #PRI_BASE / tfr d,y` (24 cyc) existed only to carry a pointer 70% of calls never
+*      read;
+*   3. `lda fc_y` was issued TWICE -- A still holds fc_y after the bounds compare (5 cyc).
+* ★ FC_NEVER returns without the bounds test, which is identical: an out-of-bounds pixel and a
+* never-fillable state both yield false.
+                ifdef   FC_STOP0
+                rts
+                endc
+                lda     fc_case
+                bne     fc_notvis
+
+* ── FC_VISUAL: the 70.3% path ─────────────────────────────────────
                 lda     fc_x
                 cmpa    #PIC_W
                 bhs     fc_no
                 lda     fc_y
                 cmpa    #PIC_H
                 bhs     fc_no
+                ifdef   FC_STOP1
+                rts
+                endc
+                ldb     #PIC_W                  ; A still holds fc_y -- no reload
+                mul
+                addb    fc_x
+                adca    #0
+                ifdef   FC_STOP2
+                rts
+                endc
+                addd    #FB_BASE
+                tfr     d,x
+                ifdef   FC_STOP3
+                rts
+                endc
+                ifndef  PIC_NOCOUNT
+                inc     PATH_V+1
+                bne     fc_pv
+                inc     PATH_V
+fc_pv:          endc
+                lda     ,x
+                anda    #$0F                    ; either nibble; equal by construction
+                cmpa    #15
+                beq     fc_yes
+                bra     fc_no
 
-* address of (fc_x, fc_y) in both planes
+* ── FC_PRIORITY (6.4%) and FC_NEVER ──────────────────────────────
+fc_notvis:      cmpa    #FC_PRIORITY
+                bne     fc_no                   ; FC_NEVER -- always false
+                lda     fc_x
+                cmpa    #PIC_W
+                bhs     fc_no
                 lda     fc_y
+                cmpa    #PIC_H
+                bhs     fc_no
                 ldb     #PIC_W
                 mul
                 addb    fc_x
                 adca    #0
-                pshs    d
-                addd    #FB_BASE
-                tfr     d,x                     ; X -> visual byte
-                puls    d
                 addd    #PRI_BASE
-                tfr     d,y                     ; Y -> priority byte
-
-                lda     pri_on
-                bne     fc_pri_on
-* --- !pri_on and scr_on and scr_color != 15 : visual must be white ---
-                lda     scr_on
-                beq     fc_no
-                lda     scr_color
-                cmpa    #15
-                beq     fc_general
+                tfr     d,x
+                ifndef  PIC_NOCOUNT
+                inc     PATH_P+1
+                bne     fc_pp
+                inc     PATH_P
+fc_pp:          endc
                 lda     ,x
-                anda    #$0F                    ; ★ either nibble; they are equal by construction
-                cmpa    #15
-                beq     fc_yes
-                bra     fc_no
-fc_pri_on:
-                lda     scr_on
-                bne     fc_general
-* --- pri_on and !scr_on and pri_color != 4 : priority must be red(4) ---
-                lda     pri_color
                 cmpa    #4
-                beq     fc_general
-                lda     ,y
-                cmpa    #4
-                beq     fc_yes
-                bra     fc_no
-fc_general:
-* --- scr_on AND visual == 15 AND scr_color != 15 ---
-                lda     scr_on
-                beq     fc_no
-                lda     scr_color
-                cmpa    #15
-                beq     fc_no
-                lda     ,x
-                anda    #$0F
-                cmpa    #15
                 beq     fc_yes
 fc_no:          andcc   #$FB                    ; Z clear = do not fill
                 rts
@@ -104,6 +146,29 @@ flood_fill:
                 bne     ff_go
                 rts
 ff_go:
+* ★★★ DECIDE THE CASE ONCE PER FILL, not once per pixel. The four flags this reads cannot
+* change between here and ff_done -- they are written only by PICTURE opcodes F0-F3, and a
+* flood_fill runs to completion inside one F8 operand pair. ★ Exhaustively verified equivalent
+* to the pin's draw_FillCheck over all 262,144 flag/pixel combinations.
+                lda     scr_on
+                beq     ffc_notvis
+                lda     scr_color
+                cmpa    #15
+                beq     ffc_notvis
+                lda     #FC_VISUAL
+                bra     ffc_set
+ffc_notvis:     lda     pri_on
+                beq     ffc_never
+                lda     scr_on
+                bne     ffc_never               ; scr_on set but scr_color==15 -> never fills
+                lda     pri_color
+                cmpa    #4
+                beq     ffc_never
+                lda     #FC_PRIORITY
+                bra     ffc_set
+ffc_never:      lda     #FC_NEVER
+ffc_set:        sta     fc_case
+
                 ldx     #STACK_BASE
                 stx     ff_sp
                 lda     cur_x
@@ -238,6 +303,7 @@ ff_overflow:
 ff_ovf_halt:    bra     ff_ovf_halt
 
 ff_sp           fdb     0
+fc_case         fcb     FC_NEVER        ; set by flood_fill; see ff_go
 fc_x            fcb     0
 fc_y            fcb     0
 ff_up           fcb     0

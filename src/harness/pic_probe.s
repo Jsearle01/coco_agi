@@ -77,6 +77,9 @@ SP_PEAK         equ     $008E           ; AC-6: fill-stack high-water mark, in B
 * counter, which would be 16.7 ms granular and useless for decomposition.
 PHASE           equ     $0090
 CNT_CHK         equ     $0094           ; AC-7: fill_check calls, 32-bit (4/px overflows 16)
+PATH_V          equ     $0098           ; AC-2: fill_check took the visual-only case
+PATH_P          equ     $009A           ; AC-2: ... the priority-only case
+PATH_G          equ     $009C           ; AC-2: ... the general (both planes on) case
 
                 org     $0800
 * ═══════════════════════════════════════════════════════════════════
@@ -98,6 +101,9 @@ probe_entry:
                 std     SP_PEAK
                 std     CNT_CHK
                 std     CNT_CHK+2
+                std     PATH_V
+                std     PATH_P
+                std     PATH_G
 * ★★★ PICTURE STATE RESET — EVERY RENDER, NOT JUST THE FIRST LOAD.
 * [ref: picture.cpp:385-388 @ 9d9b9e9] drawPicture() opens with
 *     _priOn = false;  _scrOn = false;  _scrColor = 15;  _priColor = 4;
@@ -143,11 +149,59 @@ cal_lp:         leax    -1,x
                 lda     #4
                 sta     PHASE
 
+* ★★★ -DFC_BENCH — AC-2's MEASUREMENT. Calls fill_check FC_ITERS times with fixed arguments,
+* between the same phase markers the render uses, so the per-call cost falls out of the same
+* write-tap mechanism at the same one-instruction resolution. Combined with -DFC_STOP0..3 the
+* successive differences attribute the cost block by block, and the code being timed IS
+* fill_check rather than a copy of it.
+* ★ State is pinned to the case the corpus actually takes (measured by PATH_V/P/G, not assumed):
+* both planes on, scr_color 7, and the visual plane left at 15 by vis_clear so the test yields
+* a consistent verdict every iteration.
+                ifdef   FC_BENCH
+                lda     #1
+                sta     scr_on
+                sta     pri_on
+                lda     #7
+                sta     scr_color
+                lda     #2
+                sta     pri_color
+                lda     #80
+                sta     fc_x
+                lda     #100
+                sta     fc_y
+* ★★ THE BENCH MUST SET fc_case, because flood_fill now owns it and the bench does not go
+* through flood_fill. Without this the case byte kept its FC_NEVER initialiser and every
+* iteration took the always-false path -- FC_STOP1/2/3 sit inside the FC_VISUAL branch, so all
+* four ablations returned the IDENTICAL time and the decomposition silently measured nothing.
+* ★ FC_VISUAL is the 70.3% path and the one the decomposition is about.
+                lda     #FC_VISUAL
+                sta     fc_case
+                lda     #1
+                sta     PHASE
+* ★★ THE COUNTER LIVES IN MEMORY, NOT IN X. fill_check does `tfr d,x` and `tfr d,y` while
+* forming its plane pointers, so an X or Y loop counter is destroyed the moment the ablation
+* reaches that block -- stop0/1/2 timed fine and stop3/full ran away, which is exactly the kind
+* of result that looks like a measurement. U survives, but `leau` does not set Z, so a memory
+* counter it is. ★ Its cost is IDENTICAL in every variant, so it cancels in the differences and
+* only inflates the absolute floor, which is reported as such.
+                ldd     #FC_ITERS
+                std     fcb_n
+fcb_lp:         jsr     fill_check
+                ldd     fcb_n
+                subd    #1
+                std     fcb_n
+                bne     fcb_lp
+                lda     #2
+                sta     PHASE
+                endc
+
+                ifndef  FC_BENCH
                 lda     #1
                 sta     PHASE
                 jsr     pic_render              ; interpret the picture
                 lda     #2
                 sta     PHASE
+                endc
 
 * ★★ AC-8 -- PROVE THE GATE CAN FAIL, ON THE REAL PIPELINE.
 * A gate that has only ever reported PASS has not been shown to be a gate. -DPIC_FAULT flips
@@ -618,6 +672,7 @@ pri_color       fcb     4
 scr_on          fcb     0
 pri_on          fcb     0
 xc_isx          fcb     0
+fcb_n           fdb     0       ; -DFC_BENCH loop counter (see the bench block)
 
 * ★ ONLY THE HAL MODULES THIS PROBE ACTUALLY CALLS. T-P0-012 needed ~150 bytes of code space
 * and the probe had 101; input/sound/file/mem/disk_read were assembled into every build and

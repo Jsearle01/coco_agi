@@ -49,7 +49,8 @@ end
 os.execute('mkdir "' .. OUTDIR:gsub("/", "\\") .. '" 2>nul')
 local f0 = io.open(OUTDIR .. "/run.log", "w"); if f0 then f0:close() end
 local csv = io.open(OUTDIR .. "/timing.csv", "w")
-csv:write("name,render_s,calib_s,vert,horiz,diag,pixels,fills,spans,sp_peak_bytes,bad_op,checks\n")
+csv:write("name,render_s,calib_s,vert,horiz,diag,pixels,fills,spans,sp_peak_bytes,bad_op," ..
+          "checks,path_v,path_p,path_g\n")
 
 local cpu  = manager.machine.devices[":maincpu"]
 local prog = cpu.spaces["program"]
@@ -131,10 +132,12 @@ local function finish()
     local pixels, fills, spans = rd16(0x0088), rd16(0x008A), rd16(0x008C)
     local peak = rd16(0x008E)
     local checks = rd16(0x0094) * 65536 + rd16(0x0096)   -- 32-bit: 4/px overflows 16
+    -- AC-2: which of draw_FillCheck's three cases did each call take?
+    local pv, pp, pg = rd16(0x0098), rd16(0x009A), rd16(0x009C)
 
-    csv:write(string.format("%s,%.9f,%.9f,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
+    csv:write(string.format("%s,%.9f,%.9f,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
         cur, render, calib, rd16(0x0082), rd16(0x0084), rd16(0x0086),
-        pixels, fills, spans, peak, bad, checks))
+        pixels, fills, spans, peak, bad, checks, pv, pp, pg))
     csv:flush()
     logf("%-18s render %8.4f s  fills %4d  spans %6d  peak %4d B  px %6d  bad=$%02X",
          cur, render, fills, spans, peak, pixels, bad)
