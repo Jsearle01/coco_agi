@@ -116,7 +116,7 @@ local frame, peak, peak_f = 0, 0, 0
 -- count -- see the offline tool, and do not quote a span from here.
 local GAP_FRAMES, SETTLE_FRAMES, MIN_LAT, MIN_FDC = 30, 60, 30, 2000
 local dsk_start, dsk_end, dsk_quiet = nil, nil, 0
-local drawing, draw_lat, settle, nroom = false, 0, 0, 0
+local draw_lat, settle, nroom = 0, 0, 0
 
 _G._n = emu.add_machine_frame_notifier(function()
     frame = frame + 1
@@ -158,38 +158,40 @@ _G._n = emu.add_machine_frame_notifier(function()
 
     -- ★★★ THE DETECTOR IS A CONVENIENCE, NOT THE MEASUREMENT.
     -- harness/tools/sierra_rooms.py runs the same state machine OFFLINE over frames.csv and
-    -- IS the instrument any finding must be quoted from. This one just prints candidates
-    -- while you play, so you can see something happened. Where they disagree, the offline
-    -- one is right -- it can see the whole run, which is what coalescing needs.
+    -- IS the instrument any finding must be quoted from. This one prints candidates while you
+    -- play so you can see something happened. Where they disagree, the offline one is right.
     --
-    -- ★★ It was rebuilt after a version that did not work. That version fired 39 times on a
-    -- 7-transition run, with NEGATIVE draw times, because (1) `settle` was never reset when a
-    -- new disk burst arrived, so it was already past threshold when the draw phase began;
-    -- (2) nothing required the SCREEN TO ACTUALLY CHANGE, so any disk burst followed by quiet
-    -- qualified -- and a MENU satisfies that exactly as well as a room change, which is the
-    -- error that put four menu events into the first filing of P3.6; and (3) it treated every
-    -- burst separately, when a room load is a CLUSTER of bursts with quiet gaps inside it.
+    -- ★★ THIS IS THE THIRD VERSION AND THE FIRST TWO BOTH FAILED AGAINST THE SAME RECORDED
+    -- RUN -- replayed offline over frames.csv, which is why they were caught at all:
+    --   v1: 39 detections on a 7-transition run, with NEGATIVE draw times. `settle` was never
+    --       reset when a new disk burst arrived, so it was already past threshold when the
+    --       draw phase began; nothing required the SCREEN TO ACTUALLY CHANGE, so any disk
+    --       burst followed by quiet qualified -- and A MENU SATISFIES THAT exactly as well as
+    --       a room change, which is the error that put four menu events into P3.6's first
+    --       filing; and it treated every burst separately when a room load is a CLUSTER of
+    --       bursts with quiet gaps inside it.
+    --   v2: ZERO detections. It only began accumulating lattice change once the coalescing
+    --       gap had elapsed -- and THE SCREEN CHANGE HAPPENS INSIDE THAT GAP.
+    -- ★ v3 accumulates from the FIRST quiet frame and reproduces the offline tool's seven
+    -- transitions and all seven lattice signatures (62/103/100/47/47/61/72) exactly.
     --
-    -- ★ And the screen test must be CUMULATIVE. Sierra draws a room PROGRESSIVELY: across the
-    -- seven confirmed changes the per-frame lattice maximum was 16/160 while the cumulative
-    -- change was 47-103. A per-frame threshold reports nothing through every one of them.
+    -- ★★ And the screen test is CUMULATIVE, never per-frame. Sierra draws a room
+    -- PROGRESSIVELY: across the seven the per-frame maximum was 16/160 against a cumulative
+    -- 47-103. A per-frame threshold reports nothing through every one of them.
     if fd > 0 then
-        if not dsk_start then dsk_start = { frame, t, 0 } end
+        -- ★ disk activity during the draw phase abandons the candidate and starts a fresh
+        -- cluster, which is what the offline tool does by breaking out of its draw loop.
+        if (not dsk_start) or dsk_quiet >= GAP_FRAMES then
+            dsk_start = { frame, t, 0 }
+        end
         dsk_start[3] = dsk_start[3] + fd
-        dsk_quiet = 0
-        dsk_end   = { frame, t }        -- last ACTIVE frame, updated as the cluster continues
-        drawing   = false
-        draw_lat  = 0
-        settle    = 0                   -- ★ the reset the broken version lacked
+        dsk_end   = { frame, t }              -- last ACTIVE frame, moves as the cluster runs
+        dsk_quiet, draw_lat, settle = 0, 0, 0
     elseif dsk_start then
         dsk_quiet = dsk_quiet + 1
-        if dsk_quiet >= GAP_FRAMES then drawing = true end
-    end
-
-    if drawing then
-        draw_lat = draw_lat + ch
+        draw_lat  = draw_lat + ch             -- ★ accumulate from the FIRST quiet frame
         if ch == 0 then settle = settle + 1 else settle = 0 end
-        if settle >= SETTLE_FRAMES then
+        if dsk_quiet >= GAP_FRAMES and settle >= SETTLE_FRAMES then
             -- ★ CONFIRM: enough disk to be a load, AND the screen actually moved.
             if dsk_start[3] >= MIN_FDC and draw_lat >= MIN_LAT then
                 local disk = dsk_end[2] - dsk_start[2]
@@ -199,7 +201,8 @@ _G._n = emu.add_machine_frame_notifier(function()
                   frame, nroom, disk, dsk_start[3], draw, disk + draw, draw_lat, vo)
                 scr:snapshot()
             end
-            dsk_start, dsk_end, drawing, settle, draw_lat = nil, nil, false, 0, 0
+            dsk_start, dsk_end = nil, nil
+            dsk_quiet, draw_lat, settle = 0, 0, 0
         end
     end
 
