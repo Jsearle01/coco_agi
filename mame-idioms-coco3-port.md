@@ -2443,3 +2443,60 @@ The driver writes `GO` and touches nothing else. ★ **Then check what the old p
 doing:** re-poking the binary each iteration had also been re-initialising every `fcb`/`fdb` datum, and
 dropping it exposed uninitialised picture state in 11 of 45 renders. *Candidates:*
 `a-fix-can-remove-an-accidental-safety-net`.
+
+### 41h. Sierra's OS-9 titles: `Startup` runs the interpreter FOR you — the only input is the monitor answer, and its TIMING is what matters
+**★★★ §41c is CORRECT about the answer and silent about the timing, and the timing is the whole
+problem.** Read `/d0/Startup` off the image (`os9fs.py`) and the launch is fully documented:
+
+```
+*GETMODE
+echo What display are you using?  (R)GB, (C)omposite/TV or (M)onochrome
+var.0
+IF %0=r  montype -r   ELSE IF %0=c ... ELSE IF %0=  montype -r  ELSE GOTO GETMODE
+sierra <>>>/term
+```
+
+- **There is NO `Sierra` command to type.** `Startup` launches it. Typing one is actively
+  harmful: the extra line is consumed from the shell's input, the script runs off the end of its
+  input, and **OS-9 prints `EOF` at a repeating prompt**.
+- **The answer is CAPITAL `R`, then ENTER as a SEPARATE post** (§41c). ★ `IF %0=r` is lowercase
+  in the script and it still works — **do not "correct" this from reading the source.** A
+  measured recipe outranks a fresh inference about it.
+- ★★★ **TIMING: the prompt is not up before ~frame 2400** on a 360K floppy. T-P0-004's working
+  schedule is `f300 DOS\r` · `f2460 "R"` · `f2580 "\r"` · `f5400 CTRL+BREAK`.
+- ★★ **DO NOT gate the answer on "PC is pinned".** PC pins during **disk waits** as well as at a
+  keyboard prompt, so a wait-for-quiet fires far too early and the input lands in the shell.
+  **The readable tell is `PC == $FD5F` specifically** (§41c's tight keyboard poll), not
+  "unchanging PC". A liveness signal is not a readiness signal.
+- **Movement is CTRL + letter**, not the CoCo3 arrow diamond [Nerdly Pleasures / I-16]. Measured
+  on KQ3: **CTRL+m** produced the most screen change with **zero** disk (walking); **CTRL+d** the
+  most disk (a resource load). Arrow fields exist at `:row3` (`UP/DOWN/LEFT/RIGHT`) and are not
+  what this interpreter reads.
+- ★ **Boot side ≠ playable disk.** `KQ3/Original/KQ3-1-1.DSK` carries `OS9Boot`, `CMDS/Sierra`
+  **and the AGI directory files** (`logDir picDir viewDir object words.tok`) but **ZERO `vol.*`** —
+  it can name every resource and load none. With only `-flop1`/`-flop2` (§41e) the volumes land
+  on `/d1` and the interpreter looks on the boot device. Use a single image that carries both:
+  `Floppy 360K/kq3-1.dsk` or `Coco SDC/kq3.dsk`.
+
+### 41i. Timing a guest you do NOT control: FDC taps + a screen lattice, and discover the draw window under the RIGHT workload
+Our own probes tap a `PHASE` byte we write (idiom 19l). A commercial guest writes no marker.
+What works instead:
+
+| signal | measures | resolution |
+|---|---|---|
+| read+write tap on `$FF40-$FF4F` | the disk phase | one instruction |
+| write tap on the draw window | drawing | one instruction |
+| a 16×10 `scr:pixel()` lattice, change-count per frame | when the picture settles | **one frame, 16.7 ms** |
+
+★★ The OS-9 RBF driver **polls**, so an FDC access count is not a byte count — it marks **when**
+the disk is worked, by density.
+
+**★★★ DISCOVER THE DRAW WINDOW UNDER THE WORKLOAD YOU INTEND TO MEASURE.** A wide write tap
+bucketed by 4 KB, run during **idle sprite animation**, reported `$9000-$9FFF` at **91%** — a
+status region. The same tap across a **room change** reports `$7000-$7FFF` 40.1%,
+`$0000-$1FFF` 35.4%, `$6000-$6FFF` 7.5%, and `$9000` at **0.8%**. The first measurement pass
+tapped the wrong 8 KB and confidently reported no render burst at all.
+
+★ `install_write_tap` returns an object with `:remove()`, so a wide discovery tap can be
+installed for a short window and taken out again. Keep every tap in `_G` or it is
+garbage-collected and silently stops firing.
