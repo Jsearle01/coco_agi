@@ -405,4 +405,8 @@ Three, all to `seeds/AGI/live/` (§2C — new rows, nothing existing read or edi
    times it reported a confident answer rather than an error.**
 
 ### 11 — Commit
-*(filled at commit time)*
+`3b8aa82` — the corrected report, `sierra_live.lua`, and `sierra_boot.lua`'s hazard banner.
+`0a5e217` / `7c8634e` — the superseded filing, left in history rather than rewritten, because
+§3.6 is about a wrong result and removing it would remove the evidence.
+Pool: `66d59b8` (`seeds/AGI/live/`, third row) on top of `93cabb2` (first two).
+★ Pushed to `origin/wip` before this report.
