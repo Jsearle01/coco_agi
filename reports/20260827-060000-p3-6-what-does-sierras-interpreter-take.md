@@ -1,6 +1,100 @@
 ## Form B Report — P3.6 — what does Sierra's own interpreter take? (D-14)
 **Class:** recon.  wip.
 
+---
+
+## ★★★ CORRECTION — 2026-08-27, AFTER `95d902b`. THE HEADLINE BELOW IS WITHDRAWN.
+
+**This report's own §7 said the live detector was untrustworthy and that the numbers came from
+offline analysis "with proper filtering". ★★ That offline script was run inline and was never
+saved.** Rebuilding it as `harness/tools/sierra_rooms.py` — at Jay's request to save the
+harness so a re-run needs no re-derivation — reproduced the seven transitions exactly, and
+then showed that **two of the three headline figures were artifacts of an unstated parameter.**
+
+**What survives, unchanged:**
+
+- **7 room changes**, operator-confirmed. The count is **robust**: every coalescing gap from
+  0.25 s to 3.0 s finds the same seven, with the same lattice signatures (62, 103, 100, 47,
+  47, 61, 72 of 160).
+- **DRAW (last disk access → screen settles): median 0.47 s.** Reproduced to within one frame.
+- **VOFFSET writes during a room change: 0.** A room change is not a page flip.
+- **Per-frame lattice max 16/160** against a cumulative 47–103 — Sierra draws progressively.
+
+**★★★ WHAT IS WITHDRAWN, AND WHY:**
+
+**1. "DISK 8.48 s (88%)" — the 8.48 s is not disk time, and it is not a measurement.** It is
+the span you get when you treat up to 3 s of silence as "still loading". The sensitivity:
+
+```
+ gap_s   n  med_total  med_disk  med_draw  disk%  draw%
+  0.25   7       3.54      1.97      0.47    56%    13%
+  0.50   7       3.54      1.97      0.47    56%    13%
+  1.00   7       3.54      1.97      0.47    56%    13%
+  1.50   7       3.54      1.97      0.47    56%    13%
+  2.00   7       8.38      7.06      0.47    84%     6%
+  3.00   7       9.66      8.48      0.47    88%     5%
+```
+
+★★ **The count never moves and the split moves by 4×.** The report quoted the gap=3.0 column
+without ever stating that a parameter existed. **A figure that swings 4× on an unstated
+parameter is not a measurement.**
+
+**2. ★★★ "Strictly load-then-draw" is FALSE, and this is the one that matters.** The lattice
+does not move during the load, and I read that as "no drawing is happening". **The write
+census — already in the same CSV — says the opposite:**
+
+```
+regime    frames    sec | $7000/frame  $0000/frame  total/frame  fdc/frame
+idle        8369  139.7 |          57          620         1681          0
+load        4567   76.2 |         383          312         1071         46
+settle       442    7.4 |          98          458         1531          0
+  ★ $7000 (the draw window, 40.1% of room-change traffic): load vs idle = 6.7x
+
+per transition, $7000 writes during the LOAD phase (a 160x168 picture = 26,880 px):
+  #1 965679 (35.9 screenfuls)   #2 288525 (10.7)   #3 242811 ( 9.0)   #4 158081 ( 5.9)
+  #5 134576 ( 5.0)              #6 149413 ( 5.6)   #7 132154 ( 4.9)
+     ...against 4,434-11,725 writes in the whole "draw" phase (under 0.2 of a screenful)
+```
+
+★★★ **Sierra is drawing THROUGHOUT the load, 6.7× above idle, five to thirty-six screenfuls
+per transition — into something not being displayed, since the lattice never moves and VOFFSET
+is never written. The 0.47 s "draw phase" is a TAIL, not the render.**
+
+**3. ★★★ THEREFORE "~17× faster" IS WITHDRAWN AND D-14 IS NOT ANSWERED.** 0.47 s was never
+Sierra's render time, so it cannot be divided into our 7.473 s. **What the experiment actually
+bounds is the ELAPSED room change: 3.54 s at the tightest reading, 9.66 s at the loosest** —
+disk, LOGIC, resource setup and render together, with no way to separate the render out using
+these instruments. Our renderer alone is **7.473 s per picture**.
+
+> **The defensible statement: Sierra performs an ENTIRE room change — load included — in
+> somewhere between half and one-and-a-third of the time our renderer takes to draw one
+> picture from RAM with no disk at all. ★ At the tight end that is damning; at the loose end
+> it is inconclusive. THE RATIO IS NOT ESTABLISHED.**
+
+★★ **AC-3 and AC-4 below are therefore FAILED, not passed, and the "consultation trigger 1
+fired" claim in §6 rests on a figure that no longer exists.** AC-6's conclusion — *"there is a
+technique in their fill we have not found"* — is **plausible and no longer demonstrated**: it
+was resting entirely on the 17×.
+
+★★★ **THIS IS THE THIRD CONFIDENT WRONG ANSWER IN ONE TASK, AND ALL THREE HAVE THE SAME
+SHAPE — a signal absent from ONE channel read as the phenomenon being absent.** Menus looked
+like room changes on the disk channel; a progressive redraw looked like nothing on a per-frame
+channel; and drawing-under-load looked like nothing on the lattice channel **while the write
+census in the same file said 6.7×**. ★ **In all three the refuting data was already collected
+and unexamined.**
+
+★ **What is now tracked, so none of this needs re-deriving:** `sierra_rooms.py` (the
+instrument, with its parameters as named flags and defaults), `sierra_live.ps1` (one-command
+launch), `harness/mame-cfg/sierra-live/coco3.cfg` (the working key bindings), and a rebuilt
+detector in `sierra_live.lua` — **the previous one fired 39 times on this 7-transition run,
+with negative draw times.**
+
+**Everything below is the report as filed at `95d902b`, left intact. Read it through this
+block.**
+
+---
+
+
 ### 0 — Receipt / status (C-35 stamp)
 t0=2026-08-27 (dispatch T-P0-015 receipt; HEAD at receipt `75d3dd2`, wip, clean).
 

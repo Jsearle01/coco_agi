@@ -106,9 +106,15 @@ for i = 1, #LAT do prev[i] = -1 end
 
 w("sierra_live: OBSERVE ONLY. This script cannot send input.")
 w("BREAK is bound in the cfg (DELETE) -- press Ctrl+Delete. Everything is yours.")
-w("Whole-map write census is on. A picture repaint (>=30/160) logs a ROOM CHANGE line.")
+w("Whole-map write census is on. Candidates print as ROOM CHANGE lines.")
+w("★ The MEASUREMENT is harness/tools/sierra_rooms.py, offline over frames.csv.")
 
 local frame, peak, peak_f = 0, 0, 0
+-- ★ Detector parameters, the same ones sierra_rooms.py defaults to. GAP is the quiet
+-- stretch that ENDS a disk cluster: below ~1.5 s the seven confirmed transitions are
+-- still all seven, but each reports a SHORTER disk span. It changes the span, not the
+-- count -- see the offline tool, and do not quote a span from here.
+local GAP_FRAMES, SETTLE_FRAMES, MIN_LAT, MIN_FDC = 30, 60, 30, 2000
 local dsk_start, dsk_end, dsk_quiet = nil, nil, 0
 local drawing, draw_lat, settle, nroom = false, 0, 0, 0
 
@@ -150,39 +156,50 @@ _G._n = emu.add_machine_frame_notifier(function()
     local per, tot = {}, 0
     for i = 0, 15 do per[i] = _G._b[i]; tot = tot + per[i]; _G._b[i] = 0 end
 
-    -- ★★★ THE DETECTOR, CORRECTED. A per-frame lattice threshold DOES NOT WORK: Sierra draws
-    -- a new room PROGRESSIVELY, so the lattice moves a few points per frame and never spikes.
-    -- Measured across 7 operator-confirmed room changes, the per-frame maximum was 16/160 while
-    -- the cumulative change was 47-103. A detector that assumes an instantaneous repaint is
-    -- blind to a progressive one -- and it reported "no room change" through fifteen of them.
-    -- ★ The real signature is: DISK BURST -> (disk stops) -> DRAW -> screen settles.
+    -- ★★★ THE DETECTOR IS A CONVENIENCE, NOT THE MEASUREMENT.
+    -- harness/tools/sierra_rooms.py runs the same state machine OFFLINE over frames.csv and
+    -- IS the instrument any finding must be quoted from. This one just prints candidates
+    -- while you play, so you can see something happened. Where they disagree, the offline
+    -- one is right -- it can see the whole run, which is what coalescing needs.
+    --
+    -- ★★ It was rebuilt after a version that did not work. That version fired 39 times on a
+    -- 7-transition run, with NEGATIVE draw times, because (1) `settle` was never reset when a
+    -- new disk burst arrived, so it was already past threshold when the draw phase began;
+    -- (2) nothing required the SCREEN TO ACTUALLY CHANGE, so any disk burst followed by quiet
+    -- qualified -- and a MENU satisfies that exactly as well as a room change, which is the
+    -- error that put four menu events into the first filing of P3.6; and (3) it treated every
+    -- burst separately, when a room load is a CLUSTER of bursts with quiet gaps inside it.
+    --
+    -- ★ And the screen test must be CUMULATIVE. Sierra draws a room PROGRESSIVELY: across the
+    -- seven confirmed changes the per-frame lattice maximum was 16/160 while the cumulative
+    -- change was 47-103. A per-frame threshold reports nothing through every one of them.
     if fd > 0 then
         if not dsk_start then dsk_start = { frame, t, 0 } end
         dsk_start[3] = dsk_start[3] + fd
         dsk_quiet = 0
-        drawing = false
+        dsk_end   = { frame, t }        -- last ACTIVE frame, updated as the cluster continues
+        drawing   = false
+        draw_lat  = 0
+        settle    = 0                   -- ★ the reset the broken version lacked
     elseif dsk_start then
         dsk_quiet = dsk_quiet + 1
-        if dsk_quiet == 1 then dsk_end = { frame, t }; drawing = true; draw_lat = 0 end
+        if dsk_quiet >= GAP_FRAMES then drawing = true end
     end
+
     if drawing then
         draw_lat = draw_lat + ch
-        if ch == 0 then
-            settle = settle + 1
-            if settle >= 60 and dsk_start[3] >= 2000 then
+        if ch == 0 then settle = settle + 1 else settle = 0 end
+        if settle >= SETTLE_FRAMES then
+            -- ★ CONFIRM: enough disk to be a load, AND the screen actually moved.
+            if dsk_start[3] >= MIN_FDC and draw_lat >= MIN_LAT then
                 local disk = dsk_end[2] - dsk_start[2]
-                local draw = t - 60/59.92 - dsk_end[2]
+                local draw = (t - SETTLE_FRAMES / 59.92) - dsk_end[2]
                 nroom = nroom + 1
-                w("[f%05d] * ROOM CHANGE %d: disk %.3f s (%d acc) + draw %.3f s = %.3f s  lat=%d voff=%d",
+                w("[f%05d] * ROOM CHANGE %d: disk %.3f s (%d acc) + draw %.3f s = %.3f s  lat=%d/160 voff=%d",
                   frame, nroom, disk, dsk_start[3], draw, disk + draw, draw_lat, vo)
                 scr:snapshot()
-                dsk_start, dsk_end, drawing, settle = nil, nil, false, 0
             end
-        else
-            settle = 0
-        end
-        if dsk_start and t - dsk_end[2] > 20 then     -- give up on a stale candidate
-            dsk_start, dsk_end, drawing, settle = nil, nil, false, 0
+            dsk_start, dsk_end, drawing, settle, draw_lat = nil, nil, false, 0, 0
         end
     end
 
