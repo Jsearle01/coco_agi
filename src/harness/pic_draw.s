@@ -121,25 +121,47 @@ dl_diag:
                 addd    #1
                 std     CNT_DIAG
                 puls    d
+* ★★★ UNSIGNED COMPARE, THEN SUBTRACT SMALLER FROM LARGER. The obvious form --
+*     lda ln_x2 : suba ln_x1 : bpl positive : nega
+* -- is an 8-bit SIGNED test, and AGI coordinates run to 159 (x) and 167 (y). Any delta of
+* 128..159 sets bit 7, so `bpl` calls it negative and `nega` turns it into a small positive
+* going the wrong way. The oracle computes `int deltaX = x2 - x1` in int16 and never has the
+* problem [picture.cpp draw_Line @ 9d9b9e9].
+*
+* ★★ IT WAS UNREACHABLE UNTIL THIS TASK. T-P0-011's single picture used only rel_line, whose
+* packed nibble deltas cannot exceed +/-7, and x_corner, whose segments are axis-aligned and
+* never enter this branch. abs_line arrived with T-P0-012 and immediately drew
+* (1,156)->(156,1): dx = +155 = $9B, read as -101. 3 of 45 pictures failed on it.
+* ★ Deciding direction with an UNSIGNED compare and then subtracting the smaller from the
+* larger keeps the magnitude in 0..159, which still fits a byte -- the error accumulators are
+* already 16-bit, so nothing else has to change.
                 lda     #1
                 sta     dl_stepx
                 lda     ln_x2
-                suba    ln_x1
-                bpl     dl_dxpos
-                nega
-                ldb     #$FF
-                stb     dl_stepx
-dl_dxpos:       sta     dl_dx
+                cmpa    ln_x1                   ; UNSIGNED
+                bhs     dl_dxpos
+                lda     #$FF
+                sta     dl_stepx
+                lda     ln_x1
+                suba    ln_x2                   ; x1 - x2, always positive
+                bra     dl_dxst
+dl_dxpos:       lda     ln_x2
+                suba    ln_x1                   ; x2 - x1, always positive
+dl_dxst:        sta     dl_dx
 
                 lda     #1
                 sta     dl_stepy
                 lda     ln_y2
+                cmpa    ln_y1                   ; UNSIGNED
+                bhs     dl_dypos
+                lda     #$FF
+                sta     dl_stepy
+                lda     ln_y1
+                suba    ln_y2
+                bra     dl_dyst
+dl_dypos:       lda     ln_y2
                 suba    ln_y1
-                bpl     dl_dypos
-                nega
-                ldb     #$FF
-                stb     dl_stepy
-dl_dypos:       sta     dl_dy
+dl_dyst:        sta     dl_dy
 
                 lda     dl_dy
                 cmpa    dl_dx
@@ -208,10 +230,19 @@ dl_noy:
                 sta     cur_x
 dl_nox:
                 jsr     put_pixel
+* ★★★ `dec` / `bne`, NOT a `bpl` guard. The oracle is `i--; while (i > 0)` with i an int
+* [picture.cpp draw_Line @ 9d9b9e9], and i starts at max(dx,dy) >= 1 and decrements by one, so
+* it lands on zero exactly and can never go negative. The extra `lda dl_i : bpl dl_lp` looked
+* like a defensive underflow guard and was in fact a 127-PIXEL LINE-LENGTH LIMIT: dl_i holds up
+* to 167, and any value of 128..167 has bit 7 set, so `bpl` fell through and the line stopped
+* after ONE pixel.
+* ★★ SECOND INSTANCE OF THE SAME CLASS IN THIS ROUTINE, found by the same bisect. The first was
+* the delta computation (`suba` + `bpl`, above). Both are 8-bit SIGNED tests applied to values
+* whose real range is 0..167. ★ Finding one should have prompted a sweep for the others rather
+* than a re-run -- the fix for the delta shipped, the gate still failed, and only then was this
+* one looked for.
                 dec     dl_i
-                beq     dl_end
-                lda     dl_i
-                bpl     dl_lp
+                bne     dl_lp
 dl_end:         puls    a
                 sta     cur_y
                 puls    a

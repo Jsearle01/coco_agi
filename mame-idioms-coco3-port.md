@@ -2386,3 +2386,60 @@ are structured text and are fair game.
 are not part of the picture and hold whatever `HAL_gfx_set_mode` left. Say so when submitting a
 gate, or it reads as a rendering defect. *Candidates:*
 `check-the-artifact-in-the-form-the-recipient-receives`.
+
+### 19l. Timing a region of guest code: a WRITE TAP + `machine.time`, not a frame counter
+**The 6809 has no cycle counter and MAME 0.281's Lua binding does not expose one** — `cpu.total_cycles`,
+`totalcycles`, `cycles_running` and `clock` all return **nil** on `mc6809e`, and
+`manager.machine.debugger` is nil without `-debug`. What does work:
+
+```lua
+_G._t = {}                                     -- keep the tap in _G or it is GC'd and stops firing
+_G._tap = prog:install_write_tap(PHASE, PHASE, "phase", function(offset, data, mask)
+    _G._t[data % 256] = manager.machine.time:as_double()
+end)
+```
+
+The guest writes a phase number to `PHASE` either side of the region; the callback fires **at the instant
+of the store**, so **resolution is one instruction** on exact emulated time. `machine.time` is an
+attotime and `as_double()` is a **function, not a property**.
+
+**★★ Why not the obvious alternatives.** A **frame counter** is `refresh_attoseconds` = 16688153334513408
+= **16.688 ms** granular (59.92 Hz) and cannot decompose anything. **Host wall-clock** measures the host.
+**`-seconds_to_run`** bounds a session; it does not time a region inside one.
+
+**★★★ Emulated time is DETERMINISTIC** — identical to nine decimal places across runs — which is what
+makes "two runs is not a sample" answerable here: repetition adds nothing, so state the run count and
+move on. It also means a *changed* figure is a real change, not noise.
+
+**★ CALIBRATE THE CLOCK, do not assume it.** Time a known-cycle loop between two extra phases:
+20,000 x (`leax -1,x` = 5, `bne` = 3) = 160,000 cycles. Measured **0.089401890 s -> 1.7898 MHz**, the
+CoCo3 fast rate. If it comes out near **0.8949 MHz** the machine is in SLOW mode and every derived cycle
+figure is 2x wrong — so this is a guard, and it is cheap.
+
+**★★ Take COUNTS and TIMES from DIFFERENT BUILDS.** Counting on a hot path perturbs it: a 32-bit
+`fill_check` counter costs ~30 cycles on the renderer's hottest routine. Guard the counters behind a
+`-D` and run twice. *Candidates:* `an-arithmetically-impossible-number-is-the-cheapest-defect-detector`.
+
+### 19m. Re-running a guest program in one session: let the GUEST restart itself, do not poke PC
+**Setting `cpu.state["PC"].value` from a frame notifier to restart a halted probe DOES NOT reliably land
+on the entry point.** Measured: with the probe spinning in a two-byte self-branch (`probe_halt: bra
+probe_halt`), MAME reported **PC=$0839** — mid-instruction, inside the `bra` — and after the write
+execution resumed **past the prologue**. The counter-reset block never ran, so every counter
+**ACCUMULATED across pictures** while the render itself was correct.
+
+**★★★ The failure mode is the danger: no crash, no halt, no error — plausible numbers that were wrong.**
+It was caught only because one counter was a stack depth that came back **42,241 bytes on a 1,024-byte
+stack** — arithmetically impossible. The other five looked like data.
+
+**Do this instead** — the guest owns its restart:
+```
+GO       equ  $0091
+probe_halt: clr GO
+ph_wait:    lda GO
+            beq ph_wait
+            jmp probe_entry        ; whole prologue re-runs: stack, HAL init, mode, clears, counters
+```
+The driver writes `GO` and touches nothing else. ★ **Then check what the old path was incidentally
+doing:** re-poking the binary each iteration had also been re-initialising every `fcb`/`fdb` datum, and
+dropping it exposed uninitialised picture state in 11 of 45 renders. *Candidates:*
+`a-fix-can-remove-an-accidental-safety-net`.

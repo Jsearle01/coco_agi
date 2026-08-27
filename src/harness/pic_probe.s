@@ -59,11 +59,24 @@ FB_BASE         equ     $8000           ; GFX_DB_WINDOW
 * that is neither cleared nor overwritten, so both live there.
 PIC_DATA        equ     $1200           ; picture resource, poked in by the MAME side.
                                         ;   $1200..$16EF = 1,264 B; picture 80 is 211 B.
-STATUS          equ     $16F0           ; +0 done sentinel, +1 bad opcode / $EE stack overflow
-CNT_VERT        equ     $16F2           ; DIAGNOSTIC: draw_line vertical-branch entries
-CNT_HORIZ       equ     $16F4           ;             horizontal-branch entries
-CNT_DIAG        equ     $16F6           ;             diagonal-branch entries
-CNT_PIX         equ     $16F8           ;             put_pixel writes to the visual plane
+* ★★ STATUS MOVED TO LOW RAM (T-P0-012). It was at $16F0, inside the PIC_DATA window, which
+* capped a resource at 1,264 bytes; the gated set's largest is 1,254 and 31 of 45 exceed 1 KB.
+* $0020-$00FF is free -- the HAL owns DP $00-$1F and the fill stack starts at $0100 -- so the
+* block lives there and PIC_DATA gets the whole $1200..$16FF (1,280 B).
+STATUS          equ     $0080           ; +0 done sentinel, +1 bad opcode / $EE stack overflow
+CNT_VERT        equ     $0082           ; DIAGNOSTIC: draw_line vertical-branch entries
+CNT_HORIZ       equ     $0084           ;             horizontal-branch entries
+CNT_DIAG        equ     $0086           ;             diagonal-branch entries
+CNT_PIX         equ     $0088           ;             put_pixel writes to the visual plane
+CNT_FILL        equ     $008A           ; AC-7: flood_fill invocations
+CNT_SPAN        equ     $008C           ; AC-7: seed points PUSHED onto the fill stack
+SP_PEAK         equ     $008E           ; AC-6: fill-stack high-water mark, in BYTES
+* ★★★ THE TIMING MARKER (AC-5). The probe stores a phase number here; the MAME side has a
+* WRITE TAP on this address and records `manager.machine.time` at the instant of the store.
+* Resolution is one instruction, and emulated time is exact and deterministic -- not a frame
+* counter, which would be 16.7 ms granular and useless for decomposition.
+PHASE           equ     $0090
+CNT_CHK         equ     $0094           ; AC-7: fill_check calls, 32-bit (4/px overflows 16)
 
                 org     $0800
 * ═══════════════════════════════════════════════════════════════════
@@ -80,10 +93,61 @@ probe_entry:
                 std     CNT_HORIZ
                 std     CNT_DIAG
                 std     CNT_PIX
+                std     CNT_FILL
+                std     CNT_SPAN
+                std     SP_PEAK
+                std     CNT_CHK
+                std     CNT_CHK+2
+* ★★★ PICTURE STATE RESET — EVERY RENDER, NOT JUST THE FIRST LOAD.
+* [ref: picture.cpp:385-388 @ 9d9b9e9] drawPicture() opens with
+*     _priOn = false;  _scrOn = false;  _scrColor = 15;  _priColor = 4;
+* ★★ scr_color is 15, NOT 0. The probe had `scr_color fcb 0` -- harmless while the driver
+* re-poked the whole binary before each picture, and a real defect the moment it stopped.
+* ★★★ TWO DEFECTS, ONE CAUSE, AND THE SECOND WAS SELF-INFLICTED. The GO re-run gate fixed the
+* counters by making the probe restart itself -- and in doing so removed the blob re-poke that
+* had been silently re-initialising `fcb` data. probe_entry reset the COUNTERS explicitly but
+* not the PEN, so picture N+1 inherited picture N's scr_on/pri_on/colours. It showed up in 11
+* of 45 pictures, 9 of them priority-only, because most pictures issue set_visual/set_priority
+* immediately and overwrite the inherited state before it can matter.
+* ★ The lesson is the same one twice: RE-ENTRY MUST RE-ESTABLISH ALL STATE, NOT THE STATE YOU
+* HAPPEN TO BE THINKING ABOUT. Initialised data is state.
+                clr     scr_on
+                clr     pri_on
+                clr     xc_isx
+                lda     #15
+                sta     scr_color
+                lda     #4
+                sta     pri_color
+
                 jsr     pal_load                ; ★ AGI's 16 EGA colours, from a TABLE
                 jsr     vis_clear               ; visual plane = 15 (white)
                 jsr     pri_clear               ; priority plane = 4 (red)
+
+* ★★★ AC-5's MEASUREMENT BRACKET. The markers sit IMMEDIATELY either side of pic_render, so
+* the interval excludes sys_init, set_mode and the two plane clears -- what is timed is the
+* interpretation of the picture and nothing else. The MAME side write-taps PHASE and stamps
+* `manager.machine.time` at the store, giving one-instruction resolution on exact emulated
+* time. ★ Marker 1 is written LAST before the call and marker 2 FIRST after it.
+* ★★ CLOCK CALIBRATION FIRST (phases 3→4), so cycle figures are MEASURED rather than assumed.
+* Exactly 20,000 iterations of an 8-cycle body: `leax -1,x` is 5 (indexed, 5-bit offset) and
+* `bne` is 3 = 160,000 cycles, plus ~9 for the setup and the final untaken branch. Dividing by
+* the measured interval gives the effective CPU clock, which must come out at the CoCo3's fast
+* rate (1.7898 MHz) because HAL_gfx_set_mode writes $FFD9. ★ If it lands near 0.8949 MHz the
+* machine is in SLOW mode and every timing in this report would be off by 2x -- so this is a
+* guard, not a decoration [L-24: name the variant].
+                lda     #3
+                sta     PHASE
+                ldx     #20000
+cal_lp:         leax    -1,x
+                bne     cal_lp
+                lda     #4
+                sta     PHASE
+
+                lda     #1
+                sta     PHASE
                 jsr     pic_render              ; interpret the picture
+                lda     #2
+                sta     PHASE
 
 * ★★ AC-8 -- PROVE THE GATE CAN FAIL, ON THE REAL PIPELINE.
 * A gate that has only ever reported PASS has not been shown to be a gate. -DPIC_FAULT flips
@@ -92,10 +156,16 @@ probe_entry:
 * a gate run cannot accidentally carry it and so the check is REPRODUCIBLE rather than an
 * ad-hoc edit -- an injection that lives only in someone's shell is not evidence.
 * offset = 42*160 + 37 = 6757.
+* ★★ ARMED PER PICTURE, NOT PER BUILD (T-P0-012). Injecting into all 45 would prove only that
+* the gate can go red; arming ONE proves it LOCALISES -- that picture fails and the other 44
+* still pass. A gate that fails everything is not distinguishable from a gate that is broken.
                 ifdef   PIC_FAULT
+                lda     FAULT_ARM
+                beq     pf_skip
                 lda     FB_BASE+6757
                 eora    #$11                    ; both nibbles: still a legal doubled pixel
                 sta     FB_BASE+6757
+pf_skip:
                 endc
 
                 lda     #$A5                    ; sentinel LAST: a partial run is visible
@@ -130,7 +200,32 @@ probe_entry:
                 ifdef   PIC_PRESENT
                 jsr     HAL_gfx_swap
                 endc
-probe_halt:     bra     probe_halt
+
+* ═══════════════════════════════════════════════════════════════════
+* THE RE-RUN GATE — how the sweep renders 45 pictures in one MAME session
+*
+* ★★★ THE DRIVER MUST NOT SET PC TO RESTART THIS PROBE. It was a 2-byte self-branch
+* (`probe_halt: bra probe_halt`), and writing PC from a frame notifier while the CPU is
+* mid-instruction inside it does NOT reliably land on probe_entry. Measured: on picture 2 the
+* counter-reset store at $0813 NEVER EXECUTED while pic_render did, so every counter
+* ACCUMULATED across pictures -- Kingquest1-053 reported px 50756 = its own 25677 plus
+* Kingquest1-080's 25079, fills 72 = 64 + 8, and a 42,241-byte "peak" on a 1,024-byte stack.
+* MAME reported PC=$0839 at the moment of the write: inside the two bytes of the `bra`.
+*
+* ★★ THE FAILURE MODE IS THE POINT. It did not crash and it did not halt -- it produced
+* PLAUSIBLE NUMBERS THAT WERE WRONG, and the only reason it was caught is that a 42 KB peak on
+* a 1 KB stack is arithmetically impossible. A subtler skew would have gone into the report as
+* a measurement [L-37: instrument something that can CONTRADICT you].
+*
+* ★ So the probe re-runs ITSELF. The driver writes GO and touches nothing else; every
+* iteration re-executes the whole prologue -- stack, HAL_sys_init, set_mode, both plane clears
+* and the counter resets -- so picture N+1 cannot inherit anything from picture N.
+GO              equ     $0091           ; driver writes non-zero to request another render
+FAULT_ARM       equ     $0092           ; AC-8: driver arms the injection for ONE picture
+probe_halt:     clr     GO
+ph_wait:        lda     GO
+                beq     ph_wait
+                jmp     probe_entry
 
 * ═══════════════════════════════════════════════════════════════════
 * pal_load — write the 16 AGI colours to $FFB0-$FFBF
@@ -249,12 +344,22 @@ put_pixel:
                 lslb
                 pshs    b
                 ora     ,s+                     ; ★ colour in BOTH nibbles = the pixel doubling
+* ★★ A PLAIN BYTE STORE, NOT A READ-MODIFY-WRITE (AC-7). One AGI pixel is exactly one CoCo3
+* byte in 320x200x16 with the colour in both nibbles, so there is nothing to merge and nothing
+* to read back. ★ In a non-doubled 160-wide 4bpp layout each pixel would be a NIBBLE and every
+* write would be read-modify-write; the doubling removes that cost entirely for pictures. It
+* does NOT remove it for anything drawn at full 320 resolution later.
                 sta     ,x
+* ★ -DPIC_NOCOUNT drops the per-pixel counter so the instrumentation's own cost can be
+* MEASURED rather than assumed. ~24 cycles x ~25,000 pixels is not nothing, and a timing
+* harness that cannot quantify its own overhead is reporting the harness as well as the code.
+                ifndef  PIC_NOCOUNT
                 pshs    d
                 ldd     CNT_PIX
                 addd    #1
                 std     CNT_PIX
                 puls    d
+                endc
 pp_pri:         lda     pri_on
                 beq     pp_out
                 lda     pri_color
@@ -300,13 +405,16 @@ pr_table:       fdb     op_set_visual           ; F0
                 fdb     op_dis_visual           ; F1
                 fdb     op_set_pri              ; F2
                 fdb     op_dis_pri              ; F3
-                fdb     0                       ; F4 y_corner   -- not needed by picture 80
+                fdb     op_y_corner             ; F4  [T-P0-012]
                 fdb     op_x_corner             ; F5
-                fdb     0                       ; F6 abs_line   -- not needed by picture 80
+                fdb     op_abs_line             ; F6  [T-P0-012]
                 fdb     op_rel_line             ; F7
                 fdb     op_fill                 ; F8
-                fdb     0                       ; F9 set_pattern
-                fdb     0                       ; FA pattern_brush
+* ★ F9/FA REMAIN 0 AND HALT LOUDLY, and that is reported rather than hidden (AC-4). No picture
+* in the gated set uses them -- picset.py's census across three games counts set_pattern=0 and
+* pattern_brush=0 -- so they are UNREACHED, not silently skipped. A silent no-op is forbidden.
+                fdb     0                       ; F9 set_pattern   -- unreached by the set
+                fdb     0                       ; FA pattern_brush -- unreached by the set
 
 * pic_get — next picture byte into A
 pic_get:        ldx     pic_ptr
@@ -362,6 +470,59 @@ xc_draw:        lda     cur_x
                 sta     xc_isx
                 bra     xc_lp
 xc_done:        rts
+
+* ── F4 y_corner: x,y then alternating y,x,y,x... ──────────────────
+* ★★ THE SAME LOOP AS x_corner, ENTERED ON THE OTHER PHASE. At the pin, `xCorner` and
+* `yCorner` are mirror-image functions [picture.cpp:178,219 @ 9d9b9e9]: x_corner takes an X
+* first and draws a horizontal segment, y_corner takes a Y first and draws a vertical one, and
+* both then alternate. `xc_isx` already encodes exactly that phase, so y_corner is x_corner
+* with the toggle cleared instead of set. ★ Sharing the loop is not a shortcut -- it is the
+* same mechanism in the reference, and duplicating it would let the two drift.
+* ★ Called as `yCorner()` from drawPicture's 0xF4 case, i.e. skipOtherCoords=false; the true
+* variant is the AGI256/v1 path and is not this target (§2H check 2 -- the caller carries the
+* scope).
+op_y_corner:    jsr     pic_get
+                sta     cur_x
+                jsr     pic_get
+                sta     cur_y
+                jsr     put_pixel
+                clr     xc_isx                  ; next parameter is a Y  <-- the only difference
+                bra     xc_lp
+
+* ── F6 abs_line: x,y then absolute x,y PAIRS ──────────────────────
+* [ref: picture.cpp draw_LineAbsolute @ 9d9b9e9] -- getNextCoordinates(x2,y2) is
+* getNextXCoordinate && getNextYCoordinate, so on a terminating byte the X IS ALREADY
+* CONSUMED and only the Y is rewound (getNextParamByte does `_dataOffset--`). ★ This peeks
+* each byte before taking it, which reproduces that asymmetry exactly: X is consumed, then Y
+* is peeked, and a terminator at the Y position leaves the X spent.
+op_abs_line:    jsr     pic_get
+                sta     cur_x
+                jsr     pic_get
+                sta     cur_y
+                jsr     put_pixel
+al_lp:          jsr     pic_peek
+                cmpa    #$F0
+                bhs     al_done
+                jsr     pic_get                 ; X consumed
+                pshs    a
+                jsr     pic_peek
+                cmpa    #$F0
+                bhs     al_pop                  ; terminator at Y: X stays spent
+                jsr     pic_get                 ; Y consumed
+                tfr     a,b                     ; B = y2
+                lda     cur_x
+                sta     ln_x1
+                lda     cur_y
+                sta     ln_y1
+                puls    a                       ; A = x2
+                sta     cur_x
+                sta     ln_x2
+                stb     cur_y
+                stb     ln_y2
+                jsr     draw_line
+                bra     al_lp
+al_pop:         leas    1,s                     ; discard the consumed X
+al_done:        rts
 
 pic_peek:       ldx     pic_ptr
                 lda     ,x
@@ -426,7 +587,18 @@ op_fill:        jsr     pic_peek
                 sta     cur_x
                 jsr     pic_get
                 sta     cur_y
+                ldd     CNT_FILL                ; AC-7: invocations, counted even when skipped
+                addd    #1
+                std     CNT_FILL
+* ★★★ -DPIC_NOFILL — THE DECOMPOSITION BUILD (AC-5). There is no cycle counter on a 6809 and
+* per-call instrumentation would perturb what it measures, so fill cost is obtained by
+* DIFFERENCE: the same binary, the same picture, the fill call alone suppressed. Both builds
+* still walk the resource, consume the same operands and count the same invocations, so the
+* delta is the flood fill and nothing else. ★ This build renders a WRONG picture on purpose
+* and must never be gated -- picdiff is not run on it.
+                ifndef  PIC_NOFILL
                 jsr     flood_fill
+                endc
                 bra     op_fill
 of_done:        rts
 
@@ -447,14 +619,14 @@ scr_on          fcb     0
 pri_on          fcb     0
 xc_isx          fcb     0
 
+* ★ ONLY THE HAL MODULES THIS PROBE ACTUALLY CALLS. T-P0-012 needed ~150 bytes of code space
+* and the probe had 101; input/sound/file/mem/disk_read were assembled into every build and
+* never called. Verified by grep that none of the five is referenced from sys/time/irq_vbl/gfx
+* or from this file. ★★ Dropping an include does not modify a SHARED file (§2M) — the files are
+* untouched and hal_sync_check still reports OK across all three repos.
                 include "src/hal/coco3-dsk/hal_globals.s"
                 include "src/hal/coco3-dsk/sys.s"
                 include "src/hal/coco3-dsk/time.s"
                 include "src/hal/coco3-dsk/irq_vbl.s"
                 include "src/hal/coco3-dsk/gfx.s"
-                include "src/hal/coco3-dsk/input.s"
-                include "src/hal/coco3-dsk/sound.s"
-                include "src/hal/coco3-dsk/file.s"
-                include "src/hal/coco3-dsk/mem.s"
-                include "src/hal/coco3-dsk/disk_read.s"
                 end     probe_entry

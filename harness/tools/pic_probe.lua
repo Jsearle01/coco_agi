@@ -23,7 +23,12 @@ local LOAD     = 0x0800     -- probe_entry / org
 local PIC_DATA = 0x1200     -- where the probe expects the resource
 local PRI_BASE = 0x1700     -- priority plane
 local FB_BASE  = 0x8000     -- GFX_DB_WINDOW
-local STATUS   = 0x16F0
+-- ★★ MOVED IN T-P0-012. The status block was at $16F0, inside the PIC_DATA window, which
+-- capped a picture resource at 1,264 bytes; the gated set's largest is 1,254 and 31 of 45
+-- exceed 1 KB. It now lives in free low RAM ($0080-$0097) and PIC_DATA owns $1200..$16FF.
+-- ★ Updated here rather than left stale: this driver still works for a single picture, and a
+-- tool that reads the wrong addresses reports zeros as if they were data.
+local STATUS   = 0x0080
 local W, H     = 160, 168
 local PLANE    = W * H      -- 26880
 
@@ -128,7 +133,7 @@ _G._pp_notifier = emu.add_machine_frame_notifier(function()
 
             local function rd16(a) return prog:read_u8(a) * 256 + prog:read_u8(a + 1) end
             logf("DIAGNOSTIC counters: vertical=%d horizontal=%d diagonal=%d visual_writes=%d",
-                 rd16(0x16F2), rd16(0x16F4), rd16(0x16F6), rd16(0x16F8))
+                 rd16(0x0082), rd16(0x0084), rd16(0x0086), rd16(0x0088))
             logf("wrote fb.bin and pri.bin (%d bytes each)", PLANE)
 
             -- ★ AC-10 only, and env-gated so a gate run is byte-for-byte the run it was.

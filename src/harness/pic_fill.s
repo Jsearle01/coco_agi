@@ -19,6 +19,22 @@
 * ── fill_check ────────────────────────────────────────────────────
 * in:  fc_x, fc_y.   out: Z set (eq) = "this pixel may be filled"
 fill_check:
+* ★★★ AC-7's DECIDING COUNTER, and it is 32-bit on purpose: 4 checks per pixel over a
+* full-screen fill is ~107,000, which overflows 16 bits. ★★ Counting here costs ~30 cycles on
+* the hottest path in the renderer, so the COUNTS and the TIMINGS are taken from SEPARATE
+* BUILDS -- -DPIC_NOCOUNT for time, the counted build for structure. An instrument that changes
+* what it measures by 15% cannot also be the thing reporting the measurement.
+                ifndef  PIC_NOCOUNT
+                pshs    d
+                ldd     CNT_CHK+2
+                addd    #1
+                std     CNT_CHK+2
+                bcc     fc_nocarry
+                ldd     CNT_CHK
+                addd    #1
+                std     CNT_CHK
+fc_nocarry:     puls    d
+                endc
                 lda     fc_x
                 cmpa    #PIC_W
                 bhs     fc_no
@@ -199,6 +215,22 @@ ff_push:
                 stb     1,x
                 leax    2,x
                 stx     ff_sp
+* ★★ AC-6/AC-7 INSTRUMENTATION — measured at the ONLY push site, so no path can bypass it.
+* CNT_SPAN counts seed points pushed; SP_PEAK is the high-water mark in BYTES, kept as a
+* depth (X - STACK_BASE) rather than a raw pointer so it is comparable across runs and
+* directly against the offline prediction of 204 bytes / 102 entries.
+                ifndef  PIC_NOCOUNT
+                pshs    a,b
+                ldd     CNT_SPAN
+                addd    #1
+                std     CNT_SPAN
+                tfr     x,d
+                subd    #STACK_BASE             ; D = current depth in bytes
+                cmpd    SP_PEAK
+                bls     ff_push_done
+                std     SP_PEAK
+ff_push_done:   puls    a,b
+                endc
                 rts
 ff_overflow:
                 lda     #$EE
