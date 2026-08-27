@@ -510,5 +510,7 @@ Five, all to `seeds/AGI/live/` (§2C — new rows; nothing existing read or edit
 ### 11 — Commit
 Superseded: `7c8634e`, `0a5e217`, `95d902b` (the 17× filing), `6b0cbeb` (the correction that is
 itself withdrawn). ★ Left in history deliberately — §3.6–§3.11 are about the wrong answers.
-Pool: `93cabb2`, `66d59b8`, and this task's rows.
+`19d288f` — this rewrite, plus detector v3.
+`6b0cbeb` — the tracked harness (`sierra_rooms.py`, `sierra_live.ps1`, the cfg seed).
+Pool: `93cabb2`, `66d59b8`, `d18fd47` — five rows.
 ★ Pushed to `origin/wip` before this report.
