@@ -469,4 +469,8 @@ Three, to `seeds/AGI/live/` (§2C — new rows; nothing existing read or edited)
    explained the symptom completely enough that the second cause went unexamined for a task.
 
 ### 11 — Commit
-<COMMIT>
+`2c75749` — the report and `sierra_blank.py`.
+`e4f53db` — the GIME tap in both harnesses; the unattended movement sweep disarmed.
+Pool: `a32ca7f` — three rows on top of `d18fd47`.
+★ Pushed to `origin/wip` before this report.
+
