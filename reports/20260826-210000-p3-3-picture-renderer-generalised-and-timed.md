@@ -569,4 +569,6 @@ Four, all to `seeds/AGI/live/` (§2C — new rows, nothing existing read or edit
    verification cycle that a one-line grep would have saved.
 
 ### 11 — Commit
-*(filled at commit time)*
+`db6e96f` — P3.3 picture renderer: generalised and timed on hardware
+Pool `7acf484` — the four candidate rows (§10)
+(pushed to origin/wip before this report; `db6e96f` carries the report itself)
