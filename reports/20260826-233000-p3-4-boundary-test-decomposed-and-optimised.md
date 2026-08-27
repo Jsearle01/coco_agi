@@ -456,4 +456,6 @@ Two, both to `seeds/AGI/live/` (§2C — new rows, nothing existing read or edit
    review cannot check.
 
 ### 11 — Commit
-*(filled at commit time)*
+`52fd98c` — P3.4 the boundary test: decomposed and optimised
+Pool `b8fb79d` — the two candidate rows (§10)
+(pushed to origin/wip before this report; `52fd98c` carries the report itself)
