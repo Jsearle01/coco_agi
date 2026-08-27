@@ -426,4 +426,6 @@ Two, both to `seeds/AGI/live/` (§2C — new rows, nothing existing read or edit
    corrected it in one sentence.
 
 ### 11 — Commit
-*(filled at commit time)*
+`7c8634e` — P3.6 what does Sierra's own interpreter take? (D-14)
+Pool `93cabb2` — the two candidate rows (§10)
+(pushed to origin/wip before this report; `7c8634e` carries the report itself)
