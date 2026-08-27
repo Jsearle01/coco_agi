@@ -266,7 +266,7 @@ both measured **this task** by `hal_sync_check.py` and `reg_discipline.py` at th
   **one** picture (`Kingquest3-030`) via a driver-written flag. Result: **44 PASS, 1 FAIL, and the
   failure is `Kingquest3-030`.** ★ Arming all 45 would have shown only that the gate can go red;
   arming one shows it names the right picture. `--expect-fail` exit 0.
-- **AC-9 [class: eye-gated] ★★ PASS — Jay, `poke`, RGB, 4:3.** Jay: *"the renders look good."** **Three rooms**, not one: KQ1 #80, KQ2 #94, KQ3 #74, at
+- **AC-9 [class: eye-gated] ★★ PASS — Jay, `poke`, RGB, 4:3.** Jay: *"the renders look good."* **Three rooms**, not one: KQ1 #80, KQ2 #94, KQ3 #74, at
   `C:\karateka-capture\agi-p3.3-*-RGB-4x3.png` — **outside the repo** (§2P). ★ Per §3 I have not
   read or interpreted their pixels. **Launch path: `poke`, RGB, 4:3** (640x480, ratio verified from
   each PNG's IHDR). ★★ **Per idiom 19j a byte-identical buffer proves nothing about the screen** —
