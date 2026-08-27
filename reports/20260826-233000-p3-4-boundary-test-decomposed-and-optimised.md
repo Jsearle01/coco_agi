@@ -211,8 +211,9 @@ consistent with that. **Not verified against a running original** (tier 2); stat
   entries**, max unchanged; the per-picture distribution is identical. ★ The wide-scan change that
   might have altered seeding was not made (§3.5), so this is a confirmation rather than a risk
   retired.
-- **AC-9 [class: eye-gated] PENDING JAY.** Three rooms — KQ1 #80, KQ2 #94, KQ3 #74 — at
-  `C:\karateka-capture\agi-p3.4-*-RGB-4x3.png`, **outside the repo** (§2P), pixels not interpreted
+- **AC-9 [class: eye-gated] ★★ PASS — Jay, `poke`, RGB, 4:3.** Jay: *"rooms look fine."*
+  Three rooms — KQ1 #80, KQ2 #94, KQ3 #74 — at
+  `C:\karateka-capture\agi_captures\agi-p3.4-*-RGB-4x3.png`, **outside the repo** (§2P), pixels not interpreted
   by Clyde (§3). **Launch path `poke`, RGB, 4:3** (640×480 verified from each IHDR).
   ★★ Per idiom 19j a byte-identical buffer proves nothing about the screen — which is why these
   were captured even though AC-3 is green.
@@ -397,8 +398,8 @@ KQ3-074    P3.3 F17920528DDC  P3.4 F17920528DDC  IDENTICAL
 25.2 bundled-artifact grep: **N/A** — `coco_agi` still ships no bundle; no `build.bat`, no
 `LOADER.BIN`, no disk image (all out of scope). Probe binaries are gitignored.
 
-25.3 operator-runtime-smoke: **pending Jay.** ★ Launch path **`poke`**, monitor **RGB**, aspect
-**4:3**. Three rooms at `C:\karateka-capture\agi-p3.4-{KQ1-080,KQ2-094,KQ3-074}-RGB-4x3.png`.
+25.3 operator-runtime-smoke: **PASSED — Jay, `poke`, RGB, 4:3 (endpoints only, three stills;
+no motion under gate).** Jay: *"rooms look fine."* Captures now live in `C:\karateka-capture\agi_captures\` \u2014 see \u00a73.8.
 
 ### 6 — Reactive deviations and route accounting
 
