@@ -266,7 +266,7 @@ both measured **this task** by `hal_sync_check.py` and `reg_discipline.py` at th
   **one** picture (`Kingquest3-030`) via a driver-written flag. Result: **44 PASS, 1 FAIL, and the
   failure is `Kingquest3-030`.** ★ Arming all 45 would have shown only that the gate can go red;
   arming one shows it names the right picture. `--expect-fail` exit 0.
-- **AC-9 [class: eye-gated] PENDING JAY.** **Three rooms**, not one: KQ1 #80, KQ2 #94, KQ3 #74, at
+- **AC-9 [class: eye-gated] ★★ PASS — Jay, `poke`, RGB, 4:3.** Jay: *"the renders look good."** **Three rooms**, not one: KQ1 #80, KQ2 #94, KQ3 #74, at
   `C:\karateka-capture\agi-p3.3-*-RGB-4x3.png` — **outside the repo** (§2P). ★ Per §3 I have not
   read or interpreted their pixels. **Launch path: `poke`, RGB, 4:3** (640x480, ratio verified from
   each PNG's IHDR). ★★ **Per idiom 19j a byte-identical buffer proves nothing about the screen** —
@@ -483,7 +483,8 @@ picgate exit=0  (0 = the fault WAS caught)
 25.2 bundled-artifact grep: **N/A** — `coco_agi` still ships no bundle; there is no `build.bat`,
 no `LOADER.BIN` and no disk image (all out of scope). Probe binaries are gitignored.
 
-25.3 operator-runtime-smoke: **pending Jay.** ★ **Launch path `poke`, monitor RGB, aspect 4:3.**
+25.3 operator-runtime-smoke: **PASSED — Jay, `poke`, RGB, 4:3 (endpoints only, three stills;
+no motion under gate).** Jay: *"the renders look good."* ★ **Launch path `poke`, monitor RGB, aspect 4:3.**
 Three rooms at `C:\karateka-capture\agi-p3.3-{KQ1-080,KQ2-094,KQ3-074}-RGB-4x3.png`, outside the
 repo (§2P), pixels not interpreted by Clyde (§3).
 
@@ -550,7 +551,11 @@ repo (§2P), pixels not interpreted by Clyde (§3).
 5. ★ **A `reports/` encoding check** — carried forward from T-P0-011 §3.12 and still not built.
 
 ### 9 — User interaction during task
-None.
+One, at the gate: Jay observed the three rooms and reported *"the renders look good."* — AC-9
+and 25.3 PASS. ★ No correction was needed this time, which is worth noting only because the two
+preceding captures in T-P0-011 both were: the display path had two defects the byte-identical
+gate could not see (idiom 19j), and this is the first eye-gate submitted with the monitor mode
+and aspect ratio asserted by the harness rather than inherited from MAME's defaults.
 
 ### 10 — Candidate(s) captured this task
 Four, all to `seeds/AGI/live/` (§2C — new rows, nothing existing read or edited):
