@@ -18,6 +18,26 @@
 -- ★★★ I also inferred from `Startup`'s `IF %0=r` that the answer had to be LOWERCASE. That
 -- inference was wrong and I acted on it over code that already worked. The timing was the bug.
 --
+-- ═════════════════════════════════════════════════════════════════════════════════════════
+-- ★★★ STATUS AT THE END OF T-P0-015: THE BOOT HALF WORKS. THE CTRL+LETTER PROBE BELOW DOES
+-- NOT, AND MUST NOT BE RE-RUN WHILE AN OPERATOR IS AT THE KEYBOARD.
+--
+-- ★★ hold() drives ioport_field:set_value(), which is a PERMANENT PROGRAMMATIC OVERRIDE and
+-- not a momentary press. Writing defvalue back marks the field released but never hands it
+-- back to the input system, so once this script touches CTRL it OWNS CTRL for the session --
+-- and movement in this interpreter is CTRL+letter, so a stuck CTRL turns every operator
+-- keystroke into a menu command. Three trigger designs failed for that one reason before it
+-- was understood; the fault was never the trigger.
+--
+-- ★★★ AND THE PROBE NEVER WORKED ANYWAY. Twelve CTRL+letter candidates produced no room
+-- change, and the cause was not the keys: BOTH :ctrl_sel PORTS DEFAULT TO "Joystick", the
+-- interpreter polls the joystick, and every key was arriving correctly on the CoCo3 matrix
+-- with nothing to respond to it. Setting both ports to Unconnected fixed movement instantly.
+-- ★ The SLOT/CAND tuning below is that dead approach's last state, kept only for the record.
+--
+-- ★ THE MEASUREMENT IN THE P3.6 REPORT CAME FROM sierra_live.lua -- observe-only, no input
+-- path at all, with Jay driving. Use that one.
+-- ═════════════════════════════════════════════════════════════════════════════════════════
 -- /d0/Startup, read off the disk, for the record -- it runs automatically and launches the
 -- interpreter itself, so there is NO `Sierra` command to type:
 --     *GETMODE / echo What display are you using? / var.0
@@ -138,15 +158,15 @@ _G._n = emu.add_machine_frame_notifier(function()
         -- here, not assumed]. Each candidate is HELD for 5 s, which is what it takes for the
         -- ego to cross a room and reach an edge; 1.5 s only twitches it.
         local base = gameplay_at + 1800
-        local SLOT = 480                       -- 300 held + 180 to let any room change finish
-        local CAND = { "j", "k", "i", "m", "s", "d", "e", "x", "u", "n", "h", "l" }
+        local SLOT = 1500                      -- 1200 held (20 s) + 300 idle
+        local CAND = { "m", "j", "k", "i", "u", "n", "h", "l", "e", "s", "d", "x" }
         local ph  = (frame - base) % SLOT
         local idx = (math.floor((frame - base) / SLOT) % #CAND) + 1
         if ph == 0 then
             local pt, n = letter(CAND[idx])
             if pt then hold(R6,"CTRL",true); hold(pt,n,true); held = {pt,n} end
             w("[f%05d] hold CTRL+%s", frame, CAND[idx]); mark = "key:" .. CAND[idx]
-        elseif ph == 300 then
+        elseif ph == 1200 then
             if held then hold(held[1], held[2], false) end
             hold(R6,"CTRL",false); held = nil
             mark = "release"

@@ -23,409 +23,386 @@ lwasm from lwtools 4.24        MAME 0.281 (mame0281)
 [reg-discipline] POP3_port      59 register access(es) in 7 file(s) over 14 register(s).
 [reg-discipline] karateka_coco3  8 register access(es) in 2 file(s) over 4 register(s).
 
-CoCo3 corpus at C:\Projects\agi-games\coco3\ -- 7 titles + _ac8-screenshots.
+CoCo3 corpus at C:\Projects\agi-games\coco3\ -- 7 titles.
   Original/ media present for exactly TWO: King's Quest III and Leisure Suit Larry.  [X-26]
-  KQ3/Original = ten 161,280-byte JVC images, KQ3-1-1 .. KQ3-5-2.
 ```
 
-**★ §2T — POP `430a91c` and Karateka `78c8c27` unchanged from T-P0-014 §0**, both clean apart
-from Karateka's pre-existing `last-run.log`, lwasm unchanged. **`src/**` was not touched this
-task at all**, so `reg_discipline` stays structurally at 0.
+**★ §2T — POP `430a91c` and Karateka `78c8c27` unchanged from T-P0-014 §0.** `src/**` was not
+touched at all this task, so `reg_discipline` stays structurally at 0.
 
-**★★ The timing mechanism — the C-13 question, answered: P3.3–P3.5's mechanism DOES NOT
-TRANSFER.** Those tapped a `PHASE` byte *our own probe wrote*. Sierra's interpreter writes no
-marker and we cannot add one. What replaces it is in §3.3, and it is a **different instrument
-with a different resolution**, which is why AC-3 turned out the way it did.
+**★★ The timing mechanism — P3.3–P3.5's does NOT transfer.** Those tapped a `PHASE` byte our own
+probe wrote; Sierra's interpreter writes no marker. What replaces it is in §3.3.
 
 ---
 
 ### 1 — Summary
 
-**D-14 is answered, and the answer is a THIRD option the dispatch did not list.**
+**★★★ D-14 IS ANSWERED, AND CONSULTATION TRIGGER 1 HAS FIRED.**
 
-> **A KQ3 room change under Sierra's own 1988 interpreter takes 1.84 – 12.88 s (median 6.04 s,
-> n=4), and 85% of the median is the FLOPPY.**
+> **A KQ3 room change under Sierra's own 1988 interpreter takes a median of 9.65 s, of which
+> 8.48 s (88%) is the FLOPPY and 0.45 s is DRAWING.**
 >
-> **★★★ 88.8% of the drawing happens WHILE the disk is still working.** Sierra's interpreter
-> **renders into the disk wait** rather than load-then-render.
+> **Our renderer takes 7.473 s of pure CPU with no disk at all.**
+>
+> **★★★ SIERRA'S RENDERER IS ~17x FASTER THAN OURS, and 0.45 s is a CEILING on their pure
+> render — it contains OS-9 overhead and everything else between the disk stopping and the
+> screen settling. The true gap is LARGER.**
 
-★★ **So their fill is not visibly faster than ours — it is HIDDEN.** The dispatch's two branches
-were *"materially faster, there is a technique to find"* and *"comparable, the budget assumption
-is wrong."* The measurement says: **there IS a technique, and it is not in the fill at all — it
-is the OVERLAP.** Their renderer is not racing a clock; it is filling the time the drive is
-already costing them.
+★★ **This is the dispatch's first branch: *"there is a technique in their fill we have not
+found, and finding it is worth more than any further shaving."*** Two tasks of measured
+optimisation took our fill from 11.102 s to 7.473 s — 32.7% — and **a 17x gap is not a tuning
+gap.** It is a different algorithm or a different representation, and no amount of shaving
+reaches it.
 
-★★★ **Consultation trigger 2 fires** (comparable, not faster) **and trigger 1 does not** — but
-the reason differs from the dispatch's framing, so §6 states both.
+**It is also neither of the two mechanisms I hypothesised on the way, and both are withdrawn:**
 
-**AC-3's separation could NOT be achieved, and that is a measured result rather than a
-shortfall**: with 88.8% of draw traffic inside the disk window, disk time and render time are
-not separable phases in this interpreter. §3.5.
+- **NOT overlapped with the disk.** Lattice change *during* the disk burst was **0 in 14 of 15
+  bursts** — strictly load-then-draw. ★★ My earlier claim that *"88.8% of the drawing happens
+  while the disk is working"* is **WITHDRAWN**; it was measured on events that were not room
+  changes (§3.6).
+- **NOT a page flip.** **Zero VOFFSET writes** across all seven transitions, though VOFFSET
+  flips *are* used elsewhere (observed directly at the title→game change, §3.5).
 
-**What this says about our 7.473 s** (AC-6, §3.7): our number is **pure render with no disk at
-all**. Sierra's *entire* room change including a floppy load has a median of 6.04 s. **We spend
-more CPU on drawing than Sierra spends on the whole transition** — and we spend it in a window
-where, on real media, we would also be waiting for a drive we are not yet using.
+★ **AC-3 is answered properly rather than refused:** disk and draw ARE separable in this
+interpreter, because they are sequential. 88% / 5%.
 
-★ **This task changed no renderer code and made no optimisation** (§12).
+★★★ **THE TASK'S OTHER RESULT IS A METHOD FAILURE OF MINE, AND IT IS THE MORE INSTRUCTIVE ONE.**
+An earlier version of this report was filed with four "room changes" that were **menu events in
+a single room**, and Jay caught it by looking at the stills. The detector inferred a room change
+from *"disk burst, then the screen settles"* — **a menu satisfies that exactly as well.** §3.6
+records it and both withdrawn claims trace back to it.
 
 ### 2 — Files modified
-- `harness/tools/sierra_boot.lua` — **NEW.** Boots Sierra's interpreter to gameplay on
-  T-P0-004's proven schedule and instruments it: FDC taps for the disk phase, a draw-area write
-  tap, and a screen lattice.
-- `mame-idioms-coco3-port.md` — **§41h added** (the `Startup` script and the boot timing that
-  actually matters), **§41c corrected** (see §3.2).
+- `harness/tools/sierra_live.lua` — **NEW.** Observation harness: FDC taps, whole-map write
+  census, VOFFSET tap, screen lattice, passive key naming. ★ It sends **no input**.
+- `harness/tools/sierra_boot.lua` — a **hazard banner**: the boot half works and is T-P0-004's;
+  ★★ the CTRL+letter probe **must not be re-run with an operator at the keyboard** (`set_value`
+  owns CTRL for the session), and **it never worked anyway** — the cause was the joystick, not
+  the keys (§3.7).
+- `mame-idioms-coco3-port.md` — **§41h–§41k added** (boot, timing a guest you do not control,
+  the input findings, the detector).
 
-**No `src/**` change. No game data, resource bytes, renderings or screenshots committed** (§2P);
-screenshots go to Jay.
+**No `src/**` change. No game data, resource bytes, renderings or screenshots committed** (§2P).
 
 ### 3 — Reasoning
 
-**3.1 ★★★ Which media, and why NOT `KQ3/Original` in the end.**
-The dispatch names `KQ3/Original` as the natural subject — the only V2-volume build in the
-corpus. **It cannot be used single-drive, and the manifest says why without booting anything:**
+**3.1 ★★ Which media, and the deviation from `KQ3/Original`.**
+The dispatch names `KQ3/Original` — the only non-repacked V2-volume build. **It cannot be used
+single-drive.** The manifest says why without booting anything:
 
 ```
-KQ3-1-1.DSK  22 files   0 vol.*   [OS9Boot + CMDS/Sierra + logDir/picDir/viewDir/object/words.tok]
-KQ3-1-2.DSK   3 files   2 vol.*   vol.0 vol.1
+KQ3-1-1.DSK  22 files  0 vol.*  [OS9Boot + CMDS/Sierra + logDir picDir viewDir object words.tok]
+KQ3-1-2.DSK   3 files  2 vol.*  vol.0 vol.1
 ```
 
-★★ **The boot side carries the AGI DIRECTORY files and ZERO volumes** — it can name every
-resource and load none. §41b records exactly this trap. With only `-flop1`/`-flop2` on this
-driver (§41e) the volumes land on `/d1`, and the interpreter looks on the boot device. **I tried
-it and OS-9 came up with nothing to load.**
+★★ The boot side carries the AGI **directory** files and **zero volumes** — it can name every
+resource and load none (§41b). With only `-flop1`/`-flop2` (§41e) the volumes land on `/d1` and
+the interpreter looks on the boot device. **Tried; OS-9 came up with nothing to load.**
 
 **Used instead: `Floppy 360K/kq3-1.dsk`** — boot plus `vol.0,1,2,3,12` on one image, the same
-image T-P0-004 used. ★★ **The deviation costs resource authenticity, not interpreter
-authenticity**: the *interpreter binary is Sierra's own* either way, and that is what AC-2 times.
-**It is named in AC-4's caveat list.**
+image T-P0-004 used. ★ **The deviation costs resource authenticity, not interpreter
+authenticity**: the interpreter binary is Sierra's own either way, and that is what AC-2 times.
 
-★ `toc.txt`, read off the image, is Sierra's own disk map and confirms the layout:
-`d1 s1 v0 v1 / d1 s1 v0 v2 v12 / d1 s1 v0 v3 v12 / d2 s1 v0 v4 v12 v14 / ...`
-
-**3.2 ★★★ THE BOOT, AND THREE MISTAKES OF MINE — recorded because each looked reasonable.**
-`/d0/Startup` is an OS-9 shell script that **runs automatically and launches the interpreter
-itself**:
+**3.2 ★★★ The boot, and three mistakes of mine.**
+`/d0/Startup` is an OS-9 shell script that runs automatically and **launches the interpreter
+itself** — there is no `Sierra` command to type:
 
 ```
-*GETMODE
-echo What display are you using?  (R)GB, (C)omposite/TV or (M)onochrome
-var.0
-IF %0=r  montype -r  ELSE IF %0=c ... ELSE IF %0= montype -r ELSE GOTO GETMODE
-sierra <>>>/term
+*GETMODE / echo What display are you using? (R)GB,(C)omposite/TV or (M)onochrome / var.0
+IF %0=r montype -r ... ELSE GOTO GETMODE / sierra <>>>/term
 ```
 
-1. ★★ **I fired the monitor answer at frame 900 — about 25 s before the prompt existed.** The
-   prompt is up at **frame 2400**; T-P0-004's `os9rgb2.lua` had that right and I did not read it
-   first.
-2. ★★★ **I then "improved" the schedule into an event-driven wait for a PINNED PC. That is
-   WORSE.** PC pins during **disk waits** as well as at a keyboard prompt, so it triggered at
-   f1510 — still far too early. **A liveness signal is not a readiness signal.**
-3. ★★★ **I inferred from `IF %0=r` that the answer had to be lowercase, and acted on that over
-   code that already worked.** ★ Jay: *"it specifically specifies capital R. you had this
-   working before go look at that code."* **He was right. The timing was the bug, and the
-   inference was a second bug I introduced on top of the first.**
+1. ★★ **I fired the monitor answer at frame 900 — ~25 s before the prompt existed.** It is up at
+   **frame 2400**; T-P0-004's `os9rgb2.lua` had it right and I did not read it first.
+2. ★★★ **I then "improved" that into a wait for a PINNED PC. That is WORSE.** PC pins during
+   **disk waits** as well as at a keyboard prompt. **A liveness signal is not a readiness
+   signal.** The stray input landed in the shell and OS-9 printed `EOF` at a repeating prompt.
+3. ★★★ **I inferred from `IF %0=r` that the answer must be lowercase and acted on that over code
+   that already worked.** Jay: *"it specifically specifies capital R. you had this working before
+   go look at that code."* **He was right. The timing was the bug.**
 
-★ The visible symptom was Jay's: *"the command line just repeats like typing enter over and over"*
-and then *"it's printing eof"* — stray input landing in the shell, running `Startup` off the end
-of its input.
+**3.3 ★★★ The mechanism, and its resolutions.**
+No marker can be added to the guest, so three guest-agnostic signals:
 
-**★★ IDIOM 41c IS CORRECTED, NOT CONTRADICTED.** Capital `R` + a separate ENTER is right. What
-41c did not say, and now does (§41h), is **when**: not before frame ~2400, and readiness is
-`PC == $FD5F` *specifically*, not "PC is pinned".
-
-**3.3 ★★★ THE MECHANISM, and why it is weaker than P3.3–P3.5's.**
-For a guest we do not control there is no marker to tap. Three guest-agnostic signals:
-
-| signal | what it measures | resolution |
+| signal | measures | resolution |
 |---|---|---|
-| **FDC taps** `$FF40-$FF4F`, read **and** write | the disk phase | **one instruction**, exact emulated clock |
-| **draw-area write tap** `$6000-$7FFF` | drawing activity | one instruction |
-| **screen lattice**, 16×10 points, change-count per frame | when the picture settles | **one frame = 16.688 ms** |
+| FDC taps `$FF40-$FF4F`, read **and** write | the disk phase | **one instruction** |
+| whole-map write tap, bucketed by 4 KB | where drawing goes | one instruction |
+| VOFFSET tap `$FF9D-$FF9E` | page flips | one instruction |
+| 16×10 `scr:pixel()` lattice | when the picture settles | **one frame, 16.688 ms** |
 
-★★ **The OS-9 RBF driver POLLS the controller**, so an FDC access count is *not* a byte count —
-what it marks is **when** the disk is worked, by density. 3.0 M accesses in one 120 s run.
+★★ The OS-9 RBF driver **polls**, so an FDC count is not a byte count — it marks **when** the
+disk is worked, by density.
 
-★★★ **A DISCOVERY ERROR WORTH RECORDING.** I located the draw area with a wide write tap
-bucketed by 4 KB — **during idle sprite animation** — and got `$9000-$9FFF` at **91%**. That is a
-small status region. Re-run **across an actual room change** the map is completely different:
-
-```
-$7000-$7FFF  40.1%      $0000-$1FFF  35.4%      $6000-$6FFF   7.5%      $8000-$8FFF   6.8%
-```
-
-★ **A window discovered under the wrong workload is how an instrument ends up watching the wrong
-thing and reporting it confidently.** The first measurement pass used the wrong tap and showed no
-render burst at all; that pass is discarded, not reported.
-
-**3.4 ★★ Causing a room change — the mapping was PROBED, not assumed.**
-Jay supplied the fact that movement is **Ctrl + letter**, not the CoCo3 arrow diamond
-[Nerdly Pleasures / I-16] — **secondary and observational** [L-21], so twelve candidates were
-held for 5 s each and scored on screen change and disk traffic:
+**3.4 ★★★ A DISCOVERY ERROR, recorded because it produced a confident wrong answer.**
+The draw window was located with a wide write tap **during idle sprite animation**: `$9000-$9FFF`
+at **91%**. A narrow tap was pinned there and the first measurement pass found **no render burst
+at all** — a publishable-looking result. Re-running the same discovery **across a real room
+change** gives a completely different map:
 
 ```
-CTRL+m   lattice 1231   fdc     0      <-- the ego WALKING (most change, no disk)
-CTRL+d   lattice  118   fdc 24861      <-- a RESOURCE LOAD (most disk)
-CTRL+e   lattice  293   fdc 13507
-CTRL+s   lattice  338   fdc  3005
-CTRL+x   lattice   63   fdc 12096
-CTRL+j/k/i/u/n/h/l      fdc <= 1
+during a room change:                     during idle animation (the WRONG workload):
+  $7000-$7FFF  40.1%                        $9000-$9FFF  91.0%
+  $0000-$1FFF  35.4%                        $8000-$8FFF   3.1%
+  $6000-$6FFF   7.5%                        rest          5.9%
+  total 11,286,077 writes                   total 96,104 writes
 ```
 
-★ The mapping is **not fully resolved to compass directions** and did not need to be: AC-2 needs
-room changes to *happen and be detected*, not to be commanded precisely. **That is Jay's §3
-suggestion taken directly** — the taps find the event, so causing it can be crude.
+★ **The instrument was aimed at 0.8% of the traffic.** Two orders of magnitude separate the two
+totals, and that was visible at the time.
 
-**3.5 ★★★ AC-3 — WHY DISK AND RENDER CANNOT BE SEPARATED, measured rather than asserted.**
-For each disk burst, draw-area writes were counted **inside** the burst and **after** it:
+**3.5 ★★ VOFFSET flips ARE used — but not for room changes.**
+Caught directly: `f2946 VOFFSET := $EC00`, then the whole screen changes two frames later, at the
+title→game transition. Values seen: `$E000`, `$EC01`, `$0000`, `$EC00` — physical `$70000`,
+`$76008`, `$00000`, `$76000`. ★★★ **But across all seven room changes, VOFFSET writes = 0.**
+So the interpreter has multiple buffers and flips between them for *some* transitions, and does
+**not** use that path for a room change.
+
+**3.6 ★★★ THE METHOD FAILURE — a detector that could not tell a menu from a room.**
+An earlier filing reported four room changes with a median of 6.04 s. **They were menu events in
+one room.** Jay checked the stills: *"same room."*
+
+★★ **The detector inferred the event from "disk burst, then the screen settles" — and a menu
+satisfies that exactly as well as a room change.** I never verified which I had.
+★★★ **The refutation was already in my own trace and I did not read it:** the maximum lattice
+change in any frame was **14 of 160**, where a full repaint moves most of them. **The data said
+no room change had happened.**
+
+★★ **And the correction has a second half.** After Jay confirmed real transitions, the detector
+*still* reported nothing — because it tested a **per-frame** threshold, and **Sierra draws a room
+PROGRESSIVELY**: measured across the seven confirmed changes, per-frame maximum **16/160** while
+the cumulative change was **47–103**. ★ **A detector that assumes an instantaneous repaint is
+blind to a progressive one**, and it silently missed fifteen consecutive transitions.
+★★★ **Both halves are the same error: calibrating an instrument on the wrong event and then
+trusting it. I made it twice in one task and Jay caught it both times.**
+
+**3.7 ★★ Causing the room change — the operator drove it, and that was the unblock.**
+Movement is Ctrl+letter, not the arrow diamond [Jay, Nerdly Pleasures / I-16 — secondary]. Twelve
+Ctrl+letter candidates were probed and none produced a transition. ★★★ **The actual cause was
+that both controller ports default to `Joystick`, and the interpreter polls the joystick — so
+every key arrived correctly on the CoCo3 matrix and nothing responded.** Setting `:ctrl_sel` to
+**Unconnected** on both ports fixed movement immediately, and Jay then walked in and out of
+rooms to produce the measurement.
+
+★ **Input findings, all measured by reading `:row6` live rather than assumed:**
 
 ```
-start_f  disk_s   fdc     draw_DURING   draw_AFTER   tail_s   total_s
-9536     1.268    3005          43919        42225    0.567    1.836
-9650    11.632   28415         745280        94889    1.252   12.883
-10464    8.628   16240         371286         8094    0.267    8.895
-21339    1.669    5808          52610         7518    1.519    3.187
-
-★ 88.8% of all draw-area writes fall INSIDE the disk window (1,213,095 vs 152,726)
+CTRL, ALT, SHIFT, ENTER, letters, bare arrows   -> reach the machine
+End, Insert                                     -> NEVER arrive (MAME's UI; 41f confirmed)
+Left Alt                                         -> reaches MAME but WINDOWS grabs it (system beep)
 ```
 
-★★★ **Drawing and loading are concurrent, so they are not separable phases.** A "render time"
-for this interpreter is not a quantity that exists to be measured — the honest decomposition is
-**a total, a disk window that contains most of the drawing, and a post-disk tail of
-0.27 – 1.52 s.**
+★★★ **And a harness rule paid for three times over:** `ioport_field:set_value()` is a
+**PERMANENT programmatic override**, not a momentary press — writing `defvalue` back marks the
+field released but never returns it to the input system. Any script that touches `CTRL` owns
+`CTRL` for the session, and since movement is CTRL+letter, that turns every keystroke into a
+menu command. Jay: *"it's just blasting the menus and i can't do anything."* **Three trigger
+designs failed for that one reason before it was understood; the fault was never the trigger.**
 
-★ **This is the answer AC-3 explicitly permits** — *"or a stated reason it cannot be"* — and the
-reason is a number, not a shrug.
+**3.8 §2.1 / §8.1 — authority and limits.** Sierra's interpreter is **tier 2** for CoCo3
+questions [L-17] and only for KQ3 and LSL [X-26]. This used KQ3, on the `Floppy 360K` re-imaging,
+so the **interpreter** is tier-2 Sierra and the **media layout** is not (§3.1). ★★ **Every figure
+carries OS-9 overhead and is a FLOOR** [I-19] — which makes the 17x gap a **lower bound**.
 
-**3.6 ★★ AC-5 — the fill's SHAPE: NOT DETERMINED, and I am not guessing.**
-§7 bounds C to a cheap static read. I spent the budget on AC-2/AC-3 and on recovering the boot,
-and did not disassemble. **What is known is structural, from the write map only:** the draw
-traffic is concentrated in `$6000-$7FFF` (8 KB) with a large second concentration in
-`$0000-$1FFF`. ★★ **8 KB is a quarter of a 320×200×4bpp screen (32 KB) and a third of a 160×168
-byte-per-pixel buffer (26,880 B), so the draw window is NOT fully identified**, and I decline to
-infer 160-wide vs 320-wide, span-seeding vs pixel-queue, or one-pass vs two from it. **All three
-of AC-5's questions: could not determine.**
-
-**3.7 ★★★ AC-6 — what this implies, in my words.**
-**The budget assumption is wrong AND there is a technique — but the technique is not in the
-fill.**
-
-- A room change on Sierra's own interpreter, on original-style media, costs **1.84 – 12.88 s**.
-  **AGI room changes on this machine were always slow.** 7.473 s is not obviously deficient
-  against 1988; it is in the same band.
-- ★★ **But we are not comparable, because we have no disk yet.** Our 7.473 s is *pure CPU*.
-  Sierra's median 6.04 s is *everything*. When storage arrives, our number does not stay 7.473 —
-  it becomes 7.473 **plus** a load, unless we overlap.
-- ★★★ **THE TECHNIQUE IS THE OVERLAP.** 88.8% of their drawing happens under the disk wait. On
-  a floppy the drive is going to cost seconds no matter what; Sierra spends those seconds
-  drawing. **That is an architectural property of their loader, not a trick in their fill**, and
-  it is available to us — design §4.4's span reads and §2R.1's phase pair are where it would
-  live.
-- ★ **So the next question is not "how do we make the fill faster" but "can the fill run while
-  `disk_read_range` is in flight".** That reframes §9's ranking and it is the Orchestrator's to
-  fold.
-
-**3.8 §2.1 / §8.1 — authority.** Sierra's interpreter is **tier 2** for CoCo3 questions [L-17],
-**and only for KQ3 and LSL** [X-26]. This used KQ3 — but the `Floppy 360K` re-imaging, so the
-**interpreter** is tier-2 Sierra and the **media layout** is not (§3.1). ★★ **Every figure here
-carries OS-9 overhead and is a FLOOR, not a ceiling** [I-19].
-
-**3.9 §2S — sibling claims.** POP `430a91c`, Karateka `78c8c27`, both `wip`, measured this task
-at those refs. No sibling file touched.
+**3.9 §2S.** POP `430a91c`, Karateka `78c8c27`, both `wip`, measured this task at those refs. No
+sibling file touched.
 
 ### 4 — Verification (AC-by-AC)
 
-- **AC-1 [class: byte-comparable] PASS.** `reg_discipline` 0/59/8, `hal_sync_check` OK ×3.
-  **`src/**` untouched this task**, so the 0 is structural.
-- **AC-2 [class: state-comparable] PASS, with its sampling stated honestly.** **4 distinct disk
-  events** after gameplay; totals **1.836 / 3.187 / 8.895 / 12.883 s**, median **6.04 s**.
-  Mechanism and resolution in §3.3. ★★★ **On run count: the dispatch asks for ≥3 timings each.
-  Two full runs were done and are IDENTICAL to 1e-6 s** (§5) — **emulated time is deterministic
-  [T-P0-012, 9 dp], so a third repeat would return the same number again and would be padding,
-  not evidence** [L-33]. **What repetition CANNOT establish here is variance on real hardware**,
-  where head position and drive speed vary; that is a limit of the method, stated.
-- **AC-3 [class: state-comparable] PASS as "cannot be separated", with the measurement behind
-  it.** **88.8% of draw-area writes fall inside the disk window.** Disk: 1.268 / 1.669 / 8.628 /
-  11.632 s. Post-disk tail: 0.267 – 1.519 s. §3.5.
-- **AC-4 [class: state-comparable] PASS.** Ratio **Sierra median 6.04 s : our 7.473 s = 0.81**.
-  ★★★ **THE AXES ON WHICH THESE ARE NOT COMPARABLE, and the ratio must never be quoted without
+- **AC-1 [class: byte-comparable] PASS.** `reg_discipline` 0/59/8; `hal_sync_check` OK ×3.
+  `src/**` untouched.
+- **AC-2 [class: state-comparable] ★★★ PASS.** **7 room changes**, each operator-confirmed by
+  walking in and out of rooms. Totals **8.36 / 8.93 / 9.11 / 9.65 / 10.01 / 13.75 / 18.54 s**,
+  median **9.65 s**. Mechanism and resolution in §3.3. ★★ **On the dispatch's "≥3 transitions,
+  each timed ≥3 times": the 7 are distinct transitions and were NOT repeated.** Emulated time is
+  deterministic [T-P0-012, 9 dp], so re-running an identical script returns identical numbers —
+  but these were **operator-driven and therefore not reproducible by replay**. ★ **What
+  repetition cannot establish here is variance on real hardware**, where head position and drive
+  speed vary. Stated as a limit rather than padded.
+- **AC-3 [class: state-comparable] ★★★ PASS — separable, and separated.** **DISK median 8.48 s
+  (88%), DRAW median 0.45 s.** Lattice change during the disk burst was **0 in 14 of 15 bursts**,
+  so the phases are sequential, not concurrent.
+- **AC-4 [class: state-comparable] PASS.** Ratio **7.473 s : 0.45 s ≈ 17x**, ours slower.
+  ★★★ **THE AXES ON WHICH THESE ARE NOT COMPARABLE, and the ratio must not be quoted without
   them:**
-  1. **Ours has NO DISK.** Sierra's number is disk-dominated (85% of the median). **This is the
-     big one.**
-  2. **Ours is 45 pictures across 3 games; Sierra's is 4 events in one game.**
-  3. **Ours is a poke harness with no OS.** Sierra's carries **OS-9** — a floor, not a ceiling
-     [I-19].
-  4. **Ours renders a picture from a resource already in RAM.** Sierra's "room change" includes
-     LOGIC execution, resource lookup, view loading and sprite setup.
-  5. **Different pictures.** Ours are KQ1/2/3 PC V2 resources; Sierra's are the CoCo3 build's.
-  6. **Ours is measured start-to-end of one routine at one-instruction resolution.** Sierra's is
-     bounded by a **frame-resolution** settle detector (§3.3).
-  7. **Media differs** — `Floppy 360K`, not `Original` (§3.1).
-- **AC-5 [class: state-comparable] PASS as "could not determine" ×3.** §3.6. ★ Span-seeding vs
-  pixel-queue: **could not determine.** 160-wide vs 320-wide: **could not determine.** One pass
-  or two: **could not determine.** **No guess is recorded.**
-- **AC-6 [class: suite] PASS.** §3.7. **The budget assumption is wrong, and the technique is the
-  disk/render OVERLAP rather than anything in the fill.**
-- **AC-7 [class: eye-gated] PENDING JAY.** Twelve stills across a 330 s live run at
-  `C:\karateka-capture\agi_captures\sierra-rooms\`, plus the earlier boot sequence in
-  `sierra-boot\`. ★★ **Launch path: `live-disk` — Sierra's own OS-9 boot off a mounted image,
-  which is the only path that reflects its real cost.** ★ MAME opens floppies read-write, so a
-  **copy** was mounted, never a corpus original (§2P, idiom on corpus media).
-- **AC-8 [class: suite] PASS.** Two candidates; see §10.
+  1. **Ours is 45 pictures across 3 games; Sierra's is 7 transitions in one game.**
+  2. **Ours is a poke harness with no OS**; Sierra's carries **OS-9** — so their 0.45 s is a
+     **ceiling** and the gap is a **lower bound**.
+  3. **Ours renders a PC V2 resource from RAM**; Sierra's room change also runs LOGIC, resolves
+     resources, and sets up views — more work, not less, inside the 0.45 s.
+  4. **Different pictures** — ours KQ1/2/3 PC; theirs the CoCo3 build's.
+  5. **Ours is one routine timed at one-instruction resolution**; Sierra's draw phase is bounded
+     by a **frame-resolution** settle detector (±17 ms).
+  6. **Media differs** — `Floppy 360K`, not `Original` (§3.1).
+  7. **Their draw phase may include non-render work** between the disk stopping and the settle.
+- **AC-5 [class: state-comparable] PASS as "could not determine" ×3.** The draw window is **not
+  fully identified** (§3.4): traffic concentrates in `$7000-$7FFF` and `$0000-$1FFF`, and 8 KB is
+  a quarter of a 320×200×4bpp screen. ★ Span-seeding vs pixel-queue: **could not determine.**
+  160- vs 320-wide: **could not determine.** One pass or two: **could not determine.**
+  **No guess is recorded.** ★★ This is now the obvious next task and it has a sharp question.
+- **AC-6 [class: suite] ★★★ PASS.** **There is a technique in their fill we have not found.**
+  A 17x gap is not reachable by shaving — two tasks of measured optimisation bought 32.7%.
+  ★ It is not overlap and not a page flip; both were tested and both are ruled out. §6.
+- **AC-7 [class: eye-gated] PENDING JAY.** Nine stills at
+  `C:\karateka-capture\agi_captures\sierra-rooms\`, five of them at confirmed screen changes.
+  ★★ **Launch path: `live-disk`** — Sierra's own OS-9 boot off a mounted **copy**, never a corpus
+  original (§2P). Monitor: MAME's `screen_config` default is **Composite** while `Startup` ran
+  `montype -r`; recorded because it means the colours are not the RGB ones.
+- **AC-8 [class: suite] PASS.** Three candidates; see §10.
 
 ### 5 — Verdict-time evidence (v0.7 §11)
 
 25.1 fresh tool output (verbatim):
 
 ```
-=== AC-2 / AC-3: room changes under Sierra's interpreter (KQ3, Floppy 360K, OS-9) ===
-DRAW-AREA ($6000-$7FFF) writes/frame after gameplay:
-  median 136  p90 1262  p99 2243  max 2748
+AC-2 / AC-3 -- ROOM CHANGES under Sierra's own 1988 interpreter
+KQ3, Floppy 360K image, OS-9, operator-driven by Jay, controller ports Unconnected
 
-ROOM CHANGES -- disk burst, and where the drawing sits relative to it
-  start_f disk_s   fdc      draw_DURING  draw_AFTER   tail_s   total_s
-  9536    1.268    3005     43919        42225        0.567    1.836
-  9650    11.632   28415    745280       94889        1.252    12.883
-  10464   8.628    16240    371286       8094         0.267    8.895
-  21339   1.669    5808     52610        7518         1.519    3.187
+#    start_s   disk_s    draw_s    TOTAL_s   fdc        lat_chg   voff
+1    50.01     18.140    0.400     18.540    55668           62      0
+2    193.90    12.733    1.018     13.751    35385          103      0
+3    241.99    7.944     0.417     8.361     22568          100      0
+4    253.91    8.478     0.451     8.928     26000           47      0
+5    266.36    8.695     0.417     9.112     17465           47      0
+6    279.01    8.044     1.602     9.646     24131           61      0
+7    291.02    7.059     2.954     10.013    17483           72      0
 
-★★★ 88.8% of the drawing happens WHILE the disk is working (1213095 vs 152726 writes)
-★ room change TOTAL: min 1.836  median 6.04  max 12.883 s   (n=4)
-★ of which DISK    : min 1.268  median 5.15  max 11.632 s
-```
+n = 7 room changes, each operator-confirmed by walking in and out of rooms
+  TOTAL  min 8.36  median 9.65  max 18.54 s
+  DISK   min 7.06  median 8.48  max 18.14 s   <- 88% of the median total
+  DRAW   min 0.40  median 0.45  max 2.95 s
 
-```
-=== AC-2 determinism: run 1 vs run 2, identical script, fresh copy of the same image ===
-  start_f  disk r1     disk r2     total r1    total r2
-  9536     1.268       1.268       1.836       1.836
-  9650     11.632      11.632      12.883      12.883
-  10464    8.628       8.628       8.895       8.895
-  21339    1.669       1.669       3.187       3.187
-  ★ 4 events in run 1, 4 in run 2; run-to-run IDENTICAL to 1e-6 s
-```
+  ★ lattice change DURING the disk burst: 0 in 14 of 15 bursts -- strictly LOAD THEN DRAW.
+  ★ VOFFSET writes across all of them: 0 -- it is NOT a page flip.
 
-```
-=== AC-4: the comparison, and it is NOT like for like ===
-  Sierra room change TOTAL   min 1.84  median 6.04  max 12.88 s  (n=4)
-  of which DISK              min 1.27  median 5.15  max 11.63 s
-  disk share of the median total: 85%
-  OUR render (P3.5 median)   7.473 s, NO DISK AT ALL
-  ratio Sierra-total / ours  = 0.81
-  ★ but the numerator INCLUDES a floppy load and the denominator includes NO disk,
-    so the ratio is not a statement about the two renderers.
+  OUR renderer (P3.5 median, 45 pictures, NO disk at all): 7.473 s
+  SIERRA's draw phase (median):                            0.45  s
+  ★★★ ratio 17x -- and 0.45 s is a CEILING on their pure render (it contains OS-9
+      overhead and any non-render work between the disk stopping and the screen settling),
+      so the true gap is LARGER, not smaller.
 ```
 
 ```
-=== §3.3: the draw area, discovered under the RIGHT workload ===
-during a room change:            during IDLE animation (the WRONG workload):
-  $7000-$7FFF  40.1%               $9000-$9FFF  91.0%
-  $0000-$0FFF  18.6%               $8000-$8FFF   3.1%
-  $1000-$1FFF  16.8%               rest          5.9%
-  $6000-$6FFF   7.5%
-  $8000-$8FFF   6.8%
-  total 11,286,077 writes          total 96,104 writes
+=== §3.5: VOFFSET flips exist, but not for room changes ===
+[f02946] t=49.162  VOFFSET WRITE x2  $FF9D<=$EC $FF9E<=$00
+[f02948] * screen change t=49.195 s  changed=96/160  writes=2174  fdc=0
+   -> a flip at the title->game transition, screen changes 2 frames later
+VOFFSET values seen: $E000 $EC01 $0000 $EC00  (physical $70000 $76008 $00000 $76000)
+VOFFSET writes during the 7 ROOM CHANGES: 0
 ```
 
 ```
-=== §3.4: movement mapping, PROBED over 12 candidates x 5 s held ===
-  CTRL+m   lattice 1231   fdc     0     <-- walking (most screen change, no disk)
-  CTRL+s   lattice  338   fdc  3005
-  CTRL+e   lattice  293   fdc 13507
-  CTRL+d   lattice  118   fdc 24861     <-- most disk = a resource load
-  CTRL+x   lattice   63   fdc 12096
-  CTRL+j/k/i/u/n/h/l                    fdc <= 1
+=== §3.4: the draw window, discovered under the RIGHT workload vs the wrong one ===
+during a room change:              during IDLE animation (the wrong workload):
+  $7000-$7FFF  40.1%                 $9000-$9FFF  91.0%
+  $0000-$1FFF  35.4%                 $8000-$8FFF   3.1%
+  $6000-$6FFF   7.5%                 rest          5.9%
+  total 11,286,077 writes            total 96,104 writes
 ```
 
 ```
-=== §3.1: why KQ3/Original could not be used single-drive ===
-image          files  vols  notable
-KQ3-1-1.DSK       22     0  [BOOT + CMDS/Sierra + logDir picDir viewDir object words.tok]
-KQ3-1-2.DSK        3     2  vol.0 vol.1
-KQ3-2-1.DSK        4     3  vol.0 vol.12 vol.2
-  ... (ten images; the boot side carries the DIRECTORIES and ZERO volumes)
+=== §3.7: input, measured by reading :row6 live ===
+CTRL, ALT, SHIFT, ENTER, letters, bare arrows  -> reach the machine
+End, Insert                                    -> never arrive (MAME UI; 41f confirmed)
+Left Alt                                       -> reaches MAME, WINDOWS grabs it (system beep)
+:ctrl_sel both ports default to "Joystick"     -> the interpreter polls it and ignores keys
+   set to Unconnected -> movement works immediately
 ```
 
-25.2 bundled-artifact grep: **N/A** — `coco_agi` ships no bundle, and this task built nothing.
-No `src/**` change at all.
+```
+=== §3.6: why the detector was blind, measured on the 7 confirmed changes ===
+per-frame lattice change, maximum        16/160     <- below any sane per-frame threshold
+cumulative change per transition          47-103    <- the real signal
+  -> Sierra draws a room PROGRESSIVELY; a per-frame detector missed 15 consecutive transitions
+```
 
-25.3 operator-runtime-smoke: **pending Jay.** ★★ **Launch path `live-disk`** — Sierra's own
-OS-9 boot off a mounted (copied) image, monitor **RGB** via `Startup`'s `montype -r`, aspect
-4:3. Stills in `C:\karateka-capture\agi_captures\sierra-rooms\`.
+25.2 bundled-artifact grep: **N/A** — `coco_agi` ships no bundle and this task built nothing.
+
+25.3 operator-runtime-smoke: **pending Jay.** ★★ Launch path **`live-disk`**, Sierra's own OS-9
+boot off a mounted copy. Stills in `C:\karateka-capture\agi_captures\sierra-rooms\`.
 
 ### 6 — Reactive deviations and route accounting
 
-- ★★★ **Trigger 2 FIRED: Sierra's room change is COMPARABLE, not faster** (median 6.04 s against
-  our 7.473 s) — **so the budget assumption is wrong and P3b unblocks.** ★ But the reason is not
-  the dispatch's: it is not that both renderers are equally slow, it is that **Sierra's render is
-  hidden under the disk** (§3.7). **Trigger 1 did not fire.**
-- **Trigger 3 FIRED: disk and render could not be separated.** §3.5 reports the conflated figure
-  and exactly what it includes, with the 88.8% measurement behind the refusal.
-- ★★ **Trigger 4 was APPROACHED and not fired.** The interpreter *would* not reach gameplay for
-  four runs. ★ **It was my configuration that was wrong, not MAME's** — the media choice (§3.1)
-  and then the input timing (§3.2) — and T-P0-004 had already proven the machine runs it. **I
-  came close to spending the task here and Jay's two interventions are what prevented it.**
-- **Trigger 5 did not arise** — C was not attempted beyond the write map (§3.6).
-- ★★ **Deviation: `Floppy 360K/kq3-1.dsk` instead of `KQ3/Original`.** Forced by §41b + §41e;
-  costs resource authenticity, not interpreter authenticity; carried into AC-4's caveat list.
+- ★★★ **TRIGGER 1 FIRED: Sierra's render is 0.45 s against the dispatch's 4 s threshold.**
+  Reported immediately and **the task stopped there** rather than hunting the fill — §7 puts a
+  disassembly out of scope and the dispatch says this changes the next three tasks.
+- **Trigger 2 did NOT fire** — not comparable; materially faster.
+- **Trigger 3 did NOT fire** — disk and render **were** separable (§3.5 of the dispatch's sense),
+  because they are sequential in this interpreter.
+- ★★ **Trigger 4 was APPROACHED and not fired**, but only just: the interpreter would not reach
+  gameplay for several runs. ★ **It was my configuration that was wrong, not MAME's** — media
+  (§3.1), then input timing (§3.2), then the joystick (§3.7). **I came close to spending the
+  whole task here and Jay's interventions are what prevented it.**
+- **Trigger 5 did not arise** — C was not attempted beyond the write map.
+- ★★ **Deviation: `Floppy 360K` instead of `KQ3/Original`** (§3.1), carried into AC-4's caveats.
+- ★★ **Deviation: `:ctrl_sel` set to Unconnected.** A machine configuration, not keyboard input.
+  **Without it the game ignores the keyboard and no room change is reachable.**
 - **ROUTE ACCOUNTING.** ★ **What I did NOT do:** read the fill (AC-5 is three "could not
-  determine"s), and separate disk from render (AC-3 is a measured refusal). ★★ **What I did that
-  was not asked:** an idiom correction to 41c and a new 41h, because the boot recipe as written
-  was insufficient and the next task would have hit the same wall.
+  determine"s), and I did **not** attempt the disassembly. ★★ **What I did that was not asked:**
+  a VOFFSET tap and a whole-map write census — both were needed to rule out the two wrong
+  hypotheses I had already published in an earlier filing.
 
 ### 7 — Uncertainty flags
-- ★★★ **n=4 events, one game, one media variant.** The 12.883 s and 8.895 s events are the
-  substantial ones; 1.836 s and 3.187 s may be partial loads rather than full room changes, and
-  **I cannot distinguish those without knowing the interpreter's resource logic.**
-- ★★ **The 88.8% overlap figure depends on `$6000-$7FFF` being draw traffic.** It is where 40%
-  of write traffic goes during a room change, but §3.6 shows the window is **not fully
-  identified** — some of those writes may be buffers rather than pixels. **The direction of the
-  finding is robust** (drawing is clearly concurrent with loading); **the exact percentage is
-  not.**
-- ★★ **The room-change boundary is a frame-resolution settle detector.** A slow final flourish
-  under the 60-frame quiet threshold would be excluded.
-- ★ **OS-9 overhead is inside every figure** [I-19] — a floor.
-- ★ **Determinism is the emulator's, not the hardware's.** Identical repeats say the measurement
-  is reproducible, **not** that a real 1988 drive would be.
-- ★ **`_ac8-screenshots` in the corpus was not examined** and may contain prior evidence.
+- ★★★ **n=7, one game, one media variant, one operator session.** The 17x is robust to
+  measurement error at that magnitude, but the *distribution* is not established.
+- ★★ **The draw phase is bounded by a frame-resolution settle detector** and may include
+  non-render work. **0.45 s is a ceiling on their render, not an estimate of it.**
+- ★★ **Two claims from an earlier filing of this report are WITHDRAWN**: the 6.04 s median
+  (menu events, not room changes) and "88.8% of drawing overlaps the disk" (measured on those
+  same events; the real transitions are strictly sequential).
+- ★ **The draw window is not fully identified** (§3.4), so no per-picture write count is
+  comparable to ours.
+- ★ **MAME's monitor is Composite** while the interpreter was told RGB — colours are not the RGB
+  ones, which matters for AC-7 but not for timing.
+- ★ **The live detector in `sierra_live.lua` over-fires** — it triggers on any disk burst
+  followed by quiet and produced 29 false positives in one run. **The measurement in this report
+  came from OFFLINE analysis with proper filtering, not from that detector.** It needs a screen-
+  change requirement before it is trustworthy.
+- ★ **OS-9 overhead is inside every figure** [I-19]. **Tier-2 evidence (real hardware) was not
+  consulted.**
 
 ### 8 — Follow-up candidates
-1. ★★★ **Can our fill run while `disk_read_range` is in flight?** That is the technique this
-   task found, and it is worth more than another 15% of shaving. Design §4.4 / §2R.1.
-2. ★★ **Re-run AC-3 with the draw window properly identified.** A wide tap bucketed by 256 B
-   during one room change would settle it, and would make the 88.8% exact.
-3. ★ **AC-5's three questions remain open** and now want the bounded static read §7 permitted.
-4. ★ **Try `Coco SDC/kq3.dsk`** (all 12 volumes, single image) for deeper rooms than `vol.0-3`.
+1. ★★★ **WHAT IS SIERRA'S FILL DOING THAT OURS IS NOT, TO BE 17x FASTER ON THE SAME CPU?**
+   That is the question this task was built to produce and it is now sharp. §7's bounded static
+   read is the cheap first move; a disassembly "wants a separate conversation".
+   ★ Concrete sub-questions the write map already poses: why is `$0000-$1FFF` 35% of the draw
+   traffic, and is the picture buffer 160-wide rather than 320?
+2. ★★ **Fix the live detector** — require screen change, not just a disk burst (§7).
+3. ★★ **Identify the draw window properly** — a 256 B-bucketed wide tap across one transition.
+4. ★ **Re-measure with `KQ3/Original`** using two drives, if a way is found to put volumes on the
+   boot device.
 5. ★ **A `reports/` encoding check** — carried from T-P0-011 §3.12, still not built.
 
 ### 9 — User interaction during task
-**Three, and all three were load-bearing.**
-1. ★★ **A mid-task note** (recorded here per its own instruction): the dispatch never said how
-   to *cause* a room change; movement is **Ctrl + letter**, not the arrow diamond
-   [Nerdly Pleasures / I-16], flagged as secondary; and a suggestion that **the taps could
-   DETECT the change rather than my having to control it**. ★★★ **That suggestion is the design
-   this report's AC-2/AC-3 rest on** — §3.4 and §3.5 are it.
-2. ★★ *"os9 never entered the game"* — correct, and it stopped me analysing a trace of a machine
-   sitting at a prompt.
-3. ★★★ *"it still never enters the game… the command line just repeats"*, then *"it's printing
-   eof"*, then **"it specifically specifies capital R. you had this working before go look at
-   that code."** ★ **The last one was a direct correction of a wrong inference of mine** (§3.2)
-   and saved an unbounded number of runs. I had reasoned from `Startup`'s `IF %0=r` over
-   T-P0-004's working code.
-4. ★ *"you are definitely in game. the last three are the first room"* — resolved a structural
-   ambiguity I could not settle without interpreting pixels (§3).
+**Jay intervened seven times, and the task's result is largely his.**
+1. ★★ **A mid-task note**: the dispatch never said how to *cause* a room change; movement is
+   Ctrl+letter [I-16], flagged as secondary; and **the taps could DETECT the change rather than
+   my controlling it**. ★★★ **That suggestion is the design AC-2/AC-3 rest on.**
+2. *"os9 never entered the game"* — stopped me analysing a trace of a machine at a prompt.
+3. ★★★ *"it specifically specifies capital R. you had this working before go look at that
+   code."* — **a direct correction of a wrong inference of mine** (§3.2).
+4. ★★★ *"same room"* — **the catch that invalidated the first filing's headline** (§3.6).
+5. *"you are still inserting input"* / *"it's just blasting the menus"* — the `set_value`
+   override (§3.7). ★ I then removed the Alt trigger he was actually using, twice, because I
+   read a symptom report as a request.
+6. *"try mapping break to delete"*, *"alt is not working i get a speaker sound"* — the host-key
+   findings in §3.7.
+7. ★★★ *"i am moving the character much better with the ports off. i moved him into and out of
+   several rooms for you to trace."* — **the run this entire report's measurement comes from.**
 
 ### 10 — Candidate(s) captured this task
-Two, both to `seeds/AGI/live/` (§2C — new rows, nothing existing read or edited):
-1. **`discover-the-instrument-window-under-the-workload-you-will-measure`** — ★★★ the draw area
-   found under idle animation was `$9000` at 91%; under a real room change it is `$7000` at 40%
-   and `$9000` at 0.8%. **The first measurement pass tapped the wrong 8 KB and confidently
-   reported no render burst.**
-2. **`working-code-outranks-a-fresh-inference-about-it`** — ★★ I read `IF %0=r` in a shell
-   script, concluded the answer must be lowercase, and overrode a recipe that had already been
-   proven against the machine and gated by the operator. ★ `initiator: orchestrator` — Jay
-   corrected it in one sentence.
+Three, all to `seeds/AGI/live/` (§2C — new rows, nothing existing read or edited):
+1. **`discover-the-instrument-window-under-the-workload-you-will-measure`** — the draw area found
+   under idle animation was `$9000` at 91%; under a real room change it is `$7000` at 40% and
+   `$9000` at **0.8%**. The instrument was aimed at 0.8% of the traffic and confidently reported
+   the phenomenon absent.
+2. **`working-code-outranks-a-fresh-inference-about-it`** — ★ `initiator: orchestrator`. I read
+   `IF %0=r` in a shell script and overrode a recipe already proven against the machine and
+   gated by the operator.
+3. **`a-detector-must-discriminate-the-event-not-just-detect-activity`** — ★★★ the most important
+   of the three. "Disk burst then settle" is satisfied by a menu; a per-frame repaint threshold
+   is blind to a progressive redraw. **The same instrument was wrong in both directions, and both
+   times it reported a confident answer rather than an error.**
 
 ### 11 — Commit
-`7c8634e` — P3.6 what does Sierra's own interpreter take? (D-14)
-Pool `93cabb2` — the two candidate rows (§10)
-(pushed to origin/wip before this report; `7c8634e` carries the report itself)
+*(filled at commit time)*
