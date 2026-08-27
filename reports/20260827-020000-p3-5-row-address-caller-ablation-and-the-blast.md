@@ -472,4 +472,6 @@ Two, both to `seeds/AGI/live/` (§2C — new rows, nothing existing read or edit
    253-cycle ratio: **a number that is correct in one unit and load-bearing in another.**
 
 ### 11 — Commit
-*(filled at commit time)*
+`8193e8e` — P3.5 hoist the row address; ablate the caller; answer the blast
+Pool `5e5ede5` — the two candidate rows (§10)
+(pushed to origin/wip before this report; `8193e8e` carries the report itself)
