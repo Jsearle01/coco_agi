@@ -162,6 +162,16 @@ three dispatches on two wrong bytes from exactly that. ★★ **The remaining co
 compare; it is in the bounds test (28), the row address (20) and the call itself (13).** §8
 carries the leads that follow from that, in measured order.
 
+**3.8 ★ The capture step is now a tracked script, at Jay's request.**
+All AGI captures moved to `C:\karateka-capturegi_captures\` (ten files, P3.2 onward), and
+`harness/tools/roomshots.ps1` writes there by default. ★★ **It asserts the three things that each
+cost a rejected capture earlier in P3**: `-DPIC_PRESENT` so the flip is `HAL_gfx_swap` and not the
+legacy `HAL_gfx_present` (idiom 19j); Monitor Type = RGB, set and logged from Lua because MAME's
+`coco3` defaults to COMPOSITE (19l); and `-snapview auto -snapsize 640x480 -keepaspect`, because
+the default `native` means SQUARE pixels and stretched every capture ~2x (19k). ★ It **reads each
+delivered PNG's IHDR back** to verify 4:3 rather than trusting the flags. Verified by re-running
+it: the three captures come out **byte-identical to the ones Jay gated**.
+
 **3.6 §2S — sibling claims and their ref.** POP `430a91c`, Karateka `78c8c27`, both `wip`, both
 measured **this task** at those refs, scope `<repo>/src` excluding `src/hal` and `src/harness`.
 No sibling file was modified.
@@ -441,7 +451,11 @@ KQ3-074    P3.3 F17920528DDC  P3.4 F17920528DDC  IDENTICAL
 5. ★ **A `reports/` encoding check** — carried forward from T-P0-011 §3.12, still not built.
 
 ### 9 — User interaction during task
-None.
+Two, both at the gate:
+1. Jay observed the three rooms: *"rooms look fine."* — **AC-9 and 25.3 PASS.**
+2. Jay asked for the captures to live in a dedicated folder. `C:\karateka-capturegi_captures\`
+   now holds all ten AGI captures from P3.2 onward, and the capture step is a **tracked script**
+   rather than ad-hoc shell (§3.8).
 
 ### 10 — Candidate(s) captured this task
 Two, both to `seeds/AGI/live/` (§2C — new rows, nothing existing read or edited):
