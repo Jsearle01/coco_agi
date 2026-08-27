@@ -219,11 +219,12 @@ ff_right:       jsr     fill_check
                 beq     ff_up_no                ; y == 0, no row above
                 deca
                 sta     fc_y
+* ★★ P3.5 — BRANCH ON THE FLAG, THEN RESTORE, instead of carrying the flag over the restore.
+* `pshs cc / inc fc_y / puls cc` cost 19 cycles and existed only so `inc` could not disturb Z.
+* Branching first and restoring on BOTH paths costs 7, and it happens twice per pixel.
                 jsr     fill_check
-                pshs    cc
-                inc     fc_y                    ; restore y
-                puls    cc
                 bne     ff_up_reset
+                inc     fc_y                    ; restore y (fillable path)
                 lda     ff_up
                 beq     ff_down_test
                 lda     fc_x
@@ -233,7 +234,8 @@ ff_right:       jsr     fill_check
                 clr     ff_up
                 bra     ff_down_test
 ff_up_no:       bra     ff_down_test
-ff_up_reset:    lda     #1
+ff_up_reset:    inc     fc_y                    ; restore y (not-fillable path)
+                lda     #1
                 sta     ff_up
 
 * --- the row BELOW ----------------------------------------------
@@ -244,10 +246,8 @@ ff_down_test:
                 inca
                 sta     fc_y
                 jsr     fill_check
-                pshs    cc
-                dec     fc_y
-                puls    cc
                 bne     ff_down_reset
+                dec     fc_y                    ; restore y (fillable path)
                 lda     ff_down
                 beq     ff_advance
                 lda     fc_x
@@ -257,7 +257,8 @@ ff_down_test:
                 clr     ff_down
                 bra     ff_advance
 ff_down_no:     bra     ff_advance
-ff_down_reset:  lda     #1
+ff_down_reset:  dec     fc_y                    ; restore y (not-fillable path)
+                lda     #1
                 sta     ff_down
 
 ff_advance:

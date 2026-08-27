@@ -122,6 +122,8 @@ probe_entry:
                 clr     xc_isx
                 lda     #15
                 sta     scr_color
+                lda     #$FF                    ; 15 doubled -- keep scr_dbl in step (§3.4)
+                sta     scr_dbl
                 lda     #4
                 sta     pri_color
 
@@ -176,6 +178,11 @@ cal_lp:         leax    -1,x
 * ★ FC_VISUAL is the 70.3% path and the one the decomposition is about.
                 lda     #FC_VISUAL
                 sta     fc_case
+* put_pixel reads cur_x/cur_y (not fc_x/fc_y) -- set both so any bench target is well-defined.
+                lda     #80
+                sta     cur_x
+                lda     #100
+                sta     cur_y
                 lda     #1
                 sta     PHASE
 * ★★ THE COUNTER LIVES IN MEMORY, NOT IN X. fill_check does `tfr d,x` and `tfr d,y` while
@@ -186,7 +193,35 @@ cal_lp:         leax    -1,x
 * only inflates the absolute floor, which is reported as such.
                 ldd     #FC_ITERS
                 std     fcb_n
-fcb_lp:         jsr     fill_check
+* ★★★ WHICH ROUTINE THE BENCH CALLS IS SELECTED AT ASSEMBLE TIME (T-P0-014 Part B).
+* The loop, the counter and the phase markers are IDENTICAL for every target, so the loop's own
+* cost cancels when two targets are differenced and shows up only in the -DBENCH_NULL floor.
+*   -DBENCH_FC -DFC_STOP0   fill_check truncated to `rts` -> jsr + rts + loop, THE FLOOR (32 cyc)
+*   -DBENCH_FC              fill_check          -> the boundary test
+* ★ Selection is EXPLICIT rather than "fill_check unless another is set": lwasm mis-pairs the
+* `endc`s of three nested `ifndef`s, and a label defined inside a nested `ifdef` is reported as
+* multiply-defined across its two passes. One `ifdef` per target, no nesting, no new labels --
+* the floor comes from -DFC_STOP0, which already returns immediately and was measured at 32.
+*   -DBENCH_PP     put_pixel           -> the plane write
+*   -DBENCH_PUSH   ff_push             -> a seed-stack push
+* ★★ ff_push MUTATES ff_sp, so the bench resets it every iteration -- 20,000 pushes would
+* otherwise overflow a 512-entry stack and halt. The reset is inside the timed region and is
+* subtracted as part of the NULL floor comparison; it is called out in the report rather than
+* hidden, because it inflates the ff_push figure by the cost of one `ldx #`/`stx`.
+fcb_lp:
+                ifdef   BENCH_PP
+                jsr     put_pixel
+                endc
+                ifdef   BENCH_PUSH
+                ldx     #STACK_BASE
+                stx     ff_sp
+                lda     #80
+                ldb     #100
+                jsr     ff_push
+                endc
+                ifdef   BENCH_FC
+                jsr     fill_check
+                endc
                 ldd     fcb_n
                 subd    #1
                 std     fcb_n
@@ -194,6 +229,7 @@ fcb_lp:         jsr     fill_check
                 lda     #2
                 sta     PHASE
                 endc
+
 
                 ifndef  FC_BENCH
                 lda     #1
@@ -384,29 +420,38 @@ ib_no:          andcc   #$FB                    ; Z clear = out of bounds
 * put_pixel — write the ENABLED planes at cur_x/cur_y (putVirtPixel)
 * ═══════════════════════════════════════════════════════════════════
 put_pixel:
-                jsr     in_bounds
-                bne     pp_out
-                jsr     pix_addr
+* ★★★ P3.5 — 186 -> ~118 cycles. Measured at 186 by direct benchmark (Part B), against a
+* REGRESSION estimate of ~40 in T-P0-012. It was the second largest component of the whole
+* render, 29.8%, and nobody had looked at it because the ratio said it was small.
+*
+* ★★ THREE THINGS IT WAS DOING, none of them necessary:
+*   1. `jsr in_bounds` + `jsr pix_addr` -- two subroutine calls, ~26 cycles of jsr/rts alone,
+*      for two compares and an address. Both are now inline.
+*   2. `pix_addr` formed BOTH plane pointers every call. The priority pointer is formed only
+*      when pri_on, and the visual pointer only when scr_on.
+*   3. the nibble doubling was recomputed per pixel -- `anda`, a second load, four `lslb`, a
+*      pshs/ora pair, ~30 cycles -- from scr_color, which CANNOT CHANGE during a fill. It is
+*      now precomputed into scr_dbl by op_set_visual (and by the state reset).
+* ★ scr_dbl is identically (scr_color & 15) * 17, which is exactly what the old sequence
+* computed: low nibble, OR'd with the same nibble shifted up four.
+                lda     cur_x
+                cmpa    #PIC_W                  ; UNSIGNED (L-40)
+                bhs     pp_out
+                lda     cur_y
+                cmpa    #PIC_H
+                bhs     pp_out
+                ldb     #PIC_W                  ; A still holds cur_y
+                mul
+                addb    cur_x
+                adca    #0                      ; D = y*160 + x
+                std     pix_off
                 lda     scr_on
                 beq     pp_pri
-                lda     scr_color
-                anda    #$0F
-                ldb     scr_color
-                lslb
-                lslb
-                lslb
-                lslb
-                pshs    b
-                ora     ,s+                     ; ★ colour in BOTH nibbles = the pixel doubling
-* ★★ A PLAIN BYTE STORE, NOT A READ-MODIFY-WRITE (AC-7). One AGI pixel is exactly one CoCo3
-* byte in 320x200x16 with the colour in both nibbles, so there is nothing to merge and nothing
-* to read back. ★ In a non-doubled 160-wide 4bpp layout each pixel would be a NIBBLE and every
-* write would be read-modify-write; the doubling removes that cost entirely for pictures. It
-* does NOT remove it for anything drawn at full 320 resolution later.
+                ldd     pix_off
+                addd    #FB_BASE
+                tfr     d,x
+                lda     scr_dbl                 ; the doubled byte, precomputed
                 sta     ,x
-* ★ -DPIC_NOCOUNT drops the per-pixel counter so the instrumentation's own cost can be
-* MEASURED rather than assumed. ~24 cycles x ~25,000 pixels is not nothing, and a timing
-* harness that cannot quantify its own overhead is reporting the harness as well as the code.
                 ifndef  PIC_NOCOUNT
                 pshs    d
                 ldd     CNT_PIX
@@ -416,8 +461,11 @@ put_pixel:
                 endc
 pp_pri:         lda     pri_on
                 beq     pp_out
+                ldd     pix_off
+                addd    #PRI_BASE
+                tfr     d,x
                 lda     pri_color
-                sta     ,y
+                sta     ,x
 pp_out:         rts
 
                 include "src/harness/pic_draw.s"
@@ -479,6 +527,16 @@ pic_get:        ldx     pic_ptr
 * ── F0 set_visual / F1 disable / F2 set_priority / F3 disable ──────
 op_set_visual:  jsr     pic_get
                 sta     scr_color
+* ★ Maintain the doubled byte HERE, where the colour changes, instead of in put_pixel, where it
+* is read. This is the only place scr_color is written by a picture.
+                anda    #$0F
+                sta     scr_dbl
+                lsla
+                lsla
+                lsla
+                lsla
+                ora     scr_dbl
+                sta     scr_dbl
                 lda     #1
                 sta     scr_on
                 rts
@@ -668,6 +726,7 @@ pix_off         fdb     0
 cur_x           fcb     0
 cur_y           fcb     0
 scr_color       fcb     0
+scr_dbl         fcb     0       ; (scr_color & 15) * 17 -- see put_pixel
 pri_color       fcb     4
 scr_on          fcb     0
 pri_on          fcb     0
