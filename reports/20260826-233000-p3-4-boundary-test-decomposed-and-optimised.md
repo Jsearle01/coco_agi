@@ -399,7 +399,8 @@ KQ3-074    P3.3 F17920528DDC  P3.4 F17920528DDC  IDENTICAL
 `LOADER.BIN`, no disk image (all out of scope). Probe binaries are gitignored.
 
 25.3 operator-runtime-smoke: **PASSED — Jay, `poke`, RGB, 4:3 (endpoints only, three stills;
-no motion under gate).** Jay: *"rooms look fine."* Captures now live in `C:\karateka-capture\agi_captures\` \u2014 see \u00a73.8.
+no motion under gate).** Jay: *"rooms look fine."* Captures now live in
+`C:\karateka-capture\agi_captures\` — see §3.8.
 
 ### 6 — Reactive deviations and route accounting
 
