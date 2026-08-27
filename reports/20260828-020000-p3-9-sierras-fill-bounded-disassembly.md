@@ -394,4 +394,7 @@ Three, to `seeds/AGI/live/` (§2C — new rows; nothing existing read or edited)
    below ours.
 
 ### 11 — Commit
-<COMMIT>
+`e23b29f` — the report, `sierra_pc.lua`, `sierra_cost.py`.
+Pool: `b8b15d2` — three rows on top of `f97b82d`.
+★ Pushed to `origin/wip` before this report.
+
