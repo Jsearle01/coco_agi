@@ -31,7 +31,8 @@ local OUT = os.getenv("SIERRA_OUT") or "build/sierra_live"
 os.execute('mkdir "' .. OUT:gsub("/", "\\") .. '" 2>nul')
 local logf = io.open(OUT .. "/run.log", "w")
 local csv  = io.open(OUT .. "/frames.csv", "w")
-csv:write("frame,time_s,changed,fdc,voffset,total,b0,b1,b2,b3,b4,b5,b6,b7,b8,b9,bA,bB,bC,bD,bE,bF\n")
+csv:write("frame,time_s,changed,fdc,voffset,total,b0,b1,b2,b3,b4,b5,b6,b7,b8,b9,bA,bB,bC,bD,bE,bF,"
+       .. "n_mmu,n_pal,n_vid,init0,vmode,vres,border\n")
 local function w(f, ...)
     local s = string.format(f, ...)
     logf:write(s .. "\n"); logf:flush(); print(s)
@@ -64,6 +65,61 @@ end)
 _G._t3 = prog:install_write_tap(0x0000, 0xFEFF, "all", function(off)
     local k = off // 4096
     _G._b[k] = _G._b[k] + 1
+end)
+
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+-- ★★★ T-P0-016: DOES SIERRA BLANK THE DISPLAY WHILE IT DRAWS?
+--
+-- ★★ THE DISPATCH ASKS FOR "THE GIME VIDEO-ENABLE BIT". THERE IS NO SUCH BIT -- checked
+-- before building anything, because tapping a bit that does not exist would yield a confident
+-- "no blanking" that means nothing:
+--   [ref: GIME-RM §2 Register Map Summary] $FF90-$FFBF enumerated; no display-enable register.
+--   [ref: GIME-RM §3 INIT0]  COCO/MMUEN/IEN/FEN/MC3/MC2/MC1/MC0  -- no video enable.
+--   [ref: GIME-RM §6 VMODE]  BP/BPI/MOCH/H50/LPR2-0              -- no video enable.
+--   [ref: GIME-RM §6 VRES]   LPF1-0/HRES2-0/CRES1-0              -- no video enable.
+--   ★ Corroborated by SockmasterGime.md. ★★ coco_agi's docs/ground-truth/ is EMPTY
+--   (.gitkeep only); both were read from POP3_port's copy -- read-only sibling use, §2G.
+--
+-- ★★★ "Blank the display" is a RESULT, and the GIME offers at least six routes to it. So tap
+-- every register that can change what the screen shows -- the same cost as tapping one bit:
+--   $FF90 INIT0  bit7 COCO=1  -> CoCo1/2 mode
+--   $FF98 VMODE  bit7 BP=0    -> alphanumeric; a graphics screen becomes text
+--   $FF99 VRES   LPF=10       -> "Reserved" [GIME-RM §6]; SockmasterGime.md records it as
+--                                zero/infinite lines -- set during the vertical border it
+--                                gives A SCREEN THAT IS ALL BORDER. ★★ The likeliest "yes".
+--   $FF9A BORDER / $FF9C VSCROLL / $FF9F HOFFSET
+--   $FFA0-$FFAF MMU  ★★ T-P0-015 §3.10's hypothesis -- the previous run was STRUCTURALLY
+--                    BLIND to it, its write tap covering only $0000-$FEFF.
+--   $FFB0-$FFBF PAL  ★ all sixteen to one colour is a blank with no video register involved.
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+_G._n_mmu, _G._n_pal, _G._n_vid = 0, 0, 0
+_G._init0, _G._vmode, _G._vres, _G._border = -1, -1, -1, -1
+_G._gev = {}
+_G._tg = prog:install_write_tap(0xFF90, 0xFFBF, "gime", function(off, data)
+    local d = data % 256
+    local function ev(f, ...) _G._gev[#_G._gev + 1] = string.format(f, ...) end
+    if off == 0xFF90 then
+        if d ~= _G._init0 then
+            ev("INIT0=$%02X%s", d, (d & 0x80) ~= 0 and " COCO=1(!)" or ""); _G._init0 = d
+        end
+    elseif off == 0xFF98 then
+        if d ~= _G._vmode then
+            ev("VMODE=$%02X BP=%d", d, (d & 0x80) ~= 0 and 1 or 0); _G._vmode = d
+        end
+    elseif off == 0xFF99 then
+        if d ~= _G._vres then
+            local lpf = (d >> 5) & 3
+            ev("VRES=$%02X LPF=%d%s", d, lpf, lpf == 2 and "  ★ ZERO-LINES = BLANK(!)" or "")
+            _G._vres = d
+        end
+    elseif off == 0xFF9A then
+        if d ~= _G._border then ev("BORDER=$%02X", d); _G._border = d end
+    elseif off == 0xFF9C then ev("VSCROLL=$%02X", d)
+    elseif off == 0xFF9F then ev("HOFFSET=$%02X", d)
+    elseif off >= 0xFFA0 and off <= 0xFFAF then _G._n_mmu = _G._n_mmu + 1
+    elseif off >= 0xFFB0 then _G._n_pal = _G._n_pal + 1
+    end
+    if off >= 0xFF98 and off <= 0xFF9F then _G._n_vid = _G._n_vid + 1 end
 end)
 
 -- ★★ PASSIVE KEY NAMING. Jay asked whether the run specifies a keyboard type: it does not --
@@ -108,6 +164,8 @@ w("sierra_live: OBSERVE ONLY. This script cannot send input.")
 w("BREAK is bound in the cfg (DELETE) -- press Ctrl+Delete. Everything is yours.")
 w("Whole-map write census is on. Candidates print as ROOM CHANGE lines.")
 w("★ The MEASUREMENT is harness/tools/sierra_rooms.py, offline over frames.csv.")
+w("★★ GIME tap $FF90-$FFBF armed. A display-register change prints a ★ GIME line.")
+w("   There is no video-enable bit [ref: GIME-RM §2/§3/§6] -- every route is watched.")
 
 local frame, peak, peak_f = 0, 0, 0
 -- ★ Detector parameters, the same ones sierra_rooms.py defaults to. GAP is the quiet
@@ -208,10 +266,21 @@ _G._n = emu.add_machine_frame_notifier(function()
 
     if ch > peak then peak, peak_f = ch, frame end
 
-    csv:write(string.format("%d,%.9f,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
+    local nm, np, nv = _G._n_mmu, _G._n_pal, _G._n_vid
+    _G._n_mmu, _G._n_pal, _G._n_vid = 0, 0, 0
+    if #_G._gev > 0 then
+        -- ★ A display-register change during a room change is the whole question. Logged the
+        -- instant it happens, so Jay's eye and the instrument are on the same event (AC-7).
+        w("[f%05d] t=%.3f  ★ GIME: %s", frame, t, table.concat(_G._gev, "  "))
+        _G._gev = {}
+    end
+
+    csv:write(string.format(
+        "%d,%.9f,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
         frame, t, ch, fd, vo, tot,
         per[0], per[1], per[2], per[3], per[4], per[5], per[6], per[7],
-        per[8], per[9], per[10], per[11], per[12], per[13], per[14], per[15]))
+        per[8], per[9], per[10], per[11], per[12], per[13], per[14], per[15],
+        nm, np, nv, _G._init0, _G._vmode, _G._vres, _G._border))
 
     if frame % 3600 == 0 then
         w("[f%05d] t=%.0fs  peak lattice %d/160 (f%d)", frame, t, peak, peak_f)
