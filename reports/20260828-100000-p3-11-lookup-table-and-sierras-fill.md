@@ -406,4 +406,8 @@ Three, to `seeds/AGI/live/` (§2C — new rows):
    missing one.**
 
 ### 11 — Commit
-<COMMIT>
+`00b2a3d` — the report, `sierra_fill.lua`, `sierra_caller.lua`, `sierra_trace.lua`'s
+auto save-state, and `sta/` added to `.gitignore`.
+Pool: `974e2c9` — three rows on top of `dc3fa83`.
+★ Pushed to `origin/wip` before this report. ★★ **No `src/**` change: `reg_discipline` 0.**
+
