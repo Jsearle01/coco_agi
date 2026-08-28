@@ -139,6 +139,14 @@ probe_entry:
                 sta     pri_color
 
                 jsr     pal_load                ; ★ AGI's 16 EGA colours, from a TABLE
+                jsr     pal_readback            ; ★ AC-11: prove they LANDED
+                ifdef   PIC_PALSWATCH
+* ★ AC-12: paint the swatches and present, instead of rendering a picture. The gate is the
+* SCREEN, so the run ends here rather than falling into pic_render.
+                jsr     pal_swatch
+                jsr     HAL_gfx_swap
+ps_hold:        bra     ps_hold
+                endc
                 jsr     vis_clear               ; visual plane = 15 (white)
                 jsr     pri_clear               ; priority plane = 4 (red)
 
@@ -346,6 +354,35 @@ pal_lp:         lda     ,x+
                 blo     pal_lp
                 rts
 
+* ═══════════════════════════════════════════════════════════════════
+* pal_readback — AC-11: read $FFB0-$FFBF back and stage it for the host
+*
+* ★★★ WHY THIS EXISTS AT ALL. The picture gate compares the FRAMEBUFFER -- index values per
+* pixel -- and the palette is what turns an index into a colour. It lives entirely outside the
+* buffer, so SIXTEEN WRONG VALUES WOULD STILL PASS 45/45 BYTE-IDENTICAL. A readback path and a
+* display path are different paths, and the palette is only on the display path.
+*
+* ★★ THE TOP TWO BITS MUST BE MASKED ON READ, and this is documented rather than discovered:
+* "These registers can also be read to determine what palettes are set but like the MMU
+* registers, the upper 2 bits must be masked out."
+* [ref: docs/ground-truth/SockmasterGime.md — "FFB0-FFBF Color palette registers"]
+* ★ Without the mask the comparison would report sixteen false mismatches and the obvious
+* conclusion would be that pal_load is broken.
+*
+* ★ This proves the intended values LANDED. It does NOT prove they are the right colours --
+* that is AC-12's eye gate, and it is Jay's (CLAUDE.md §3, §4).
+* ═══════════════════════════════════════════════════════════════════
+PAL_READBACK    equ     $00A0           ; 16 bytes the host reads after the run
+pal_readback:
+                ldy     #$FFB0
+                ldx     #PAL_READBACK
+pal_rb_lp:      lda     ,y+
+                anda    #$3F                    ; ★ mask bits 7-6 [SockmasterGime.md, above]
+                sta     ,x+
+                cmpy    #$FFC0
+                blo     pal_rb_lp
+                rts
+
 agi_pal16:
                 fcb     $00             ;  0 black
                 fcb     $08             ;  1 blue
@@ -384,6 +421,46 @@ vc_lp:          std     ,x++
                 cmpx    #FB_BASE+(PIC_W*PIC_H)
                 blo     vc_lp
                 rts
+
+* ═══════════════════════════════════════════════════════════════════
+* pal_swatch — AC-12: sixteen bands, one per palette index, in index order
+*
+* ★★★ AN EYE GATE DESIGNED FOR THE QUESTION. Three 25.3 passes on rooms rule out gross errors
+* and would not catch brown reading as dark yellow, because nothing in a room isolates one
+* index. Sixteen labelled-by-position bands do: index N is the Nth band from the left, always,
+* so "band 6 is wrong" names an entry rather than a symptom.
+*
+* ★ NO GAME DATA IS INVOLVED -- sixteen blocks of a known index. So the capture is not
+* copyrighted content and can be handled normally (the note says so explicitly).
+*
+* ★★ 160 px / 16 = 10 px per band = 5 bytes per band at 2 pixels/byte. The index is doubled
+* into both nibbles, which is the same `scr_dbl` convention the renderer uses (§3.4).
+* ═══════════════════════════════════════════════════════════════════
+                ifdef   PIC_PALSWATCH
+pal_swatch:
+                ldu     #FB_BASE
+                ldb     #PIC_H                  ; rows
+ps_row:         pshs    b
+                clra                            ; A = colour index 0..15
+ps_band:        pshs    a
+                lsla
+                lsla
+                lsla
+                lsla                            ; A = index<<4
+                ora     ,s                      ; both nibbles = the index
+                ldb     #5                      ; 5 bytes = 10 pixels per band
+ps_byte:        sta     ,u+
+                decb
+                bne     ps_byte
+                puls    a
+                inca
+                cmpa    #16
+                blo     ps_band
+                puls    b
+                decb
+                bne     ps_row
+                rts
+                endc
 
 pri_clear:
                 ldx     #PRI_BASE

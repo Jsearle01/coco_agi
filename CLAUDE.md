@@ -1,7 +1,12 @@
 # CLAUDE.md — AGI Interpreter → CoCo3 Project (Clyde standing rules)
-## Working Agreement v1.4 (forked from POP3_port CLAUDE.md v1.1)
-**Version:** 1.4
+## Working Agreement v1.5 (forked from POP3_port CLAUDE.md v1.1)
+**Version:** 1.5
 **Instantiates:** CODM v0.7. Where this doc and v0.7 overlap, v0.7 governs; this doc adds AGI invariants.
+
+**Changelog v1.4 → v1.5 (2026-08-28, Jay).** ★★★ **§2J REWRITTEN AND BROADENED.** v1.4 scoped the
+heredoc ban to *creating and editing files*, so **inline scripts (`python3 - <<'EOF'`) read as outside
+it** — and that is where the repeated failures have been. **The ban is now on the SHELL CONSTRUCT, in
+every use.** No other rule changed.
 
 **Changelog v1.3 → v1.4 (2026-08-26, Jay).** ★ **§2T ADDED — sibling baselines are established by
 CITING the previous report when the inputs are unchanged**, rather than by rebuilding. No other rule
@@ -343,13 +348,56 @@ about AGI.
 
 ---
 
-## 2J. File creation and editing — not via shell heredocs
+## 2J. ★★★ NO HEREDOCS. Not for files, not for scripts, not for data.
 
-Create and edit files with `create_file` / `str_replace`, **not** with shell heredocs. On Git Bash,
-heredocs bit POP twice in one session: **CRLF line endings attach to the delimiter** so the heredoc never
-terminates, and **`$` interpolates** inside the body, silently corrupting assembly and script text. Both
-failures produce a file that looks plausible and is wrong. ★ **These are Git Bash properties, not POP
-properties** — they reproduce here identically.
+> ★★★ **Do not use `<<`, `<<-` or `<<<` in any bash invocation, for any purpose.**
+
+**v1.4 scoped this to file creation and it was read as not covering inline scripts. It covers
+everything.** ★★ **The construct is banned, not one use of it.**
+
+### 2J.1 Why — and why "I will be careful" does not work
+
+On Git Bash, heredocs bit POP **twice in one session**:
+
+- ★★ **CRLF line endings attach to the delimiter**, so the heredoc **never terminates.**
+- ★★★ **`$` interpolates inside the body**, silently corrupting assembly, register names, shell
+  variables in scripts, and anything with `$FF9D` in it.
+
+★★★ **Both failures produce something that LOOKS PLAUSIBLE AND IS WRONG.** ★ **These are Git Bash
+properties, not POP properties** — they reproduce here identically, and quoting the delimiter fixes only
+the second.
+
+### 2J.2 What to use instead — every case
+
+| you want to | use |
+|---|---|
+| create a file | **`create_file`** |
+| edit a file | **`str_replace`** |
+| overwrite a file | **`create_file` to a new path, then move** |
+| ★★★ **run a multi-line Python/awk/sed script** | ★★★ **`create_file` the script, then run it by path** |
+| pass multi-line data to a command | **`create_file` the data, then redirect from it** |
+| a genuinely one-line command | **just run it** — no heredoc needed |
+
+### 2J.3 ★★ The inline-script case is the one that keeps failing, and the fix is better anyway
+
+★★★ **`python3 - <<'EOF'` is the specific form to stop reaching for.** Write the script with
+`create_file` and run it by path.
+
+> ★★★ **This is not merely equivalent — it is REQUIRED by L-45: *an unsaved analysis script cannot be
+> audited, and the act of saving it is itself a check.*** **T-P0-015's withdrawn "88% disk" figure came
+> from an inline analyser that was never saved; rebuilding it is what exposed the artifact.**
+
+★★ **So the heredoc ban and the reproducibility rule point the same way.** A script worth running twice
+is worth a filename; a script not worth a filename is probably not worth trusting.
+
+### 2J.4 If you find yourself typing one
+
+★ **Stop and use §2J.2.** ★★ **Repeated heredoc attempts have cost real time across several tasks** — the
+construct fails in ways that look like your script being wrong rather than the shell being wrong, **so
+the debugging goes to the wrong place.**
+
+★★★ **If a case genuinely has no §2J.2 answer, that is a §22.5 consultation, not a reason to try a
+heredoc.**
 
 ---
 
