@@ -335,6 +335,10 @@ ff_span:
                 lda     #1
                 sta     ff_up
                 sta     ff_down
+* ★ the run's origin, for the deferred flush
+                stx     ff_runp
+                lda     fc_x
+                sta     ff_runx
 * ★★★ THE THREE INVARIANT POINTERS. X = current row, U = row above, Y = row below. They advance
 * together with three LEAs per pixel, replacing three MULs and three bounds tests.
 * ★ U and Y are formed even when their row does not exist; ff_upok / ff_dnok gate every
@@ -352,31 +356,22 @@ ff_right:
                 lda     ,x
                 anda    fc_mask
                 cmpa    fc_match
-                lbne    ff_pop_lp               ; span finished -> next seed
+                lbne    ff_flush                ; span finished -> flush, then next seed
 
-* --- write this pixel into the enabled planes -------------------
-* ★★ put_pixel's body, with the bounds test removed because the span loop already guarantees
-* 0 <= x < PIC_W and the pop test guaranteed 0 <= y < PIC_H. The stores, the values and the
-* CNT_PIX increment are unchanged, which is why AC-5's pixel count must not move.
-                lda     ff_wval
-                sta     ,x
-                lda     fc_case
-                bne     ff_wr_done              ; FC_PRIORITY: primary write WAS the priority
-                ifndef  PIC_NOCOUNT
-                pshs    d
-                ldd     CNT_PIX
-                addd    #1
-                std     CNT_PIX
-                puls    d
-                endc
-                lda     ff_sec
-                beq     ff_wr_done
-                pshs    x
-                leax    PRI_DELTA,x
-                lda     pri_color
-                sta     ,x
-                puls    x
-ff_wr_done:
+* ★★★ P3.14 — THE WRITE IS DEFERRED TO THE END OF THE SPAN. Nothing is written here.
+*
+* ★★ WHY THAT IS SAFE, AND IT IS THE WHOLE JUSTIFICATION: within one span, NO TEST READS A
+* PIXEL THAT SPAN WRITES. The current-row test reads AHEAD of the write position; the up and
+* down tests read OTHER ROWS. So the writes have no reader until the span ends, and moving them
+* changes nothing any test can observe.
+* ★ That is what makes this a single-pass change. A two-pass version -- find the extent, blast,
+* then re-walk for transitions -- would have cost an extra pointer walk per pixel and given most
+* of the saving back.
+*
+* ★★★ AND IT REMOVES MORE THAN THE STORE. The per-pixel path was
+*     lda ff_wval (5) / sta ,x (4) / lda fc_case (5) / bne (3) / lda ff_sec (5) / beq (3) = 25
+* -- of which 16 cycles were re-deciding, per pixel, two facts that are fixed for the whole
+* fill. The deferred flush decides them ONCE PER SPAN.
 
 * --- the row ABOVE: seed only on a transition into a fillable span ---
                 lda     ff_upok
@@ -433,7 +428,76 @@ ff_advance:
                 lda     fc_x
                 cmpa    #PIC_W
                 lblo    ff_right
-                lbra    ff_pop_lp
+                lbra    ff_flush
+
+* ── ff_flush — write the span's run, now that it is complete ──────
+* ★ run length = fc_x - ff_runx. Correct at BOTH exits: the test-failed exit leaves fc_x on the
+* first non-fillable pixel, and the right-edge exit leaves it at PIC_W. ★★ Both are UNSIGNED
+* comparisons of unsigned coordinates -- fc_x >= ff_runx always, so no `bmi` is involved [L-40].
+ff_flush:
+                lda     fc_x
+                suba    ff_runx
+                lbeq    ff_pop_lp               ; empty run (the seed itself was not fillable)
+                sta     ff_runn
+
+* ★ CNT_PIX counts VISUAL writes only, exactly as put_pixel did: FC_PRIORITY's primary write is
+* the priority plane and never counted. Adding the run length once is identical to incrementing
+* per pixel, which is why AC-3's 1,188,430 must not move.
+                ifndef  PIC_NOCOUNT
+                lda     fc_case
+                bne     ffl_nocnt
+                clra
+                ldb     ff_runn
+                addd    CNT_PIX
+                std     CNT_PIX
+ffl_nocnt:
+                endc
+
+                ldx     ff_runp
+                lda     ff_wval
+                ldb     ff_runn
+                bsr     ff_store                ; primary plane
+                lda     ff_sec
+                beq     ff_flush_done
+                ldx     ff_runp
+                leax    PRI_DELTA,x
+                lda     pri_color
+                ldb     ff_runn
+                bsr     ff_store                ; the second plane, same run
+ff_flush_done:  lbra    ff_pop_lp
+
+* ── ff_store — B bytes of A, starting at X ────────────────────────
+* ★ 11 cycles per byte: sta ,x+ (6) / decb (2) / bne (3).
+ff_store:
+ffs_lp:         sta     ,x+
+                decb
+                bne     ffs_lp
+                rts
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★ THE STACK BLAST WAS BUILT, GATED AND MEASURED, AND IT IS NOT WORTH IT. AD-45 IS CLOSED.
+*
+*     P3.13  per-pixel write        2.973 s median
+*     P3.14  deferred, sta ,x+      2.746 s      7.6% faster
+*     P3.14  deferred + pshs blast  2.749 s      7.5% faster
+*     ★★★ THE BLAST'S OWN CONTRIBUTION: -0.1%. It was 0.004 s SLOWER, not faster.
+*
+* ★★ THE ARITHMETIC PREDICTED ~4% AND THE MEASUREMENT SAID NOTHING, and the reason is the span
+* distribution rather than the instruction timings. Per byte the blast really is cheaper --
+* 2.9 cycles against 11 -- but it is paid for PER SPAN: mask, save S, compute the end pointer,
+* load five registers, restore S, then a tail loop for run mod 8. With a MEDIAN SPAN OF 9 BYTES
+* [T-P0-014] that setup is amortised over about one 8-byte group, and it cancels the gain.
+* ★ The blast wins on long runs and our runs are short. That is L-52 again: a technique is a
+* solution to a problem SHAPE, and ours is not that shape.
+*
+* ★★ THE 7.6% CAME FROM DEFERRING THE WRITE, NOT FROM pshs -- and deferring removed 16 of the
+* 25 per-pixel cycles by deciding `fc_case` and `ff_sec` ONCE PER SPAN instead of once per
+* pixel. The store itself was never the expensive part.
+*
+* ★ The blast code is REMOVED rather than left behind a define: it borrowed S, and dead code
+* that borrows S is a liability for the next person who adds a `bsr` near it (POP
+* char_draw.s:512 -- three dispatches lost to exactly that).
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 
 ff_done:        rts
 
@@ -485,3 +549,7 @@ ff_sec          fcb     0               ; 1 = a second plane must also be writte
 ff_row          fdb     0               ; base of the current span's row, in the test plane
 ff_upok         fcb     0               ; the row above exists
 ff_dnok         fcb     0               ; the row below exists
+* ★ P3.14's deferred-write state.
+ff_runp         fdb     0               ; where the current run starts, in the test plane
+ff_runx         fcb     0               ; the x it started at
+ff_runn         fcb     0               ; its length in bytes
