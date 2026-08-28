@@ -353,4 +353,7 @@ Three, to `seeds/AGI/live/` (§2C — new rows):
    because everything referred to it by the label.
 
 ### 11 — Commit
-<COMMIT>
+`fa04829` — the report, `sierra_trace.lua`, `sierra_readtrace.py`.
+Pool: `dc3fa83` — three rows on top of `b8b15d2`.
+★ Pushed to `origin/wip` before this report.
+
