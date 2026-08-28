@@ -19,7 +19,7 @@ local OUTDIR = os.getenv("PIC_OUT") or "build/picrun"
 local PROG   = os.getenv("PIC_PROG") or "build/pic_probe.bin"
 local PICRES = os.getenv("PIC_RES") or "build/pic080.res"
 
-local LOAD     = 0x0800     -- probe_entry / org
+local LOAD     = 0x0700     -- probe_entry / org  ★ P3.13: moved with the .s origin
 local PIC_DATA = 0x1200     -- where the probe expects the resource
 local PRI_BASE = 0x1700     -- priority plane
 local FB_BASE  = 0x8000     -- GFX_DB_WINDOW

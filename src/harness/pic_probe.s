@@ -46,8 +46,19 @@ PIC_W           equ     160
 PIC_H           equ     168
 
 STACK_BASE      equ     $0100           ; fill stack (seed points)
-STACK_TOP       equ     $0500           ; one past the last usable fill entry
-HW_STACK        equ     $0800           ; 6809 S, grows DOWN into $0500..$07FF
+STACK_TOP       equ     $0400           ; one past the last usable fill entry
+HW_STACK        equ     $0700           ; 6809 S, grows DOWN into $0400..$06FF
+* ★★★ P3.13 — THE SEED STACK WAS CUT FROM 1024 B TO 768 B AND THE ORIGIN MOVED DOWN 256 B,
+* because the COUNTED build overran PIC_DATA and the gate reported it as one picture with
+* "no output" rather than as a build error.
+*   org $0800 + 2,579 bytes = $1213, and PIC_DATA is $1200 -- a 19-byte overlap.
+* ★★ The nocount build (2,451 B -> $1193) fitted, so the TIMINGS were valid and only the
+* GATE broke. A size regression that damages one artifact and not the other is exactly the
+* kind that hides.
+* ★ The space came from the seed stack, which was provisioned at 512 entries against a
+* MEASURED peak of 37 (74 bytes). 384 entries is still 10x the measured peak, and the
+* overflow path still HALTS rather than wrapping.
+* ★★★ Margin is now 237 bytes and it is ASSERTED at assembly time below, not assumed.
 PRI_BASE        equ     $1700           ; 160*168 = $6900 -> ends at $8000
 FB_BASE         equ     $8000           ; GFX_DB_WINDOW
 
@@ -81,7 +92,7 @@ PATH_V          equ     $0098           ; AC-2: fill_check took the visual-only 
 PATH_P          equ     $009A           ; AC-2: ... the priority-only case
 PATH_G          equ     $009C           ; AC-2: ... the general (both planes on) case
 
-                org     $0800
+                org     $0700
 * ═══════════════════════════════════════════════════════════════════
 probe_entry:
                 orcc    #$50                    ; mask interrupts for the duration
@@ -743,4 +754,17 @@ fcb_n           fdb     0       ; -DFC_BENCH loop counter (see the bench block)
                 include "src/hal/coco3-dsk/time.s"
                 include "src/hal/coco3-dsk/irq_vbl.s"
                 include "src/hal/coco3-dsk/gfx.s"
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★ THE LAYOUT ASSERTION. The counted build silently grew past PIC_DATA in P3.13 and the
+* only symptom was ONE picture reporting "no output" in a 45-picture gate -- a build error
+* wearing a rendering error's clothes. This makes it an ASSEMBLY failure instead.
+* ★★ IT MUST SIT BEFORE `end`, WHICH TERMINATES ASSEMBLY. Placed after it, the whole block --
+* label, condition and error -- is silently ignored, which is how the first version of this
+* guard was written. ★ An assertion that has not been broken on purpose is not an assertion.
+PIC_CODE_END    equ     *
+                ifgt    PIC_CODE_END-PIC_DATA
+                error   "pic_probe code overlaps PIC_DATA -- shrink it or move the layout"
+                endc
+
                 end     probe_entry

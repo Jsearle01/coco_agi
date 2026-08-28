@@ -27,7 +27,9 @@ local LIST   = os.getenv("PIC_LIST") or "build/picset/order.txt"
 local RESDIR = os.getenv("PIC_RESDIR") or "build/picset"
 local PLANES = os.getenv("PIC_PLANES") ~= "0"   -- "0" = timing only, skip the 54 KB readback
 
-local LOAD     = 0x0800
+-- ★ P3.13: moved down 256 B with the assembly origin, to keep the code clear of
+-- PIC_DATA after the counted build grew past it. LOAD and the .s org must agree.
+local LOAD     = 0x0700
 local PIC_DATA = 0x1200
 local PIC_MAX  = 0x1700 - PIC_DATA              -- 1280 bytes
 local PRI_BASE = 0x1700
