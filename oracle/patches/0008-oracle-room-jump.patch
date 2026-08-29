@@ -1,0 +1,109 @@
+diff --git a/engines/agi/cycle.cpp b/engines/agi/cycle.cpp
+index 3f49e6dc..01ea8ee2 100644
+--- a/engines/agi/cycle.cpp
++++ b/engines/agi/cycle.cpp
+@@ -20,6 +20,7 @@
+  */
+ 
+ #include "common/config-manager.h"
++#include "common/file.h" // coco_agi ORACLE INSTRUMENTATION (P0.2): Common::DumpFile
+ 
+ #include "agi/agi.h"
+ #include "agi/sprite.h"
+@@ -154,7 +155,43 @@ void AgiEngine::resetControllers() {
+ 	}
+ }
+ 
++// coco_agi ORACLE INSTRUMENTATION (P4.1): the deterministic virtual clock, defined in
++// global.cpp. Advanced once per main-loop iteration in playGame() below.
++extern uint32 g_oracleVirtualMs;
++
++// coco_agi ORACLE INSTRUMENTATION (P0.2) -- per-cycle VM state.
++//
++// Dumped at cycle ENTRY, which is the state the cycle is about to act on. One line
++// per cycle, hex, fixed width, so a diff against the CoCo3 interpreter is a line
++// diff and the first divergent cycle is the first differing line.
++//
++//   cycle <n> flags <64 hex chars = 32 bytes = 256 flags> vars <512 hex = 256 vars>
++//
++// AgiGame holds flags[] as 32 packed bytes and vars[] as 256 bytes (agi.h:383-384),
++// so this is the engine's own storage emitted verbatim, not a reconstruction.
++static void oracleDumpVmState(uint32 cycleNr, const uint8 *flags, const uint8 *vars) {
++	static Common::DumpFile s_vmLog;
++	if (!s_vmLog.isOpen()) {
++		if (!s_vmLog.open(Common::Path("vmstate.txt")))
++			return;
++	}
++
++	Common::String line = Common::String::format("cycle %06u flags ", cycleNr);
++	for (int i = 0; i < MAX_FLAGS; i++)
++		line += Common::String::format("%02x", flags[i]);
++	line += " vars ";
++	for (int i = 0; i < MAX_VARS; i++)
++		line += Common::String::format("%02x", vars[i]);
++	line += "\n";
++
++	s_vmLog.write(line.c_str(), line.size());
++	s_vmLog.flush();
++}
++
+ void AgiEngine::interpretCycle() {
++	static uint32 s_oracleCycleNr = 0;
++	oracleDumpVmState(s_oracleCycleNr++, _game.flags, _game.vars);
++
+ 	ScreenObjEntry *screenObjEgo = &_game.screenObjTable[SCREENOBJECTS_EGO_ENTRY];
+ 
+ 	if (!_game.playerControl)
+@@ -373,6 +410,52 @@ void AgiEngine::playGame() {
+ 	do {
+ 		processAGIEvents();
+ 
++		// coco_agi ORACLE INSTRUMENTATION (P4.1): advance the deterministic virtual clock by
++		// one 25 ms tick per main-loop iteration. See global.cpp for why the clock is virtual.
++		// This is the unit the pacing gate below already counts in, so the ratio between loop
++		// iterations and interpreted cycles is unchanged -- only its dependence on the host's
++		// speed is removed.
++		g_oracleVirtualMs += 25;
++
++		// coco_agi ORACLE INSTRUMENTATION (P5.3) -- gated room jump.
++		//
++		// ★★★ WHY: T-P0-028 captured 1,680 composited frames and the EGO appeared in NONE of
++		// them. Left alone, an AGI game sits in its credits/attract sequence for the whole
++		// window, so every frame gated, timed and shown was an intro. The compositing cost and
++		// the priority-test coverage were both taken on decorations the player never controls.
++		//
++		// ★★ This calls the engine's OWN newRoom(), which is exactly what the AGI debug
++		// console's `room` command does (console.cpp Cmd_Room). It resets the screen-object
++		// table, unloads resources, sets playerControl/horizon, writes VM_VAR_CURRENT_ROOM and
++		// loads the room's LOGIC -- so the game proceeds as if it had walked there.
++		//
++		// ★ IT PERTURBS THE ENGINE and a run with it on is NOT a valid vmstate baseline --
++		// patch 0006's rule, restated. The composite's inputs (before-planes + sprite list) and
++		// its output are still the oracle's own, which is what the compositing gate compares.
++		{
++			static int s_cocoLoop = 0;
++			static bool s_cocoJumped = false;
++			s_cocoLoop++;
++			if (ConfMan.hasKey("coco_room")) {
++				const int after = ConfMan.hasKey("coco_room_after")
++				                  ? ConfMan.getInt("coco_room_after") : 300;
++				if (!s_cocoJumped && s_cocoLoop >= after) {
++					s_cocoJumped = true;
++					newRoom(ConfMan.getInt("coco_room"));
++				}
++				// ★ Optional ego placement, a settling delay after the jump so the room's own
++				// logic has run its animate.obj/draw first. Without the delay the position is
++				// overwritten by the room's setup and the jump looks like it did nothing.
++				if (s_cocoJumped && ConfMan.hasKey("coco_ego_x")
++				    && s_cocoLoop == after + (ConfMan.hasKey("coco_ego_after")
++				                             ? ConfMan.getInt("coco_ego_after") : 120)) {
++					ScreenObjEntry *ego = &_game.screenObjTable[SCREENOBJECTS_EGO_ENTRY];
++					ego->xPos = ConfMan.getInt("coco_ego_x");
++					ego->yPos = ConfMan.getInt("coco_ego_y");
++				}
++			}
++		}
++
+ 		inGameTimerUpdate();
+ 
+ 		byte timeDelay;

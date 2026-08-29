@@ -27,6 +27,8 @@ local TIMED     = tonumber(os.getenv("VM_TIMED") or "")    -- AC-7: free-run thi
 local timed_t0                                              -- set on the first timed frame
 local CAL       = tonumber(os.getenv("VM_CAL") or "")      -- clock calibration: N x 160,000 cycles
 local cal_t0
+local ROOM      = tonumber(os.getenv("VM_ROOM") or "")     -- P5.3 C1: host-side room jump
+local ROOM_AT   = tonumber(os.getenv("VM_ROOM_AT") or "40")
 local VMTR_BUF, VMTR_IDX
 os.execute('mkdir "' .. OUT:gsub("/", "\\") .. '" 2>nul')
 
@@ -334,6 +336,26 @@ _G._n = emu.add_machine_frame_notifier(function()
           n, WATCHOBJ, u8(10), u8(11), u8(0), u8(1), u8(12), u8(13),
           u8(15), u8(14), u8(3), u8(19), u8(26), u8(27), u8(28),
           prog:read_u8(0x4006), prog:read_u8(SYM.vm_gfxmode or 0))
+    end
+
+    -- ═══════════════════════════════════════════════════════════════════════════════════
+    -- ★★★ THE ROOM JUMP (P5.3 C1) -- HOST-SIDE, NO TARGET CODE.
+    --
+    -- T-P0-028's compositing sample was attract mode: the ego appeared in 0 of 1,680 frames,
+    -- because an AGI game sits in its credits for the whole capture window. The jump is what
+    -- gets past that, and on OUR VM it needs nothing added to the 6809 at all.
+    --
+    -- ★★ WHY IT IS THIS CHEAP: our VM state is 256 variables and 256 flags, flat and
+    -- byte-indexed at a known address (VM_VARS $4000, VM_FLAGS $4100, packed LSB-first). AGI
+    -- routes a room change through VAR_CURRENT_ROOM (var 0) and FLAG_NEW_ROOM_EXEC (flag 5) --
+    -- **which logic.0 already tests every cycle**. So `room <n>` is two host writes: set var 0,
+    -- set flag 5, and the game's own logic.0 dispatches the room on its next pass.
+    -- ★ That is the whole mechanism. No new opcode, no new probe mode, no 6809 instruction.
+    if ROOM and n == ROOM_AT then
+        prog:write_u8(VM_VARS + 0, ROOM)
+        local b = prog:read_u8(VM_FLAGS + 0)                  -- flag 5 lives in byte 0, bit 5
+        prog:write_u8(VM_FLAGS + 0, b | 0x20)
+        w("  ★ room jump at cycle %d: var0 <- %d, flag 5 set", n, ROOM)
     end
 
     -- ★ THE SAMPLE: 32 flag bytes then 256 var bytes, exactly the oracle.s layout.

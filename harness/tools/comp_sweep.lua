@@ -105,6 +105,15 @@ local function compareFrame(n)
         fv:write(table.concat(tv)); fv:close()
         fp:write(table.concat(tp)); fp:close()
     end
+    -- ★ MODE-2 counters, to separate "the composite is slow" from "the free-run harness loops"
+    -- [L-56]. cp_do_free showed 696,660 tested pixels for a 340-pixel cel; MODE 2 does ONE
+    -- composite per handshake, so its counters cannot be inflated by a loop of mine.
+    if os.getenv("COMP_COUNT") then
+        local function rd32(a) return prog:read_u8(a)*16777216 + prog:read_u8(a+1)*65536
+                                    + prog:read_u8(a+2)*256 + prog:read_u8(a+3) end
+        w_("      counters: tested %d written %d rejpri %d rejkey %d ctrlhit %d ctrlstep %d",
+           rd32(0x0090), rd32(0x0094), rd32(0x0098), rd32(0x009C), rd32(0x00A8), rd32(0x00AC))
+    end
     if bad == 0 then
         pass = pass + 1
         w_("  frame %s  %2d sprites  BOTH PLANES IDENTICAL", n, #sprites)

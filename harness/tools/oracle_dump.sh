@@ -61,7 +61,7 @@ cd "$OUT_ABS"
 CEL_DUMP=${CEL_DUMP:-0}
 SPRITE_DUMP=${SPRITE_DUMP:-0}
 rm -f scummvm.ini
-if [ "$CEL_DUMP" = "1" ] || [ "$SPRITE_DUMP" = "1" ]; then
+if [ "$CEL_DUMP" = "1" ] || [ "$SPRITE_DUMP" = "1" ] || [ -n "$ROOM" ]; then
     printf '[scummvm]\n' > scummvm.ini
     if [ "$CEL_DUMP" = "1" ]; then
         printf 'coco_view_sweep=true\n' >> scummvm.ini
@@ -78,6 +78,18 @@ if [ "$CEL_DUMP" = "1" ] || [ "$SPRITE_DUMP" = "1" ]; then
     if [ "$SPRITE_DUMP" = "1" ]; then
         printf 'coco_sprite_dump=true\n' >> scummvm.ini
         echo "sprite   : ON  -- frameNNN.{before,after}.{visual,priority}.bin + sprites.txt"
+    fi
+    # ★★★ P5.3, patch 0008: the ROOM JUMP. Without it an AGI game sits in its credits for the
+    # whole window and the EGO is never composited -- measured at T-P0-028 as 0 of 1,680
+    # frames. ROOM=<n> calls the engine's own newRoom(), the same entry the AGI debug console's
+    # `room` command uses.
+    # ★ A jumped run PERTURBS the engine and its vmstate.txt is NOT a valid baseline.
+    if [ -n "$ROOM" ]; then
+        printf 'coco_room=%s\n' "$ROOM" >> scummvm.ini
+        [ -n "$ROOM_AFTER" ] && printf 'coco_room_after=%s\n' "$ROOM_AFTER" >> scummvm.ini
+        [ -n "$EGO_X" ] && printf 'coco_ego_x=%s\ncoco_ego_y=%s\n' "$EGO_X" "$EGO_Y" >> scummvm.ini
+        [ -n "$EGO_AFTER" ] && printf 'coco_ego_after=%s\n' "$EGO_AFTER" >> scummvm.ini
+        echo "room     : JUMP to $ROOM  -- ★ this run's vmstate.txt is NOT a valid baseline"
     fi
 else
     echo "cel dump : off (CEL_DUMP=1 to enable; that run's vmstate is not a baseline)"
