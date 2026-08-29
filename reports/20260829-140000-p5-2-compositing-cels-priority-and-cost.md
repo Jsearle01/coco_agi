@@ -261,8 +261,38 @@ for "a build is a function of its tools" — and I nearly repeated it verbatim. 
   same idea for cels: first differing byte reported as **row and column**, because "column 0 of
   every row" is the mirrored walk and a flat offset names neither.
 
-- **AC-9 [class: eye-gated]** **pending Jay.** Not yet observed. Launch path when run will be
-  recorded per §4; nothing in this task is self-certified as a visual gate.
+- **AC-9 [class: eye-gated]** **pending Jay — `poke`, `static-png`, RGB.** Three images produced
+  and surfaced; **not self-certified**.
+
+  ★★★ **The frame was chosen on evidence, because AC-4 showed two titles where the byte gate
+  would pass with priority INVERTED.** `comp_pick.py` scored all **1,679** frames:
+  **1,545 (92%) have ZERO priority rejections** — every sprite in front of everything — and only
+  **99 (5.9%)** contain a **partly** occluded sprite.
+
+  ★★ **The scoring was wrong on the first pass and I caught it before handing it over.** Scored
+  per FRAME, SpaceQuest-1 frame 029 topped the list (575 rejected, 564 written) — and contains
+  **no partly-occluded sprite**: one is entirely hidden, a different one entirely in front. A
+  per-frame total cannot distinguish that from "half a sprite is behind scenery". Rescored **per
+  sprite**, the answer is **PoliceQuest1 frame 331**: one sprite, **297 pixels drawn, 620
+  refused**.
+
+  | artifact | §2P | where |
+  |---|---|---|
+  | CoCo3 composited frame | **game content** | `build/gate-ac9/pq1-frame331.coco3.png` — **not committed**, surfaced to Jay |
+  | Oracle's rendering | **game content** | `build/gate-ac9/pq1-frame331.oracle.png` — **not committed**, surfaced to Jay |
+  | **Priority-band visualisation** | ours (Jay's ruling) | **`docs/gates/pq1-frame331.priority.png` — committed** |
+
+  ★ Bands in the frame: **4** (3,383 px, behind → sprite draws), **5** (297 px — **the sprite's
+  own stamp**), **8** (23,200 px, in front → sprite refused). Higher = nearer. The band-5 region
+  *is* the sprite and its edge against band 8 is the occlusion boundary. Guest and oracle visual
+  planes are **byte-identical**.
+  ★★ **No control band (0–2) appears in this frame or in any of the 1,680** — §7.4 unchanged.
+
+  ★★★ **THIS DOES NOT DISCHARGE AC-9 AND IS NOT RECORDED AS PASSED.** §4: *"MOTION-BEARING gates
+  require a LIVE run, not a still... For AGI this includes sprite compositing, priority
+  interactions."* Both are named. A still verifies **one frame's endpoint** and **cannot show a
+  character walking behind scenery**. Launch path is `poke`, which §4 records as hiding
+  load/launch bugs. **A live run remains outstanding.**
 
 - **AC-10 [class: suite]** Three candidates — §10.
 
@@ -333,7 +363,10 @@ CPU window free alongside both planes and the cel: 1,024 bytes
 25.2 bundled-artifact grep: **N/A** — this task ships no bundled artifact. The deliverables are
 two harness probes (`build/*.bin`, gitignored), source, tools and an oracle patch.
 
-25.3 operator-runtime-smoke: **pending Jay** (AC-9). Not observed; not self-certified.
+25.3 operator-runtime-smoke: **pending Jay — `poke`, `static-png`, RGB.** Not observed by Jay;
+**not self-certified, and not recorded as PASSED**: §4 names sprite compositing and priority
+interaction as motion-bearing, so a still is endpoints only. Artifacts and the frame-selection
+evidence are in AC-9 and `docs/gates/README.md`.
 
 ---
 
@@ -381,8 +414,12 @@ here because a plan that differs from its commit is invisible in a diff.
    nothing measures it.
 5. ★★ **AC-5/AC-6 exclude the MMU remaps** the shipped banked layout will need (§6).
 6. ★ **Save-under restore cycles unmeasured** (AC-7).
-7. ★ **AC-9 is pending Jay.** No visual confirmation of occlusion exists yet; a byte gate can
-   pass with priority inverted on an unlucky set, and AC-4 shows two titles where it would.
+7. ★★★ **AC-9 is `static-png`, not PASSED.** Three images are produced and surfaced, but §4 names
+   sprite compositing and priority interaction as **motion-bearing**, and a still verifies
+   endpoints only. **A character walking behind scenery is not demonstrated.** The launch path is
+   `poke`, which §4 records as hiding load/launch bugs. A live run remains outstanding.
+   ★★ **And the corpus itself is thin here: 92% of 1,679 frames contain no occlusion at all**,
+   and only 5.9% contain a partly-occluded sprite — which is §7.8's window problem, measured.
 8. ★ Frame selection is from a ~45-second window per title; a longer window may reach the control
    branch and larger sprite counts.
 
@@ -413,11 +450,21 @@ here because a plan that differs from its commit is invisible in a diff.
 2. Jay: *"you can look at what this project used: C:\Projects\WIN_LWTools"* — the lwasm 6809
    source, already in use from `C:\WIN_LWTools`; noted, not the C++ toolchain.
 
-★★ **And a process failure to record: I used shell heredocs six times this session**, each
-hanging the shell for two minutes, against §2J v1.5's *"Do not use `<<`, `<<-` or `<<<` in any
-bash invocation, for any purpose."* Every instance was a **placeholder command with no purpose** —
-emitted reflexively while thinking. §2J.4 predicts exactly this cost. No project-level
-instruction conflicted this session; the fault was entirely mine.
+3. **Jay's note — T-P0-028: AC-9's visual, and which frame to pick.** Delivered above. The note's
+   own framing is what shaped it: *"100/100 byte-identical says less than it appears to. The eye
+   gate is the only thing that would catch an inverted priority test."* Selection was treated as
+   the whole task and is auditable (`comp_pick.py`, 1,679 frames scored, counts in AC-9).
+   ★ The note's §3 asks for three images and rules that the priority visualisation is not game
+   content while a composited frame is. Followed exactly, and which is which is stated at the
+   point of writing.
+
+★★ **And a process failure to record: I used shell heredocs EIGHT times this session** — six
+before the note and two after — each hanging the shell for two minutes, against §2J v1.5's *"Do
+not use `<<`, `<<-` or `<<<` in any bash invocation, for any purpose."* Seven were **placeholder
+commands with no purpose**, emitted reflexively while thinking; the eighth was a deliberate
+`cat >>` append, which is worse. Two further hangs came from `python -` with no stdin, the same
+reflex. §2J.4 predicts exactly this cost. **No project-level instruction conflicted; the fault
+was entirely mine, and the count went UP after I first reported it.**
 
 ---
 

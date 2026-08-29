@@ -104,6 +104,7 @@ def main():
     ap.add_argument("--cels-dir", default=None)
     ap.add_argument("--out", required=True)
     ap.add_argument("--count", type=int, default=20, help="frames to stage, best-scoring first")
+    ap.add_argument("--only", default=None, help="comma-separated frame numbers (AC-9)")
     a = ap.parse_args()
 
     fdir = pathlib.Path(a.frames_dir or ("oracle/dumps/frames-" + a.title))
@@ -159,7 +160,17 @@ def main():
         cand.append((score, n, rows, stats))
 
     cand.sort(key=lambda t: -t[0])
-    chosen = cand[:a.count]
+    # ★ --only names specific frames, for AC-9's eye gate: comp_pick.py ranks by PER-SPRITE
+    # partial occlusion (what a human can see) while the score above ranks by total priority
+    # rejections (what the byte gate should cover). Different questions, different frames.
+    if a.only:
+        want = set(a.only.split(","))
+        chosen = [c for c in cand if c[1] in want]
+        missing = want - {c[1] for c in chosen}
+        if missing:
+            print("      ★★★ requested frame(s) not candidates: %s" % ",".join(sorted(missing)))
+    else:
+        chosen = cand[:a.count]
 
     idx = (out / "frames.txt").open("w", encoding="ascii", newline="\n")
     for score, n, rows, stats in chosen:

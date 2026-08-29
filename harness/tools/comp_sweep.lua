@@ -94,6 +94,17 @@ local function compareFrame(n)
             if at < 0 then plane, at = "priority", i - 1 end
         end
     end
+    -- ★ AC-9: write the GUEST's own planes out so the eye gate renders what the 6809 produced,
+    -- not the oracle's copy of it. Off unless asked -- 53,760 bytes per frame.
+    if os.getenv("COMP_DUMP") then
+        local fv = io.open(OUT .. "/guest" .. n .. ".visual.bin", "wb")
+        local fp = io.open(OUT .. "/guest" .. n .. ".priority.bin", "wb")
+        local tv, tp = {}, {}
+        for i = 1, PLANE do tv[i] = string.char(prog:read_u8(CP_VIS + i - 1)) end
+        for i = 1, PLANE do tp[i] = string.char(prog:read_u8(CP_PRI + i - 1)) end
+        fv:write(table.concat(tv)); fv:close()
+        fp:write(table.concat(tp)); fp:close()
+    end
     if bad == 0 then
         pass = pass + 1
         w_("  frame %s  %2d sprites  BOTH PLANES IDENTICAL", n, #sprites)
