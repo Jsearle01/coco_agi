@@ -92,6 +92,37 @@ def walk_expr(code, ip, tests):
     return ip
 
 
+def blobs_from_zip(z):
+    import zipfile
+    with zipfile.ZipFile(z, "r") as zf:          # 'r' -- read only, always (§2P)
+        return {i.filename.rsplit("/", 1)[-1]: zf.read(i)
+                for i in zf.infolist() if not i.is_dir()}
+
+
+def census_game(game):
+    """Census an already-loaded volread Game -- shared by the directory and zip paths."""
+    cmds, tests = collections.Counter(), collections.Counter()
+    nlogic, failed = 0, []
+    for e in game.dirs["LOGIC"]:
+        if not e.present:
+            continue
+        try:
+            lg = logic_mod.split(game.load("LOGIC", e.index), index=e.index)
+        except Exception as exc:                              # noqa: BLE001
+            failed.append((e.index, "split: %s" % type(exc).__name__))
+            continue
+        try:
+            walk(lg.bytecode, cmds, tests)
+            nlogic += 1
+        except Exception as exc:                              # noqa: BLE001
+            failed.append((e.index, str(exc)[:60]))
+    return cmds, tests, nlogic, failed
+
+
+def census_zip(z):
+    return census_game(resource.load_from_blobs(blobs_from_zip(z), z.stem))
+
+
 def census_title(path):
     game = resource.load_from_files(str(path))
     cmds, tests = collections.Counter(), collections.Counter()
