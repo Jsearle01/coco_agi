@@ -342,4 +342,7 @@ Pushed to `methodology-candidate-pool` `ac21bb8`, `seeds/AGI/live/`:
 
 ### 11 — Commit
 
-See below — pushed to origin/wip before this report was filed.
+`aec2263` — pushed to origin/wip before this report was filed.
+
+★ The report file itself is inside that commit; the hash is recorded here after the fact and
+verified by `git rev-parse` rather than predicted.
