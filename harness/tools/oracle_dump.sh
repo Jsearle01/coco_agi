@@ -56,11 +56,32 @@ cd "$OUT_ABS"
 # key here is how patch 0006's sweep is switched on without inventing a command-line option.
 # When CEL_DUMP is off we write NOTHING, so a baseline run is bit-for-bit the run it was before
 # patch 0006 existed.
-if [ "$CEL_DUMP" = "1" ]; then
-    printf '[scummvm]\ncoco_view_sweep=true\n' > scummvm.ini
-    echo "cel dump : ON  -- ★ this run's vmstate.txt is NOT a valid baseline"
+# ★ Defaults BEFORE the test that reads them. They were set 40 lines below the `if`, which
+# worked only because an unset variable compares false -- a fragility, not a design.
+CEL_DUMP=${CEL_DUMP:-0}
+SPRITE_DUMP=${SPRITE_DUMP:-0}
+rm -f scummvm.ini
+if [ "$CEL_DUMP" = "1" ] || [ "$SPRITE_DUMP" = "1" ]; then
+    printf '[scummvm]\n' > scummvm.ini
+    if [ "$CEL_DUMP" = "1" ]; then
+        printf 'coco_view_sweep=true\n' >> scummvm.ini
+        echo "cel dump : ON  -- ★ this run's vmstate.txt is NOT a valid baseline"
+    fi
+    # ★★ P5.2, patch 0007: the composited-frame dump. AC-3 needs a REFERENCE for a composited
+    # frame and none existed -- tools/agivm/blit.py is a cost model whose own header says
+    # "pixels WRITTEN: NOT COMPUTED". So the oracle is asked, per CLAUDE.md §2O.1.
+    #
+    # ★ VERIFIED INERT WHEN OFF, which patch 0006 taught us not to assume: with the switch
+    # off, the new binary's picture dumps are byte-identical to the old binary's and the
+    # vmstate common prefix hashes the same. (vmstate LENGTH varies run to run because this
+    # script kills the run on WALL CLOCK -- that is the timeout, not the engine.)
+    if [ "$SPRITE_DUMP" = "1" ]; then
+        printf 'coco_sprite_dump=true\n' >> scummvm.ini
+        echo "sprite   : ON  -- frameNNN.{before,after}.{visual,priority}.bin + sprites.txt"
+    fi
 else
     echo "cel dump : off (CEL_DUMP=1 to enable; that run's vmstate is not a baseline)"
+    echo "sprite   : off (SPRITE_DUMP=1 to enable)"
 fi
 
 # --auto-detect finds the game in the CWD, so point it at the game by path instead and let
@@ -83,7 +104,6 @@ SEED=${SEED:-12345}
 # So a cel-dump run is a SEPARATE run and its vmstate.txt IS NOT A VALID BASELINE. The oracle
 # is what everything else is diffed against (CLAUDE.md §2O.1); an instrumentation switch that
 # perturbs it must never be on for a run whose state anyone consumes.
-CEL_DUMP=${CEL_DUMP:-0}
 timeout "$SECS" "$SCUMMVM" \
     --path="$GAME_ABS" \
     --auto-detect \

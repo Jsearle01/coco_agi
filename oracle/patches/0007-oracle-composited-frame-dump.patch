@@ -1,0 +1,158 @@
+diff --git a/engines/agi/graphics.h b/engines/agi/graphics.h
+index 320019fa..5eff5b31 100644
+--- a/engines/agi/graphics.h
++++ b/engines/agi/graphics.h
+@@ -170,6 +170,18 @@ public:
+ 	byte getPriority(int16 x, int16 y) const;
+ 	bool checkControlPixel(int16 x, int16 y, byte newPriority) const;
+ 
++	// coco_agi ORACLE INSTRUMENTATION (P0.2). Writes _gameScreen and _priorityScreen
++	// verbatim. It lives in GfxMgr because those buffers are private and MUST NOT be
++	// copied through an accessor that could transform them -- CLAUDE.md 2O.1: the
++	// baseline may not pass through anything we wrote.
++	void oracleDumpScreens(int16 resourceNr) const;
++
++	// coco_agi ORACLE INSTRUMENTATION (P5.2). Read-only views of the two buffers, so the
++	// sprite dump can emit them without duplicating oracleDumpScreens' naming, which is
++	// per-PICTURE and this is per-FRAME.
++	const byte *getGameScreenForOracle() const { return _gameScreen; }
++	const byte *getPriorityScreenForOracle() const { return _priorityScreen; }
++
+ 	byte getCGAMixtureColor(byte color) const;
+ 
+ 	void render_Block(int16 x, int16 y, int16 width, int16 height, bool copyToScreen = true);
+diff --git a/engines/agi/sprite.cpp b/engines/agi/sprite.cpp
+index 849857f2..5707bb4f 100644
+--- a/engines/agi/sprite.cpp
++++ b/engines/agi/sprite.cpp
+@@ -20,6 +20,8 @@
+  */
+ 
+ #include "agi/agi.h"
++#include "common/config-manager.h" // coco_agi ORACLE INSTRUMENTATION (P5.2)
++#include "common/file.h"           // coco_agi ORACLE INSTRUMENTATION (P5.2)
+ #include "agi/sprite.h"
+ #include "agi/graphics.h"
+ #include "agi/text.h"
+@@ -192,7 +194,89 @@ void SpritesMgr::eraseSprites() {
+ /**
+  * Draw all sprites in the given list.
+  */
++// coco_agi ORACLE INSTRUMENTATION (P5.2) -- composited-frame dump.
++//
++// AC-3 needs a REFERENCE for a composited frame and none existed: tools/agivm/blit.py is a
++// COST MODEL whose own header says "pixels WRITTEN: NOT COMPUTED -- needs the priority screen,
++// which this VM does not build". Comparing the 6809 against a model that does not compute the
++// answer is not a gate. So the oracle is asked, which is what CLAUDE.md 2O.1 requires anyway:
++// the baseline is the pinned oracle, never something we wrote.
++//
++// Per frame, five artifacts:
++//   frameNNN.before.visual.bin    both planes as the room left them -- the 6809's INPUT
++//   frameNNN.before.priority.bin
++//   frameNNN.sprites.txt          one line per sprite actually drawn, in draw order
++//   frameNNN.after.visual.bin     both planes after compositing -- the 6809's EXPECTED OUTPUT
++//   frameNNN.after.priority.bin
++//
++// The sprite manifest is what makes the input reproducible: object, view, loop, cel, x, y,
++// priority and size, in the order drawSprites() walks them. Without the ORDER the frames can
++// only be compared when sprites do not overlap, which is exactly the case that does not
++// exercise the priority test.
++//
++// GATED INERT. Patch 0006 recorded the reason in as many words: with its sweep off but the dump
++// still firing, Kingquest1 STILL diverged from the pre-patch baseline. An instrumentation
++// switch that perturbs the oracle must never be on for a run whose state anyone consumes.
++static bool oracleSpriteDumpEnabled() {
++	return ConfMan.hasKey("coco_sprite_dump") && ConfMan.getBool("coco_sprite_dump");
++}
++
++static void oracleWriteBuf(const Common::String &name, const byte *buf, uint32 len) {
++	Common::DumpFile df;
++	if (!df.open(Common::Path(name)))
++		return;
++	df.write(buf, len);
++	df.finalize();
++	df.close();
++}
++
++void SpritesMgr::oracleDumpFrame(const char *when, int frameNr) {
++	const byte *vis = _gfx->getGameScreenForOracle();
++	const byte *pri = _gfx->getPriorityScreenForOracle();
++	if (vis == nullptr || pri == nullptr)
++		return;
++	oracleWriteBuf(Common::String::format("frame%03d.%s.visual.bin", frameNr, when),
++	               vis, SCRIPT_WIDTH * SCRIPT_HEIGHT);
++	oracleWriteBuf(Common::String::format("frame%03d.%s.priority.bin", frameNr, when),
++	               pri, SCRIPT_WIDTH * SCRIPT_HEIGHT);
++}
++
++void SpritesMgr::oracleDumpSpriteList(int frameNr, const SpriteList &spriteList) {
++	Common::DumpFile df;
++	if (!df.open(Common::Path(Common::String::format("frame%03d.sprites.txt", frameNr))))
++		return;
++	// object view loop cel x y priority width height clearKey mirrored
++	//
++	// ★ IN DRAW ORDER, which is the whole point of dumping the list rather than reconstructing
++	// it: sprites overlap, so the same set drawn in a different order gives a different frame.
++	// A gate that could only be run on non-overlapping sprites would not exercise the priority
++	// test, which is the one mechanism this task exists to verify.
++	SpriteList::const_iterator it;
++	for (it = spriteList.begin(); it != spriteList.end(); ++it) {
++		ScreenObjEntry *o = it->screenObjPtr;
++		if (o == nullptr || o->celData == nullptr)
++			continue;
++		df.writeString(Common::String::format(
++			"%d %d %d %d %d %d %d %d %d %d %d\n",
++			o->objectNr, o->currentViewNr, o->currentLoopNr, o->currentCelNr,
++			o->xPos, o->yPos, o->priority,
++			o->celData->width, o->celData->height,
++			o->celData->clearKey, o->celData->mirrored ? 1 : 0));
++	}
++	df.finalize();
++	df.close();
++}
++
+ void SpritesMgr::drawSprites(SpriteList &spriteList) {
++	// coco_agi ORACLE INSTRUMENTATION (P5.2) -- see oracleDumpFrame above.
++	static int s_oracleFrameNr = 0;
++	const bool oracleDumping = oracleSpriteDumpEnabled() && !spriteList.empty();
++	int oracleFrameNr = 0;
++	if (oracleDumping) {
++		oracleFrameNr = s_oracleFrameNr++;
++		oracleDumpFrame("before", oracleFrameNr);
++		oracleDumpSpriteList(oracleFrameNr, spriteList);
++	}
+ 	SpriteList::iterator iter;
+ //	warning("drawSprites");
+ 
+@@ -205,6 +289,8 @@ void SpritesMgr::drawSprites(SpriteList &spriteList) {
+ //		warning("sprite %d (view %d), priority %d, sort %d, givenOrder %d", screenObj->objectNr, screenObj->currentView, screenObj->priority, sprite.sortOrder, sprite.givenOrderNr);
+ 		drawCel(screenObj);
+ 	}
++	if (oracleDumping)
++		oracleDumpFrame("after", oracleFrameNr);
+ }
+ 
+ /**
+@@ -225,6 +311,7 @@ void SpritesMgr::drawStaticSpriteList() {
+ 	drawSprites(_spriteStaticList);
+ }
+ 
++
+ void SpritesMgr::drawAllSpriteLists() {
+ 	drawSprites(_spriteStaticList);
+ 	drawSprites(_spriteRegularList);
+diff --git a/engines/agi/sprite.h b/engines/agi/sprite.h
+index 96107ed2..48a5ca75 100644
+--- a/engines/agi/sprite.h
++++ b/engines/agi/sprite.h
+@@ -80,6 +80,10 @@ public:
+ 	void drawStaticSpriteList();
+ 	void drawAllSpriteLists();
+ 
++	// coco_agi ORACLE INSTRUMENTATION (P5.2) -- see sprite.cpp.
++	void oracleDumpFrame(const char *when, int frameNr);
++	void oracleDumpSpriteList(int frameNr, const SpriteList &spriteList);
++
+ 	void drawCel(ScreenObjEntry *screenObj);
+ 
+ 	void showSprite(ScreenObjEntry *screenObj);

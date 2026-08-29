@@ -35,6 +35,16 @@ oracle/**/*.o
 oracle/**/*.so
 oracle/**/*.exe
 
+# ★★★ ORACLE DUMPS ARE GAME CONTENT AND WERE NOT IGNORED (found T-P0-028, §2P).
+# oracle/dumps/ holds decoded cels, composited frames and 160x168 picture planes -- all of it
+# copyrighted and the user's. It was untracked but NOT ignored, which is one `git add -A` away
+# from being committed; §2E forbids that command, so the guard held, but a guard that depends on
+# never mistyping is not a guard. Same shape as docs/ground-truth/ and games/ above.
+# ★ The .gitkeep stays tracked so the directory exists on a fresh clone and oracle_dump.sh has
+# somewhere to write.
+oracle/dumps/*
+!oracle/dumps/.gitkeep
+
 # disk images and build artifacts — reproducible from tools/imgbuild/, never committed
 *.dmk
 *.dsk

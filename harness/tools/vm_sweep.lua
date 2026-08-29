@@ -25,6 +25,8 @@ local TRACE_AT  = tonumber(os.getenv("VM_TRACECYCLE") or "1")
 local WATCHOBJ  = tonumber(os.getenv("VM_WATCHOBJ") or "") -- nil unless asked
 local TIMED     = tonumber(os.getenv("VM_TIMED") or "")    -- AC-7: free-run this many cycles
 local timed_t0                                              -- set on the first timed frame
+local CAL       = tonumber(os.getenv("VM_CAL") or "")      -- clock calibration: N x 160,000 cycles
+local cal_t0
 local VMTR_BUF, VMTR_IDX
 os.execute('mkdir "' .. OUT:gsub("/", "\\") .. '" 2>nul')
 
@@ -37,6 +39,7 @@ local VM_FLAGS  = 0x4100
 local VM_VARS   = 0x4000
 local GO, STATUS, BADOP, BADLOGIC, CYCLE = 0x0080, 0x0081, 0x0082, 0x0083, 0x0084
 local FREE      = 0x0090                                     -- VP_FREE, the AC-7 free-run counter
+local CALADDR   = 0x0092                                     -- VP_CAL, the calibration block count
 
 local m    = manager.machine
 local cpu  = m.devices[":maincpu"]
@@ -171,6 +174,27 @@ _G._n = emu.add_machine_frame_notifier(function()
     -- MAME's frame period (16.7 ms) and says nothing about the VM. VP_FREE makes the probe run
     -- N cycles back to back; the emulated clock either side gives the real figure.
     -- ★ Emulated time, not wall time: wall time measures this laptop.
+    -- ═══════════════════════════════════════════════════════════════════════════════════
+    -- ★★★ CLOCK CALIBRATION AT N BLOCKS, so the fixed overhead can be separated from the clock
+    -- instead of being charged to it. Each block is exactly 160,000 CPU cycles; elapsed time is
+    -- (N*160000 + overhead)/f. Run at several N and fit -- with three points the two-parameter
+    -- fit is over-determined and can be contradicted, which a single measurement never can.
+    if CAL then
+        if cal_t0 == nil then
+            cal_t0 = m.time:as_double()
+            prog:write_u8(CALADDR, math.floor(CAL / 256))
+            prog:write_u8(CALADDR + 1, CAL % 256)
+            prog:write_u8(GO, 1)
+            return
+        end
+        if prog:read_u8(GO) ~= 0 then return end
+        local dt = m.time:as_double() - cal_t0
+        w("CAL blocks=%d cycles=%d elapsed=%.9f implied_MHz=%.4f",
+          CAL, CAL * 160000, dt, (CAL * 160000) / dt / 1e6)
+        m:exit()
+        return
+    end
+
     if TIMED then
         if timed_t0 == nil then
             timed_t0 = m.time:as_double()

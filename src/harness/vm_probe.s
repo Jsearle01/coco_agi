@@ -43,6 +43,7 @@ VP_OPCOUNT      equ     $008B           ; 2 bytes: commands dispatched, cumulati
 VP_ICGUARD      equ     $008D           ; logic.0 invocations in the last cycle
 VP_ARENA_BAD    equ     $008E           ; ★ 2 bytes: first arena address that failed readback, 0 = clean
 VP_FREE         equ     $0090           ; ★ 2 bytes: AC-7 free-run counter, 0 = normal handshake
+VP_CAL          equ     $0092           ; ★ 2 bytes: clock-calibration blocks, 0 = none
 VP_HW_STACK     equ     $0700
 
                 org     $0700
@@ -120,6 +121,7 @@ vp_at_done:     std     VP_ARENA_BAD
 * only true on the runs where the host sets it.
                 ldd     #0
                 std     VP_FREE
+                std     VP_CAL
 
                 jsr     vm_start
 
@@ -133,7 +135,34 @@ vp_at_done:     std     VP_ARENA_BAD
 * back and parks; the host reads the emulated clock either side and divides.
 * ★ Same code path, same staging, same pacing: the only thing removed is the park. A separate
 * timing binary would measure a different program [L-56].
+* ═══════════════════════════════════════════════════════════════════════════════════
+* ★★★ CLOCK CALIBRATION, WITH THE SCAFFOLDING SEPARABLE. Two figures for one clock are on
+* record: 1.7898 MHz (P3.3/P3.13, a 160,009-cycle loop) and 1.7871 MHz (P1.3/P4.4, a
+* 160,000-cycle loop). They differ by 0.15% and the hardware constant is 14.31818/8 =
+* 1.789773 MHz, which the first matches to five figures and the second does not.
+*
+* ★★ The suspicion is L-56 -- the timing bracket contains the loop AND the probe's own report
+* path, so a fixed overhead is divided into a fixed cycle count and comes out as clock error.
+* A single measurement cannot separate the two. **N blocks of 160,000 cycles can**: elapsed =
+* (N * 160000 + overhead) / f, so two N values give f and the overhead, and a third CHECKS them.
+*
+* ★ 20,000 iterations of `leax -1,x` (5 cycles) + `bne` (3, taken or not) = 160,000 exactly.
+* `ldx #20000` (3) and the outer decrement are part of the overhead the fit recovers.
 vp_loop:
+                ldd     VP_CAL
+                beq     vp_nocal
+vp_calblk:      pshs    d
+                ldx     #20000
+vp_calloop:     leax    -1,x
+                bne     vp_calloop
+                puls    d
+                subd    #1
+                std     VP_CAL
+                bne     vp_calblk
+                clr     VP_GO                   ; park: the host reads the clock here
+vp_calwait:     lda     VP_GO
+                beq     vp_calwait
+vp_nocal:
                 ldd     VP_FREE
                 beq     vp_paced                ; not free-running: normal handshake
                 subd    #1
