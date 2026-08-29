@@ -220,3 +220,47 @@ scummvm.log
 
 # MAME save states: machine snapshots, never tracked (CLAUDE.md 2P)
 sta/
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★ DOS-RELEASE HARDENING (P1.4) — COMMITTED AND PUSHED BEFORE THE ARCHIVES ARRIVE.
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+#
+# ★★★ THE ORDERING IS THE SAFETY PROPERTY, exactly as the P0.4 block above says. Six archives
+# with nine AGI v2 titles are about to be dropped in the repo root. Everything below landed and
+# was PUSHED first, and `harness/tools/ignore_probe.py` proves each case with
+# `git check-ignore -v` rather than by reading the patterns and believing them (L-28).
+#
+# ★ The P0.4 block already covers the AGI resource names, the archive formats in circulation
+# then, the DOS interpreter/driver/text extensions and the SCI resource files. What follows is
+# only what the probe found MISSING for a DOS drop.
+#
+# --- archive wrappers P0.4 did not anticipate ----------------------------------------------
+# ★ An Internet Archive upload arrives in whatever the uploader used. .cab and .iso are both
+# common for DOS-era bundles and neither was covered.
+*.cab
+*.CAB
+*.iso
+*.ISO
+*.ace
+*.ACE
+*.zoo
+*.ZOO
+*.dms
+*.adf
+#
+# --- ★★★ BATCH FILES: THE ONE THE P0.4 BLOCK DELIBERATELY LEFT OUT -------------------------
+# ★★ P0.4 declined a blanket *.bat and SAID WHY: `build.bat` is CLAUDE.md §1's build contract,
+# .gitattributes pins it to CRLF because cmd.exe cannot parse an LF-only batch, and a blanket
+# rule would make it un-addable without `git add -f`. That reasoning was right and is preserved
+# — the rule below is not a reversal, it is the same rule with the exception made explicit.
+#
+# ★★★ Every DOS AGI release ships one (SIERRA.BAT, INSTALL.BAT), so the gap is real now in a way
+# it was not when the CoCo3 corpus was the only thing arriving. The negation is anchored to the
+# REPOSITORY ROOT (`/build.bat`), so this project's build contract stays addable and a batch file
+# anywhere else — which is where a dropped release would put one — is caught.
+*.bat
+*.BAT
+!/build.bat
+#
+# ★ Sibling repos keep their own build.bat at their own root; this file is not shared (§2M lists
+# the ten shared HAL files and .gitignore is not among them), so the anchoring is local.
