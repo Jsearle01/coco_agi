@@ -367,4 +367,4 @@ would be a row about the wrong mechanism. **Deferred deliberately** until the ca
 
 ### 11 — Commit
 
-Recorded below after push.
+`f0b5f5e` — pushed to origin/wip before this report was filed.
