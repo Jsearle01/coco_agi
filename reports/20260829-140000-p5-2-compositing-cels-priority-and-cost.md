@@ -423,6 +423,41 @@ here because a plan that differs from its commit is invisible in a diff.
 
 ### 7 — Uncertainty flags
 
+0. ★★★★ **THE CORPUS IS ATTRACT MODE, NOT GAMEPLAY — AND THIS QUALIFIES AC-3, AC-5, AC-6 AND
+   AC-9.** Raised by Jay after the verdict: *"unless you inject keyboard input most of the games
+   go to a credits screen. and even ingame if you get there, you would need to move the character
+   to where it is occluded to test."* **Measured, and he is right:**
+
+   | | |
+   |---|---|
+   | frames captured | 1,680 across 5 titles |
+   | **frames containing the EGO (object 0)** | ★★★ **0** |
+   | object numbers ever composited | 12, 34, 55, 60–65, 39–44, 200–206, 220 — `add.to.pic` decorations and attract elements |
+   | composited sprite area, median | **120 px** (10×12 and 7×9 dominate) |
+   | cel area in the CORPUS, median | **270 px** — 2.25× larger |
+   | ego `ySize` from the VM's own object table | 32–33 (larry1, PoliceQuest1) |
+
+   ★★ **Nothing the player ever controls was composited even once.** The 45-second windows never
+   leave the credits, so every frame gated, timed and shown is an intro sequence.
+   ★ **Consequences, stated separately because they differ in direction:**
+   - **AC-3** (100 frames byte-identical) is *sound but narrow*: it proves the composite against
+     the oracle on the frames it saw, and those exclude the ego entirely.
+   - **AC-5's per-composite figure is plausibly representative** — its samples were 575 and 888
+     tested pixels and the ego's cels are of that order (`ySize` 32–33) — but **sprite COUNT in
+     gameplay is not established**, and AC-6 extrapolates by count.
+   - **AC-6's 106% remains a FLOOR**, now for a fourth reason: gameplay draws the ego every
+     cycle *in addition to* NPCs.
+   - **§7.4's control branch (0 of 1,680)** is very likely a gameplay mechanism — control lines
+     are what an ego walks past — so its absence here is a property of attract mode, not of AGI.
+   - **AC-9's eye gate showed an attract-mode element**, not a character behind scenery.
+
+   ★★★ **The fix needs no keyboard injection.** The pinned oracle's own AGI console
+   (`engines/agi/console.cpp`) registers **`room <n>`**, **`setvar`**, **`setobj`** and
+   **`runopcode`** — so a gated patch can enter a gameplay room and `position(0, x, y)` the ego
+   onto an occluding spot deterministically. ★ Such a run PERTURBS the engine and its `vmstate`
+   would not be a valid baseline — patch 0006's rule exactly — but the composite's inputs
+   (before-planes + sprite list) and its output are still the oracle's own.
+
 1. ★★★ **Both siblings remain dirty on the shared `sys.s`** — unchanged from P4.5 §7.1 and still
    uncommitted in POP and Karateka. All three trees agree today; if one commits and another does
    not, `hal_sync_check.py` fails both siblings' builds.
@@ -449,6 +484,15 @@ here because a plan that differs from its commit is invisible in a diff.
 ---
 
 ### 8 — Follow-up candidates
+
+0. ★★★★ **DRIVE THE ORACLE INTO GAMEPLAY, and re-take AC-3, AC-5, AC-6 and AC-9 on it.**
+   §7.0: the ego was composited **zero times in 1,680 frames**. The mechanism is already in the
+   pinned oracle — `room`, `setvar`, `setobj`, `runopcode` in `engines/agi/console.cpp` — so a
+   gated patch can enter a gameplay room and `position` the ego onto an occluding spot without
+   any keyboard injection. ★★ **This is the highest-value follow-up on the list**, because it
+   is the only one that changes what the cost figure MEANS, and the cost figure is what §9's
+   ranking is being re-taken against. ★ It also very likely supplies the first control-branch
+   frames (§7.4) and a proper "character behind scenery" image for AC-9.
 
 1. ★★★ **The §3.6 / §9 design call AC-6 forces.** 106% of a second at four sprites. The
    candidates are visible in the fit: 76 cycles per pixel *written* dominates, and the composite
@@ -480,6 +524,17 @@ here because a plan that differs from its commit is invisible in a diff.
    ★ The note's §3 asks for three images and rules that the priority visualisation is not game
    content while a composited frame is. Followed exactly, and which is which is stated at the
    point of writing.
+
+4. ★★★ **Jay, after observing AC-9:** *"the green appears in the darker black area and the red
+   appears in the upper lighter gray area."* Confirmed against the buffers — see AC-9. **25.3
+   moves to OBSERVED.**
+5. ★★★★ **Jay, on why the corpus looks the way it does:** *"unless you inject keyboard input most
+   of the games go to a credits screen. and even ingame if you get there, you would need to move
+   the character to where it is occluded to test."* **Measured and confirmed: the ego appears in
+   0 of 1,680 frames** — see §7.0, which this note created. ★★ It explains all three coverage
+   holes at once (92% of frames with no occlusion, no tall occluded sprite, zero control-branch
+   hits) and it is now §8's top follow-up. ★ **A user observation that reframed four ACs after
+   the verdict had been filed.**
 
 ★★ **And a process failure to record: I used shell heredocs EIGHT times this session** — six
 before the note and two after — each hanging the shell for two minutes, against §2J v1.5's *"Do
