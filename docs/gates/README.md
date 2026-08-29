@@ -54,68 +54,67 @@ capture only the IHDR width and height were read.
 
 ---
 
-## AC-9 (T-P0-028) — `pq1-frame331.priority.png`
+## AC-9 (T-P0-028) — does a sprite go BEHIND scenery?
 
-**The composite's eye gate: does a sprite go BEHIND scenery where the priority screen says it
-should?** PoliceQuest1, frame 331. Produced by `harness/tools/comp_render.py` from the **6809's
-own** priority plane after compositing.
+**PoliceQuest1, frame 306.** One sprite, **212 pixels drawn and 196 refused** by the priority
+test — split almost exactly in half, which is what makes the decision visible.
 
-### ★★★ Why this frame, and why the selection is the whole job
+| file | what it is | §2P |
+|---|---|---|
+| **`pq1-frame306.decision.png`** | ★★★ **read this one** — every sprite pixel coloured by OUTCOME | ours |
+| `pq1-frame306.priority.png` | the priority screen after compositing, one colour per depth band | ours |
+| `build/gate-ac9/pq1-frame306.coco3.png` | the CoCo3's composited frame | **game content — not committed** |
+| `build/gate-ac9/pq1-frame306.oracle.png` | the oracle's rendering of the same frame | **game content — not committed** |
 
-AC-4 found **two titles where the byte gate would pass with the priority test INVERTED** — their
-sample frames contain no occlusion at all. So a frame had to be chosen on evidence, not looks.
+### ★★★ How to read `decision.png`
+
+| colour | meaning |
+|---|---|
+| **GREEN** | the sprite was **drawn** — the priority test found scenery *behind* it |
+| **RED** | the sprite was **refused** — scenery is *in front*, so it is hidden |
+| grey | the depth map before compositing; **lighter = nearer** |
+
+★★ **The green/red boundary IS the occlusion edge.** The sprite occupies rows 61–70, columns
+50–101 — a single 52×10 strip crossing a depth boundary, so its left part is drawn and its right
+part is hidden. **If the priority test were inverted, green and red would simply swap**, which is
+instantly visible and is exactly what AC-4 proved a byte gate can miss on two of five titles.
+
+### ★★ Why `priority.png` alone was not enough
+
+It shows the depth map — correct, and nearly illegible for this question. On this frame the
+sprite is **588 of 26,880 pixels (2%)**, and the 196 pixels where it was **refused** are not in
+that image *at all*, because refusing means nothing was drawn. **The one thing the gate exists to
+show is the part that picture cannot contain.** It is kept because it shows the scenery's own
+depth structure; `decision.png` is the one that answers the question.
+
+### ★ Why this frame, and what the corpus does not contain
+
 `harness/tools/comp_pick.py` scored all **1,679** frames:
 
 | | frames | |
 |---|---|---|
-| scored | 1,679 | five titles |
 | **zero** priority rejections | **1,545** | **92%** — every sprite in front of everything |
-| a sprite **partly** occluded | **99** | 5.9% — the only frames worth showing |
+| a sprite **partly** occluded | **99** | 5.9% |
+| a **tall** partly-occluded sprite | **0** | ★★ none in the corpus |
 
-★★ **The score is per SPRITE, and the first version was per frame — which was wrong.**
-SpaceQuest-1 frame 029 topped the per-frame ranking (575 rejected, 564 written) and contains **no
-partly-occluded sprite at all**: one sprite is entirely hidden and a different one is entirely in
-front. A per-frame total cannot tell that from "half a sprite is behind scenery", and only the
-second shows a human anything.
+★★ **Every partly-occluded sprite in the captured window is a wide, short shape** (aspect ≈ 0.19)
+— in Police Quest, a vehicle passing behind scenery. **There is no "character walking behind a
+tree" frame to show**, which is §7.8's capture-window limit, measured.
 
-Frame 331: one sprite, **297 pixels drawn and 620 refused by the priority test.**
+★★ **Scored per SPRITE, and the first version was per frame — which was wrong.** SpaceQuest-1
+frame 029 topped the per-frame ranking (575 rejected, 564 written) and contains **no
+partly-occluded sprite**: one is entirely hidden, a *different* one entirely in front. A
+per-frame total cannot tell that from "half a sprite is behind scenery".
 
-### ★★ What the image shows, and how to read it
+### ★★★ Launch path, and what this does NOT discharge
 
-One colour per priority band — **not** the picture palette, deliberately, so it cannot be read as
-a picture. Bands present:
+**`poke` + `static-png`, RGB.** §4: *"MOTION-BEARING gates require a LIVE run, not a still... For
+AGI this includes sprite compositing, priority interactions."* Both are named. This verifies
+**one frame's endpoint** and **cannot show motion**. **AC-9 is recorded as `static-png`, NOT as
+PASSED**; a live run remains outstanding.
 
-| band | pixels | meaning |
-|---|---|---|
-| 4 | 3,383 | scenery **behind** the sprite → the sprite draws over it |
-| **5** | **297** | ★ **the sprite's own stamp** — exactly the pixels it was allowed to draw |
-| 8 | 23,200 | scenery **in front** → the sprite is refused here |
+★★ **Clyde interpreted none of the four images** (§3). Every number here comes from the plane
+buffers and the cel, not from a rendered PNG.
 
-★ **Higher band = nearer.** The rule is `screenPriority <= viewPriority → draw`; the sprite is
-priority 5, so band 4 accepts it and band 8 hides it. **The 297-pixel band-5 region IS the
-sprite**, and its outline against band 8 is the occlusion boundary.
-★★ Bands 0–2 would be **control lines, not depth** (shown in reds by the ramp). **None appear in
-this frame — or in any of the 1,680** (report §7.4).
+---
 
-### ★★★ Launch path and what this does NOT discharge
-
-**`static-png`** — and per §4 that is **endpoints only**. The composite ran under MAME with the
-probe **poked** into RAM by Lua, so the launch path is `poke`, which §4 records as hiding
-load/launch bugs.
-
-> ★★★ §4: *"MOTION-BEARING gates require a LIVE run, not a still... For AGI this includes sprite
-> compositing, priority interactions and the room-change transition."*
-
-**Sprite compositing and priority interaction are named there explicitly.** This still verifies
-one frame's occlusion and **cannot show motion** — a character *walking* behind scenery is not
-demonstrated. **AC-9 is therefore reported as `static-png`, not as PASSED**, and a live run
-remains outstanding.
-
-### §2P — what is here and what is not
-
-★★ The **composited frames are copyrighted game content and are NOT committed.** They are at
-`build/gate-ac9/pq1-frame331.{coco3,oracle}.png` and were surfaced to Jay directly.
-★ The **priority visualisation is ours** — sixteen flat bands of our own buffer — and is
-committed, per Jay's ruling in the T-P0-028 note.
-★★ **Clyde did not interpret any of the three images** (§3). Every number above comes from the
-plane **buffers**, not from a rendered image.
