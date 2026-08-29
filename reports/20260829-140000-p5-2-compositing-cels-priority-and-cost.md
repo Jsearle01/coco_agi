@@ -261,8 +261,19 @@ for "a build is a function of its tools" — and I nearly repeated it verbatim. 
   same idea for cels: first differing byte reported as **row and column**, because "column 0 of
   every row" is the mirrored walk and a flat offset names neither.
 
-- **AC-9 [class: eye-gated]** **pending Jay — `poke`, `static-png`, RGB.** Three images produced
-  and surfaced; **not self-certified**.
+- **AC-9 [class: eye-gated]** ★★ **OBSERVED BY JAY — `poke`, `static-png`, RGB. The static
+  endpoint is confirmed; the LIVE/motion gate is NOT.**
+
+  Jay, 2026-08-29: *"the green appears in the darker black area and the red appears in the upper
+  lighter gray area."* ★★★ **That is the correct direction and it is the discriminating
+  observation** — verified against the plane buffers afterwards: green = 212 px all over band 4
+  (grey 56, rows 66–70, `4 ≤ 5` → draw); red = 196 px all over band 8 (grey 88, rows 61–65,
+  `8 > 5` → refuse). The sprite straddles a depth boundary at row 65/66, upper half hidden and
+  lower half drawn. **An inverted priority test swaps the two colours**, which is precisely the
+  fault AC-4 showed a byte gate misses on two of five titles — so this is the thing 100/100
+  byte-identical could not establish.
+  ★ **Still not PASSED**, for the reason at the foot of this entry: §4 classes sprite compositing
+  and priority interaction as motion-bearing and a still shows endpoints only.
 
   ★★★ **The frame was chosen on evidence, because AC-4 showed two titles where the byte gate
   would pass with priority INVERTED.** `comp_pick.py` scored all **1,679** frames:
@@ -373,8 +384,10 @@ CPU window free alongside both planes and the cel: 1,024 bytes
 25.2 bundled-artifact grep: **N/A** — this task ships no bundled artifact. The deliverables are
 two harness probes (`build/*.bin`, gitignored), source, tools and an oracle patch.
 
-25.3 operator-runtime-smoke: **pending Jay — `poke`, `static-png`, RGB.** Not observed by Jay;
-**not self-certified, and not recorded as PASSED**: §4 names sprite compositing and priority
+25.3 operator-runtime-smoke: **OBSERVED by Jay — `poke`, `static-png`, RGB.** Jay confirmed the
+green/red split falls on the correct side of the depth boundary (AC-9), which is the observation
+an inverted priority test would fail. **Still not recorded as PASSED**:
+§4 names sprite compositing and priority
 interaction as motion-bearing, so a still is endpoints only. Artifacts and the frame-selection
 evidence are in AC-9 and `docs/gates/README.md`.
 

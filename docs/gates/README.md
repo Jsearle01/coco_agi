@@ -106,6 +106,28 @@ frame 029 topped the per-frame ranking (575 rejected, 564 written) and contains 
 partly-occluded sprite**: one is entirely hidden, a *different* one entirely in front. A
 per-frame total cannot tell that from "half a sprite is behind scenery".
 
+### ★★★ OBSERVED BY JAY, 2026-08-29 — and it matches the buffers
+
+> *"the green appears in the darker black area and the red appears in the upper lighter gray
+> area."*
+
+**Correct, and it is the discriminating observation.** Confirmed against the plane buffers
+afterwards, not asserted from memory:
+
+| Jay saw | buffers | rule |
+|---|---|---|
+| green on the **darker** grey | 212 px, all over band **4**, grey level 56, rows **66–70** | 4 ≤ 5 → **draw** |
+| red on the **upper lighter** grey | 196 px, all over band **8**, grey level 88, rows **61–65** | 8 > 5 → **refuse** |
+
+★★ The sprite is priority 5 and straddles a depth boundary at row 65/66: its **upper half is
+behind** near scenery and hidden, its **lower half in front of** far scenery and drawn. Higher
+band = nearer, and the ramp is `24 + band*8`, so nearer scenery is lighter — which is why the
+refused pixels sit on the lighter grey.
+
+★★★ **An inverted priority test would swap them** — green on the light grey, red on the dark.
+That is the fault AC-4 proved a byte gate misses on two of five titles, so this observation is
+the thing 100/100 byte-identical could not establish.
+
 ### ★★★ Launch path, and what this does NOT discharge
 
 **`poke` + `static-png`, RGB.** §4: *"MOTION-BEARING gates require a LIVE run, not a still... For
