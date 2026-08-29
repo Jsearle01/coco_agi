@@ -88,21 +88,8 @@ vm_rl_loop:
 * ★ The 6809 indexes only by A, B or D -- `leax y,x` is not a form, and lwasm reports it as an
 * undefined symbol `y` rather than as a bad addressing mode.
                 ifdef   VM_TRACE
-                pshs    a
-                ldd     vmtr_idx
-                cmpd    #VMTR_MAX*3
-                bhs     vm_rl_notr
-                ldx     #vmtr_buf
-                leax    d,x
-                addd    #3
-                std     vmtr_idx
-                ldb     vm_ip
-                stb     ,x
-                ldb     vm_ip+1
-                stb     1,x
-                lda     ,s
-                sta     2,x
-vm_rl_notr:     puls    a
+                clrb                            ; kind 0 = the outer interpreter loop
+                jsr     vmtr_rec
                 ldx     vm_code
                 ldd     vm_ip
                 leax    d,x
@@ -122,6 +109,25 @@ vm_rl_notr:     puls    a
 
 * ---- a command ---------------------------------------------------------------
                 sta     vm_op                   ; keep it for the handler and for halts
+* ★★ AC-5's COVERAGE, RECORDED BY THE INTERPRETER ITSELF. One byte per opcode, set as it is
+* dispatched: "every opcode reached is implemented; every one not reached is listed" cannot be
+* answered from the host, because the host cannot see which opcodes a given run took. ★ It is
+* also the cheapest possible probe -- two instructions on the dispatch path -- and it doubles as
+* the answer to "did this opcode execute at all", which is the question a state diff cannot ask.
+                ldx     #VM_OPSEEN
+                pshs    a
+                clra
+                ldb     ,s
+                leax    d,x                     ; ★ D-offset: UNSIGNED (the signed-index lesson)
+                inc     ,x
+                puls    a
+* ★★★ THE OPCODE GOES ON THE STACK *HERE*, above the VMOP_TAB index computation and not below
+* it. The first version of this fix pushed after the `clra` that zeroes D's high half for the
+* table index -- so it pushed 0, and every command looked up VMOP_ARGS[0] = 0 args. ip then
+* advanced by the opcode byte alone and the stream desynchronised at the third instruction.
+* ★★ A push has to be placed against the LAST WRITE to the register, not against the place the
+* value is wanted; `tfr a,b` reads A and `clra` two lines later kills it.
+                pshs    a                       ; ★ survives both the index maths and the callee
                 ldx     #VMOP_TAB
                 tfr     a,b
                 clra
@@ -132,14 +138,26 @@ vm_rl_notr:     puls    a
                 ldy     vm_opcount
                 leay    1,y
                 sty     vm_opcount
+* ★★★ THE OPCODE GOES ON THE STACK ACROSS THE HANDLER, because vm_op is a GLOBAL and `call` /
+* `call.v` run a whole nested logic that overwrites it. The arg-count lookup below then read the
+* CALLEE's last opcode -- $00, `return` -- whose VMOP_ARGS entry is 0, so ip did not advance past
+* call.v's operand. The interpreter re-read that operand as an opcode; it is $00, so logic.0
+* "returned" three instructions early and the last `call`, `get.posn` and `assignv` never ran.
+* ★★ The state diff saw exactly that: var 109, written by the second get.posn, and nothing else.
+* ★ FOURTH INSTANCE OF ONE CLASS in this VM -- a per-invocation value kept in a global. The
+* others were the opcode in A, retflag, and keepret. **Nesting is what turns a global into a bug,
+* and this interpreter nests the moment a logic calls a logic.**
                 jsr     ,x
+                puls    a                       ; ★ pushed above, before the index maths
 * ★ advance by the ARGUMENT COUNT, after the handler, exactly as the reference does. A wrong
 * count here desynchronises the stream and every later opcode is garbage -- which is why
 * VMOP_ARGS is generated rather than typed.
                 ldx     #VMOP_ARGS
-                lda     vm_op
-                ldb     a,x
+                tfr     a,b
                 clra
+                leax    d,x                     ; ★ D-offset: UNSIGNED for 0..255
+                clra
+                ldb     ,x
                 addd    vm_ip
                 std     vm_ip
                 lda     vm_exitall
@@ -209,17 +227,34 @@ vm_tic_loop:
                 std     vm_ip
                 lda     vm_op
 
+                ifdef   VM_TRACE
+                ldb     #1                      ; kind 1 = an evaluator step
+                jsr     vmtr_rec
+                endc
                 cmpa    #$FC
-                beq     vm_tic_or
+                lbeq    vm_tic_or
                 cmpa    #$FD
-                beq     vm_tic_not
+                lbeq    vm_tic_not
                 tsta
-                beq     vm_tic_end
+                lbeq    vm_tic_end
                 cmpa    #$FF
-                beq     vm_tic_end
+                lbeq    vm_tic_end
 
 * ---- evaluate one test ------------------------------------------------------
                 sta     vm_op
+* ★★ AC-5 COVERAGE FOR THE *TEST* OPCODE SPACE. The command counter has been here since P4.5 and
+* the test counter had not, so "coverage" meant one of the two dispatch classes and the report
+* would have compared it against a census counting both. ★★★ CLAUDE.md 2H's worked example is
+* exactly this: 319 opcodes across TWO ORTHOGONAL AXES, and a figure can be exactly right while
+* meaning something other than what quoting it implies. Tests and commands are separate opcode
+* SPACES -- test $01 and command $01 are different instructions -- so they need separate tables.
+                ldx     #VM_TESTSEEN
+                pshs    a
+                clra
+                ldb     ,s
+                leax    d,x                     ; ★ D-offset: UNSIGNED (the signed-index lesson)
+                inc     ,x
+                puls    a
                 ldx     #VMTEST_TAB
                 tfr     a,b
                 clra
@@ -287,8 +322,9 @@ vm_tic_not:     lda     #1
 * steps over it and runs the block; a false one adds it.
 vm_tic_end:
                 ifdef   VM_TRACE
-                ldd     vm_ip
-                std     vmtr_endip              ; ★ where the expression finished
+                lda     vm_result
+                ldb     #2                      ; kind 2 = expression end; A carries the result
+                jsr     vmtr_rec
                 endc
                 ldx     vm_code                 ; ★ a POINTER now: the logic lives in P1.3's arena
                 ldd     vm_ip
@@ -299,9 +335,6 @@ vm_tic_end:
                 ldb     ,x                      ; LOW byte
                 lda     1,x                     ; HIGH byte
                 pshs    d
-                ifdef   VM_TRACE
-                std     vmtr_skip               ; ★ the branch word as READ
-                endc
                 ldd     vm_ip
                 addd    #2
                 std     vm_ip                   ; past the skip word
@@ -325,14 +358,22 @@ vm_tic_taken:   leas    2,s                     ; true: fall into the block
 * and it is invisible until a logic happens to compare against 252-255.
 vm_skip_until:
                 sta     vm_sutarget
+* ★★★ ADVANCE ip BEFORE READING THE OPCODE. `ldd vm_ip` puts ip_hi in A; `lda ,x` then
+* overwrites A with the OPCODE, so a following `addd #1` adds one to (opcode:ip_lo) rather than
+* to ip. At ip=4 in KQ1's logic.0 the byte there is $FF, so ip became $FF05 = 65285, the outer
+* loop saw ip >= codelen, and logic.0 "ended" on its first `if` -- forever.
+* ★★ THIRD INSTANCE OF THE SAME CLASS IN THIS VM: the opcode clobber in vm_run_logic and the
+* one in vm_test_if_code were the first two, and I introduced THIS one myself while rewriting
+* the routine to decode rather than scan. **`ldd`/`ldx` for arithmetic and `lda` for a byte read
+* share A, and the read must not sit between the load and the use.**
 vm_su_lp:       ldd     vm_ip
                 cmpd    vm_codelen
                 bhs     vm_su_out               ; UNSIGNED [L-40]
                 ldx     vm_code                 ; ★ a POINTER now: the logic lives in P1.3's arena
                 leax    d,x
-                lda     ,x
                 addd    #1
-                std     vm_ip
+                std     vm_ip                   ; ★ ip advanced while D still holds ip
+                lda     ,x                      ; ★ only now is A free for the opcode
                 cmpa    vm_sutarget
                 beq     vm_su_out
 * ★ operands are stepped over by the SAME routine the evaluator uses, so the two cannot drift
@@ -359,8 +400,12 @@ vm_skip_instruction:
                 cmpa    #VM_SAID_OP
                 beq     vm_si_said
                 ldx     #VMTEST_ARGS
-                ldb     a,x
                 clra
+                tfr     a,b
+                ldb     vm_op
+                leax    d,x
+                clra
+                ldb     ,x
                 addd    vm_ip
                 std     vm_ip
 vm_si_out:      rts
@@ -412,10 +457,68 @@ vm_retflag      fcb     0
 vm_sutarget     fcb     0
 vm_opcount      fdb     0
 
+* ═══════════════════════════════════════════════════════════════════════════════════
+* ── vmtr_rec ── the build-gated execution trace, 4 bytes per step ────────────────
+*
+* ★★ A TRACE OF THE OUTER LOOP ALONE WAS NOT ENOUGH. It showed 199 entries all reading
+* (ip=0, op=$FF) -- i.e. 199 fresh invocations of vm_run_logic -- which proves the first `if`
+* sends ip out of range but says nothing about WHERE inside the evaluator it happens. The KIND
+* byte lets the evaluator record its own steps in the same buffer, so the sequence reads as one
+* interleaved story rather than two.
+*
+* in: A = opcode, B = kind (0 outer loop, 1 evaluator step, 2 expression end, 3 skip_until)
+* ★ Preserves A, B, X, D. The caller reloads X/D anyway, but a diagnostic that perturbs the
+* thing it measures is the failure mode this whole task keeps meeting [L-56].
                 ifdef   VM_TRACE
-VMTR_MAX        equ     400
+* ★★★ 384 ENTRIES, NOT 2,000, AND THE CEILING IS THE HOST'S EYESIGHT RATHER THAN RAM.
+* The buffer was at $9400 "in free RAM above the object table". It is free, and it is also in
+* MMU slot 4 -- which mem_probe.lua proved the host CANNOT READ: MAME's CPU `program` space
+* does not follow the GIME map above $8000, so `prog:read_u8` there returns unrelated ROM-ish
+* constants. **The dump was near-uniform plausible garbage that read as instruction pointers.**
+* VM_OPSEEN moved out of $9300 for exactly this reason and the trace buffer was left behind.
+* ★★ $2A00..$2FFF is the largest host-readable hole: above VM_OPSEEN ($2900) and below
+* RES_DIRS ($3000). 384 entries is what fits, and it fits EXACTLY.
+VMTR_MAX        equ     384
+* ★★ A WINDOW, BECAUSE A PREFIX NO LONGER REACHES. Logic 0 alone is 719 reference steps in
+* cycle 0 and the halt is at opcount 2,587, so no affordable buffer holds the run from step
+* zero. vmtr_from is set by the HOST before the run; the first VMTR_MAX steps at or after it
+* are recorded. Bisecting the window against the reference costs one MAME launch per probe and
+* is the only thing that finds a first divergence 2,000 steps in [L-36].
+vmtr_rec:
+                pshs    a,b,x
+* ★★★ LOGIC-0 ONLY, MATCHING vm_reftrace.py's --logic FILTER. The guest recorded every logic
+* and the reference recorded one, so the two traces described different things and every line
+* after the first nested call was a false divergence. **A diff is only evidence when both sides
+* were asked the same question.**
+                lda     vm_curlogic
+                cmpa    vmtr_logic
+                bne     vmtr_out
+                ldd     vmtr_seen
+                addd    #1
+                std     vmtr_seen
+                subd    #1
+                cmpd    vmtr_from
+                blo     vmtr_out                ; before the window
+                ldd     vmtr_idx
+                cmpd    #VMTR_MAX*4
+                bhs     vmtr_out
+                ldx     #vmtr_buf
+                leax    d,x
+                addd    #4
+                std     vmtr_idx
+                lda     vm_ip
+                sta     ,x
+                lda     vm_ip+1
+                sta     1,x
+                lda     ,s                      ; the opcode as passed
+                sta     2,x
+                lda     1,s                     ; the kind
+                sta     3,x
+vmtr_out:       puls    a,b,x,pc
+
 vmtr_idx        fdb     0
-vmtr_buf        rmb     VMTR_MAX*3
-vmtr_endip      fdb     0
-vmtr_skip       fdb     0
+vmtr_seen       fdb     0                       ; matching steps SEEN, window or not
+vmtr_from       fdb     0                       ; ★ host-settable window start
+vmtr_logic      fcb     0                       ; ★ host-settable logic filter
+vmtr_buf        equ     $6500
                 endc

@@ -90,7 +90,12 @@ vmtest_is_set_v:
 vmtest_has:
                 jsr     vm_p0
                 ldx     #VM_OBJROOMS
-                lda     a,x
+                pshs    b
+                tfr     a,b
+                clra
+                leax    d,x                     ; ★ UNSIGNED
+                puls    b
+                lda     ,x
                 cmpa    #EGO_OWNED
                 lbeq    vm_tr_true
                 lbra    vm_tr_false
@@ -98,7 +103,12 @@ vmtest_has:
 vmtest_obj_in_room:
                 jsr     vm_p0
                 ldx     #VM_OBJROOMS
-                lda     a,x
+                pshs    b
+                tfr     a,b
+                clra
+                leax    d,x                     ; ★ UNSIGNED
+                puls    b
+                lda     ,x
                 pshs    a
                 jsr     vm_v1
                 cmpa    ,s+

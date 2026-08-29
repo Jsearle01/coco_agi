@@ -247,10 +247,36 @@ vm_up_move:
                 lda     VMO_STEPTIME,x
                 sta     VMO_STEPTIMECNT,x
 
-                lda     VMO_X,x
-                sta     vm_upx
-                lda     VMO_Y,x
-                sta     vm_upy
+* ═══════════════════════════════════════════════════════════════════════════════════
+* ★★★ x AND y ARE 16-BIT SIGNED THROUGH THIS WHOLE PASS, AND THAT IS THE FIX.
+*
+* They were bytes, and the very first bounds test was `lda vm_upx / bpl` -- "x < 0" read as
+* bit 7 of a byte. SCRIPT_WIDTH is 160, so EVERY OBJECT LEGITIMATELY AT x >= 128 read as
+* negative: it was slammed to x = 0 and reported border 4. ★★ The state diff saw it as vars 4
+* and 5 (BORDER_CODE, BORDER_TOUCH_OBJECT) going non-zero on 16 of KQ3's 500 cycles while the
+* oracle held them at 0 -- a rare, position-dependent divergence that a short run never reaches
+* and that no amount of staring at the border logic would explain, because the border logic was
+* right and its INPUT TYPE was wrong.
+*
+* ★★ The reference works in Python ints, so `x` there is a true signed integer: it can go to
+* -3 after a leftward step and back. A byte cannot represent both "-3" and "150", and this pass
+* needs both. L-40's rule with the sign the other way round -- there the hazard was a signed
+* compare on unsigned coordinates; here it is an unsigned type holding a signed quantity.
+*
+* ★ The three y comparisons had the same defect latently: `y - ySize` ranges over -167..167 and
+* does not fit a signed byte, and `y > SCRIPT_HEIGHT-1` was an UNSIGNED compare that a negative
+* y would have passed. Fixed in the same pass rather than left as the next session's bisect.
+*
+* ★ stepSize * DIR_DX[dir] needs no multiply: the deltas are exactly $00/$01/$FF, so it is an
+* add, a subtract, or nothing. That also removes vm_smul's signed 8-bit product, which could
+* not have represented -255..255 either.
+* ═══════════════════════════════════════════════════════════════════════════════════
+                clra
+                ldb     VMO_X,x
+                std     vm_upx
+                clra
+                ldb     VMO_Y,x
+                std     vm_upy
                 clr     vm_border
 
 * ★ the step is applied only when fUpdatePos is CLEAR -- the flag means "a command already
@@ -260,75 +286,109 @@ vm_up_move:
                 bne     vm_up_bounds
                 lda     VMO_DIR,x
                 ldu     #vm_dir_dx
-                ldb     a,u                     ; signed dx
-                stb     vm_upd
-                lda     VMO_STEPSIZE,x
-                jsr     vm_smul                 ; A = stepSize * dx, signed
-                adda    vm_upx
-                sta     vm_upx
+                ldb     a,u                     ; $00, $01 or $FF -- never anything else
+                beq     vm_up_dy
+                bmi     vm_up_dxneg
+                clra
+                ldb     VMO_STEPSIZE,x
+                addd    vm_upx
+                std     vm_upx
+                bra     vm_up_dy
+vm_up_dxneg:    clra
+                ldb     VMO_STEPSIZE,x
+                pshs    d
+                ldd     vm_upx
+                subd    ,s++
+                std     vm_upx
+vm_up_dy:
                 lda     VMO_DIR,x
                 ldu     #vm_dir_dy
                 ldb     a,u
-                stb     vm_upd
-                lda     VMO_STEPSIZE,x
-                jsr     vm_smul
-                adda    vm_upy
-                sta     vm_upy
+                beq     vm_up_bounds
+                bmi     vm_up_dyneg
+                clra
+                ldb     VMO_STEPSIZE,x
+                addd    vm_upy
+                std     vm_upy
+                bra     vm_up_bounds
+vm_up_dyneg:    clra
+                ldb     VMO_STEPSIZE,x
+                pshs    d
+                ldd     vm_upy
+                subd    ,s++
+                std     vm_upy
 
 vm_up_bounds:
-* ★ x < 0 (version 0x3086 uses <= 0; the pin is 0x2917, so <). x is held as a byte, so
-* "negative" is bit 7 -- the step above can carry it there and that is the test.
-                lda     vm_upx
+* ★ x < 0 (version 0x3086 uses <= 0; the pin is 0x2917, so <). SIGNED 16-bit: `ldd` sets N from
+* bit 15, so `bpl` is now the real test and not a coincidence about small coordinates.
+                ldd     vm_upx
                 bpl     vm_up_xhigh
-                clr     vm_upx
+                ldd     #0
+                std     vm_upx
                 lda     #4
                 sta     vm_border
                 bra     vm_up_y
 vm_up_xhigh:
-                adda    VMO_XSIZE,x
-                cmpa    #SCRIPT_WIDTH
+* if x + xSize > SCRIPT_WIDTH: x = SCRIPT_WIDTH - xSize; border = 2
+                clra
+                ldb     VMO_XSIZE,x
+                addd    vm_upx
+                cmpd    #SCRIPT_WIDTH
                 bls     vm_up_y
-                lda     #SCRIPT_WIDTH
-                suba    VMO_XSIZE,x
-                sta     vm_upx
+                clra
+                ldb     VMO_XSIZE,x
+                pshs    d
+                ldd     #SCRIPT_WIDTH
+                subd    ,s++
+                std     vm_upx
                 lda     #2
                 sta     vm_border
 vm_up_y:
-* y - ySize < -1  <=>  y < ySize - 1
-                lda     vm_upy
-                suba    VMO_YSIZE,x
-                cmpa    #$FF
-                blt     vm_up_ytop              ; SIGNED: y - ySize < -1
-                lda     vm_upy
-                cmpa    #SCRIPT_HEIGHT-1
-                bhi     vm_up_ybot
+* if y - ySize < -1: y = ySize - 1; border = 1        -- SIGNED 16-bit
+                clra
+                ldb     VMO_YSIZE,x
+                pshs    d
+                ldd     vm_upy
+                subd    ,s++
+                cmpd    #$FFFF                  ; -1
+                blt     vm_up_ytop
+* elif y > SCRIPT_HEIGHT-1: y = SCRIPT_HEIGHT-1; border = 3
+                ldd     vm_upy
+                cmpd    #SCRIPT_HEIGHT-1
+                bgt     vm_up_ybot              ; ★ SIGNED: a negative y must not pass this
+* elif not fIgnoreHorizon and y <= horizon: y = horizon+1; border = 1
                 ldd     VMO_FLAGS,x
                 bitb    #fIgnoreHorizon
                 bne     vm_up_apply
-                lda     vm_upy
-                cmpa    vm_horizon
-                bhi     vm_up_apply
-                lda     vm_horizon
-                inca
-                sta     vm_upy
+                clra
+                ldb     vm_horizon
+                cmpd    vm_upy                  ; horizon - y
+                blt     vm_up_apply             ; horizon < y: no touch
+                clra
+                ldb     vm_horizon
+                addd    #1
+                std     vm_upy
                 lda     #1
                 sta     vm_border
                 bra     vm_up_apply
-vm_up_ytop:     lda     VMO_YSIZE,x
-                deca
-                sta     vm_upy
+vm_up_ytop:     clra
+                ldb     VMO_YSIZE,x
+                subd    #1
+                std     vm_upy
                 lda     #1
                 sta     vm_border
                 bra     vm_up_apply
-vm_up_ybot:     lda     #SCRIPT_HEIGHT-1
-                sta     vm_upy
+vm_up_ybot:     ldd     #SCRIPT_HEIGHT-1
+                std     vm_upy
                 lda     #3
                 sta     vm_border
 
 vm_up_apply:
-                lda     vm_upx
+* ★ Only now does it narrow to a byte, and by construction every path above has clamped the
+* value into 0..167 first.
+                lda     vm_upx+1
                 sta     VMO_X,x
-                lda     vm_upy
+                lda     vm_upy+1
                 sta     VMO_Y,x
 * ★ checkCollision()/checkPriority() rollback omitted -- both need the priority screen, which
 * this VM does not build. Declared in objects.py the same way.
@@ -387,7 +447,7 @@ vm_celcur       fcb     0
 vm_cellast      fcb     0
 vm_advanced     fcb     0
 vm_objidx       fcb     0
-vm_upx          fcb     0
-vm_upy          fcb     0
+vm_upx          fdb     0                       ; ★ 16-bit SIGNED: see vm_update_position
+vm_upy          fdb     0                       ; ★ 16-bit SIGNED
 vm_upd          fcb     0
 vm_border       fcb     0

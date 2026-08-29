@@ -315,19 +315,44 @@ vmop_erase:     jsr     vm_obj0
                 ldd     #fDrawn
                 jmp     vm_objflags_clr
 
-vmop_position:  jsr     vm_obj0
-                jsr     vm_p1
-                sta     VMO_X,x
+* ═══════════════════════════════════════════════════════════════════════════════════
+* ★★★ OPERANDS FIRST, OBJECT POINTER LAST. vm_arg indexes the bytecode with `ldx vm_code /
+* leax d,x`, so EVERY operand accessor destroys X -- and vm_obj0 returns the object in X. These
+* four handlers took the pointer first and fetched afterwards, so `sta VMO_X,x` wrote the
+* coordinate INTO THE RESIDENT LOGIC'S BYTECODE instead of into the object.
+*
+* ★★ It was found in KQ2: ego stayed at (0,37) while the reference put it at (70,140), and the
+* state diff surfaced it four opcodes downstream as vars 100-103 -- the get.posn that reads the
+* position it should have had. **The write went into the arena, so the first visible symptom is
+* whatever the corrupted bytecode does next, in another variable, in a later cycle.**
+* ★ Thirteen neighbouring handlers already bracket the fetch with `pshs x` / `puls x` and are
+* correct; harness/tools/x_liveness.py is what separates them from these four, and it is the
+* answer to "are there others" -- CLAUDE.md 2H's third check, run rather than recalled.
+*
+* ★ The ordering is preferred over more pshs/puls because it removes the trap instead of
+* guarding it: once X is taken last, nothing between the fetch and the store can clobber it.
+* ═══════════════════════════════════════════════════════════════════════════════════
+vmop_position:  jsr     vm_p1
+                pshs    a
                 jsr     vm_p2
+                pshs    a
+                jsr     vm_obj0                 ; ★ X taken LAST
+                puls    a
                 sta     VMO_Y,x
+                puls    a
+                sta     VMO_X,x
                 rts
 
 vmop_position_f:
-                jsr     vm_obj0
                 jsr     vm_v1
-                sta     VMO_X,x
+                pshs    a
                 jsr     vm_v2
+                pshs    a
+                jsr     vm_obj0                 ; ★ X taken LAST
+                puls    a
                 sta     VMO_Y,x
+                puls    a
+                sta     VMO_X,x
                 rts
 
 vmop_get_posn:  jsr     vm_obj0
@@ -343,6 +368,92 @@ vmop_get_posn:  jsr     vm_obj0
                 jsr     vm_setvar
                 leas    2,s
                 rts
+
+* ═══════════════════════════════════════════════════════════════════════════════════
+* ── distance(n, n, v) [commands.py cmdDistance] ──────────────────────────────────
+*
+* ★ Reached by BlackCauldron at cycle 225 and by nothing in the three-title set, which is why
+* it was still vm_op_unimpl. AC-5's halt is what named it rather than letting it no-op.
+* ★★ 0xFF when EITHER object is not drawn, and 0xFE as a CEILING otherwise -- two different
+* sentinels one apart, and returning 0xFF for "far away" would be wrong in a way that a game
+* testing `distance < 0xFF` would act on.
+* ★ ScummVM's KQ4 zombie workaround is deliberately NOT reproduced; commands.py says so.
+* ★ Operands first, X last -- the vmop_position rule (x_liveness.py).
+* ═══════════════════════════════════════════════════════════════════════════════════
+vmop_distance:
+                jsr     vm_p0
+                jsr     vm_obj
+                pshs    x                       ; object 1
+                jsr     vm_p1
+                jsr     vm_obj
+                pshs    x                       ; object 2
+* both must be fDrawn, else the answer is $FF
+                ldd     VMO_FLAGS,x
+                bitb    #fDrawn
+                beq     vm_dist_none
+                ldx     2,s
+                ldd     VMO_FLAGS,x
+                bitb    #fDrawn
+                beq     vm_dist_none
+* d = |x1 - x2| + |y1 - y2|, with x centred by xSize/2
+* ★★★ FOURTH INSTANCE OF ONE CLASS, AND I WROTE THIS ONE TODAY -- after fixing it in the
+* position pass and twice in motion. The first version did `lda x2 / suba x1`, a BYTE subtract
+* of two coordinates: the difference runs -167..167 and does not fit a signed byte, so `nega`
+* on a wrapped value produced a plausible wrong distance. BlackCauldron's var 61 then drifted
+* DOWNWARDS (181, 180, 179) where the oracle counted UP (183, 184, 185).
+* ★★ The rule, stated once and for the whole VM: **a coordinate fits a byte; the difference of
+* two coordinates does not, and neither does their sum.** Every distance, delta and bound in
+* this interpreter is 16-bit from here on.
+                lda     VMO_XSIZE,x
+                lsra
+                adda    VMO_X,x
+                sta     vm_dtmp                 ; x1 = o1.x + o1.xSize/2  (0..199: a byte is fine)
+                lda     VMO_Y,x
+                sta     vm_dtmp2                ; y1
+                ldx     ,s                      ; object 2
+                lda     VMO_XSIZE,x
+                lsra
+                adda    VMO_X,x
+                sta     vm_dtmp3                ; x2
+* |x2 - x1|, 16-bit
+                clra
+                ldb     vm_dtmp
+                pshs    d
+                clra
+                ldb     vm_dtmp3
+                subd    ,s++
+                bpl     vm_dist_dx
+                coma
+                comb
+                addd    #1
+vm_dist_dx:     std     vm_dsum
+* |y2 - y1|, 16-bit
+                clra
+                ldb     vm_dtmp2
+                pshs    d
+                clra
+                ldb     VMO_Y,x
+                subd    ,s++
+                bpl     vm_dist_dy
+                coma
+                comb
+                addd    #1
+vm_dist_dy:     addd    vm_dsum                 ; |dx| + |dy|, up to 334
+                cmpd    #$00FE
+                bls     vm_dist_ok
+                ldd     #$00FE                  ; ★ a CEILING at $FE, one below the sentinel
+vm_dist_ok:     tfr     b,a
+                bra     vm_dist_store
+vm_dist_none:   lda     #$FF                    ; ★ either object not drawn
+vm_dist_store:  leas    4,s
+                tfr     a,b
+                jsr     vm_p2
+                jmp     vm_setvar
+
+vm_dtmp         fcb     0
+vm_dtmp2        fcb     0
+vm_dtmp3        fcb     0
+vm_dsum         fdb     0
 
 * ★ dx/dy are SIGNED bytes and the underflow guard is a clamp to ZERO, not a general clamp.
 vmop_reposition:
@@ -380,22 +491,31 @@ vm_rp_yadd:     lda     VMO_Y,x
                 sta     VMO_Y,x
 vm_rp_fix:      jmp     vm_fix_position
 
+* ★ Same defect and the same fix as vmop_position above -- operands first, X last.
 vmop_reposition_to:
-                jsr     vm_obj0
                 jsr     vm_p1
-                sta     VMO_X,x
+                pshs    a
                 jsr     vm_p2
+                pshs    a
+                jsr     vm_obj0                 ; ★ X taken LAST
+                puls    a
                 sta     VMO_Y,x
+                puls    a
+                sta     VMO_X,x
                 ldd     #fUpdatePos
                 jsr     vm_objflags_set
                 jmp     vm_fix_position
 
 vmop_reposition_to_f:
-                jsr     vm_obj0
                 jsr     vm_v1
-                sta     VMO_X,x
+                pshs    a
                 jsr     vm_v2
+                pshs    a
+                jsr     vm_obj0                 ; ★ X taken LAST
+                puls    a
                 sta     VMO_Y,x
+                puls    a
+                sta     VMO_X,x
                 ldd     #fUpdatePos
                 jsr     vm_objflags_set
                 jmp     vm_fix_position
@@ -804,13 +924,21 @@ vmop_put_f:     jsr     vm_v1
                 jsr     vm_v0
 vm_objloc_set:
                 ldx     #VM_OBJROOMS
-                stb     a,x
+                pshs    b
+                tfr     a,b
+                clra
+                leax    d,x                     ; ★ UNSIGNED; object numbers reach 255
+                puls    b
+                stb     ,x
                 rts
 
 vmop_get_room_f:
                 jsr     vm_v0
                 ldx     #VM_OBJROOMS
-                ldb     a,x
+                tfr     a,b
+                clra
+                leax    d,x                     ; ★ UNSIGNED
+                ldb     ,x
                 lbra    vm_store_p1
 
 * ═══════════════════════════════════════════════════════════════════════════════════

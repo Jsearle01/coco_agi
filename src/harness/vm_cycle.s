@@ -32,6 +32,20 @@ vm_st_f:        clr     ,x+
 vm_st_o:        clr     ,x+
                 decb
                 bne     vm_st_o
+                ldx     #VM_OPSEEN
+                ldb     #0
+vm_st_c:        clr     ,x+
+                decb
+                bne     vm_st_c
+* ★★ AND THE TEST TABLE, which the first version of the test counter did not clear. An `inc`
+* counter is only meaningful from a known start: VM_TESTSEEN held cold-boot RAM, so AC-5 read
+* 256 distinct test opcodes against a possible 18. **The table was added and its initialisation
+* was not** -- and the reading was impossible rather than plausible, which is the cheap case.
+                ldx     #VM_TESTSEEN
+                ldb     #0
+vm_st_t:        clr     ,x+
+                decb
+                bne     vm_st_t
 
 * ★ every object starts with stepTime/stepTimeCount/cycleTime/cycleTimeCount/stepSize = 1
 * [state.py ScreenObj.__init__]. Zero there would stall every cycler permanently.
@@ -145,13 +159,26 @@ vm_interpret_cycle:
                 lda     #VAR_EGO_DIRECTION
                 jsr     vm_setvar
                 bra     vm_ic_motions
+* ═══════════════════════════════════════════════════════════════════════════════════
+* ★★★ vm_obj DESTROYS B. Its first act after the bound check is `tfr a,b`, because it turns the
+* object NUMBER into an offset. So `jsr vm_getvar / tfr a,b / clra / jsr vm_obj / stb VMO_DIR,x`
+* stores the OBJECT INDEX, not the direction -- and for the ego, whose index is 0, it stores 0.
+*
+* ★★ larry1: the ego was under move.obj with a destination of (80,160), motion_move_obj computed
+* direction 3 and published it as var 6 correctly, and then this line put 0 back. The watch
+* showed `dir 0 ... var6 3` on the same line, which is the pair that named it.
+* ★ THE MIRROR OF THE X-CLOBBER CLASS x_liveness.py finds, in the other register. Same shape --
+* a value held in a register across a call that needs it -- and the same fix: take the pointer
+* FIRST, fetch the value SECOND, with the pointer stacked across the fetch.
+* ═══════════════════════════════════════════════════════════════════════════════════
 vm_ic_player:
-                lda     #VAR_EGO_DIRECTION
-                jsr     vm_getvar
-                tfr     a,b
                 clra
-                jsr     vm_obj
-                stb     VMO_DIR,x
+                jsr     vm_obj                  ; X -> ego, and B is now scrap
+                pshs    x
+                lda     #VAR_EGO_DIRECTION
+                jsr     vm_getvar               ; ★ clobbers X, hence the stack
+                puls    x
+                sta     VMO_DIR,x
 
 vm_ic_motions:
                 jsr     vm_check_all_motions
@@ -203,12 +230,15 @@ vm_ic_ok:
 
 vm_ic_after:
                 jsr     vm_reset_ctrl
+* ★ Same defect as vm_ic_player above, same fix -- and this is the one that actually fired every
+* cycle, because larry1's ego is not under player control.
+                clra
+                jsr     vm_obj                  ; X -> ego
+                pshs    x
                 lda     #VAR_EGO_DIRECTION
                 jsr     vm_getvar
-                tfr     a,b
-                clra
-                jsr     vm_obj
-                stb     VMO_DIR,x
+                puls    x
+                sta     VMO_DIR,x
 
                 lda     #VAR_BORDER_TOUCH_OBJECT
                 clrb

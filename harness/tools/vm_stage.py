@@ -64,10 +64,20 @@ def main():
     rec = Recorder()
     vm = cycle_mod.Vm(game, 0x2917, trace=rec)
     vm.start()
-    for _ in range(a.cycles):
-        if vm.should_quit:
-            break
-        vm.interpret_cycle()
+    # ★★★ vm.run(), NOT a bare loop over interpret_cycle(). The loop that was here called
+    # interpret_cycle directly and so skipped everything run() does AROUND a cycle: the 25 ms
+    # virtual clock, the VM_VAR_TIME_DELAY pacing gate, timer_update(), and the four post-cycle
+    # resets. **virtual_ms therefore never advanced and vars 11-14 never ticked**, so the oracle
+    # held VAR_SECONDS at 0 for ever while the 6809 -- which paces correctly in vm_pace -- put it
+    # at 1 from cycle 11. The diff reported the GUEST as divergent on the one variable where the
+    # guest was right and the baseline was wrong.
+    # ★★ §2O.1's rule generalised: the baseline has to be the reference RUNNING, not a
+    # convenience harness wrapped around its interior. A loop that calls one method of the
+    # reference is not the reference; it is a third implementation with no tests.
+    # ★ Confirmed against the reference itself: run(max_cycles=20) on KQ1 ends at virtual_ms
+    # 1925 with TIME_DELAY=2 and SECONDS=1 -- i.e. the second boundary really is crossed inside
+    # the sampled window, and the guest's cycle 11 is where it belongs.
+    vm.run(max_cycles=a.cycles)
 
     touched = set()
     for nr in vm._logic_cache:

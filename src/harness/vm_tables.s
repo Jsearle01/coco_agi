@@ -218,7 +218,7 @@ VMOP_TAB:
                 fdb     vmop_object_on_anything ; 42 object.on.anything(n)
                 fdb     vmop_ignore_objs        ; 43 ignore.objs(n)
                 fdb     vmop_observe_objs       ; 44 observe.objs(n)
-                fdb     vm_op_unimpl            ; 45 distance(nnv)
+                fdb     vmop_distance           ; 45 distance(nnv)
                 fdb     vmop_stop_cycling       ; 46 stop.cycling(n)
                 fdb     vmop_start_cycling      ; 47 start.cycling(n)
                 fdb     vmop_normal_cycle       ; 48 normal.cycle(n)

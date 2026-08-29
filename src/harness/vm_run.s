@@ -100,18 +100,21 @@ vm_res_fail:
 * its `return`, retflag went to 1, the unwind put 0 back, and the cycle re-ran logic.0 forever.
 * The guard caught it as "$FD -- logic.0 never returned", which was true and pointed one layer
 * away from the cause. ★ The diagnostic that settled it was lastop=$00 -- a `return` HAD run.
-* ★ A holds the logic number on entry, so both preludes save it around the flag write.
+* ★★★ THE keepret FLAG LIVES ON THE STACK, NOT IN A GLOBAL. It was a global set at entry and
+* read at exit -- and a nested cmdCall between those two points overwrote it. So logic.0's own
+* unwind read the NESTED call's flag (1, "restore"), threw away logic.0's `return`, and the
+* cycle re-ran logic.0 for ever. ★★ The trace is what named it: `3893 00 0` -- logic.0 DID
+* execute its return opcode, so the fault had to be between run_logic setting retflag and the
+* cycle reading it. **Any per-invocation value in a recursive routine belongs in the frame; a
+* global is per-routine, not per-call, and the distinction only bites once nesting exists.**
+* ★ A holds the logic number and B is free, so B carries the flag into the shared body.
 vm_call_logic0:
-                pshs    a
-                clr     vm_keepret
-                puls    a
+                clrb                            ; 0 = keep the callee's retflag (the cycle)
                 bra     vm_call_body
 vm_call_logic:
-                pshs    a
-                lda     #1
-                sta     vm_keepret
-                puls    a
+                ldb     #1                      ; 1 = restore the caller's (cmdCall)
 vm_call_body:
+                pshs    b                       ; the frame's own keepret
                 pshs    a
                 ldd     vm_ip
                 pshs    d
@@ -122,8 +125,8 @@ vm_call_body:
                 lda     vm_retflag
                 pshs    a                       ; ★ per-invocation; see vm_run_logic's comment
                 lda     vm_curlogic
-                pshs    a               ; ,s=curlogic 1,s=retflag 2,s=codelen 4,s=code 6,s=ip 8,s=nr
-
+                pshs    a
+* frame: ,s=curlogic 1,s=retflag 2,s=codelen 4,s=code 6,s=ip 8,s=nr 9,s=keepret
                 lda     8,s
                 sta     vm_curlogic
                 jsr     vm_bind_logic
@@ -134,9 +137,10 @@ vm_call_body:
 vm_call_unwind:
                 puls    a
                 sta     vm_curlogic
-                puls    a
-                tst     vm_keepret
-                beq     vm_cu_keep              ; the cycle's call: leave logic.0's own result
+                puls    a                       ; the caller's saved retflag
+* ★ 7,s: two bytes have been popped, so nr is at 6,s and this frame's keepret at 7,s.
+                tst     7,s
+                beq     vm_cu_keep              ; the cycle's call: leave the callee's result
                 sta     vm_retflag
 vm_cu_keep:
                 puls    d
@@ -145,7 +149,7 @@ vm_cu_keep:
                 std     vm_code
                 puls    d
                 std     vm_ip
-                leas    1,s
+                leas    2,s                     ; the logic number and the keepret flag
                 rts
 
 * ★ load.logic / load.view are set membership in the reference; the diff never reads those
@@ -464,10 +468,17 @@ vm_check_motion:
                 beq     vm_cm_move
                 cmpa    #kMotionEgo
                 beq     vm_cm_move
+                cmpa    #kMotionWander
+                beq     vm_cm_wander
+                cmpa    #kMotionFollowEgo
+                beq     vm_cm_follow
 * ★★★ AC-4: an unmodelled mode HALTS. The oracle's `default:` falls through silently; a mode we
 * do not model produces a divergence the state diff cannot attribute, so it is loud here.
-* wander and follow.ego land here, and vm_motion_which.py measured that the gated set never
-* reaches them -- if one ever does, this says so instead of drifting.
+* ★★ WANDER AND FOLLOW.EGO USED TO LAND HERE, on the strength of "vm_motion_which.py measured
+* that the gated set never reaches them". The measurement was true and the SET was smaller than
+* the claim: BlackCauldron reaches kMotionWander at cycle 225 and halted with badop=$01. **A
+* measured absence is an absence in the thing measured** -- 2H, and the loud halt is what turned
+* it into a fact rather than a drift. Both modes are implemented below; this default remains.
                 sta     vm_badop
                 lda     vm_curlogic
                 sta     vm_badlogic
@@ -476,6 +487,10 @@ vm_check_motion:
                 sta     vm_exitall
                 rts
 vm_cm_move:     jsr     vm_motion_move_obj
+                bra     vm_cm_blocks
+vm_cm_wander:   jsr     vm_motion_wander
+                bra     vm_cm_blocks
+vm_cm_follow:   jsr     vm_motion_follow_ego
 vm_cm_blocks:
 * ★ change_pos runs only when a block is set AND the object does not ignore blocks AND it has a
 * direction. vm_motion_which.py measured zero calls in the gated set; the guard is reproduced
@@ -493,22 +508,238 @@ vm_cm_blocks:
                 sta     vm_exitall
 vm_cm_out:      rts
 
+* ═══════════════════════════════════════════════════════════════════════════════════
+* ── motion_wander [motion.py motion_wander] ──────────────────────────────────────
+* in: X -> object.  ★ X is preserved across every call below, by pshs/puls at each site.
+*
+* ★★★ THE `while wander_count < 6` IS A RETRY LOOP, NOT A CLAMP, and that distinction is the
+* whole reason this cannot be approximated. It re-rolls until the value is >= 6, so it consumes
+* the generator a VARIABLE number of times. `max(6, roll)` would give the same wander_count and
+* a different RNG stream -- and the stream is shared with the random() opcode, so the damage
+* surfaces later, in another title, as an unrelated variable. motion.py says so in as many words.
+*
+* ★★ THIS IS ALSO WHY THE MODES HAD TO BE IMPLEMENTED RATHER THAN SUPPRESSED. Two draws here
+* shift every subsequent random() result; there is no version of "skip wander" that keeps the
+* diff meaningful.
+* ═══════════════════════════════════════════════════════════════════════════════════
+vm_motion_wander:
+                lda     VMO_WANDERCNT,x
+                sta     vm_mwcnt                ; `original`, before the decrement
+                deca
+                sta     VMO_WANDERCNT,x         ; (count - 1) & 0xFF -- a byte, so it wraps
+* re-roll when original == 0 OR the object did not move
+                tst     vm_mwcnt
+                beq     vm_mw_roll
+                lda     VMO_FLAGS,x
+                bita    #fDidntMove_H
+                beq     vm_mw_out
+vm_mw_roll:
+                pshs    x
+                lda     #8
+                jsr     vm_rnd                  ; direction = get_random_number(8)
+                ldx     ,s
+                sta     VMO_DIR,x
+                jsr     vm_is_ego
+                tsta
+                beq     vm_mw_notego
+                ldx     ,s
+                ldb     VMO_DIR,x
+                lda     #VAR_EGO_DIRECTION
+                jsr     vm_setvar
+vm_mw_notego:
+* ★ the retry loop, verbatim: while wander_count < 6: wander_count = rnd(50)
+vm_mw_lp:       ldx     ,s
+                lda     VMO_WANDERCNT,x
+                cmpa    #6
+                bhs     vm_mw_done
+                lda     #50
+                jsr     vm_rnd
+                ldx     ,s
+                sta     VMO_WANDERCNT,x
+                bra     vm_mw_lp
+vm_mw_done:     puls    x
+vm_mw_out:      rts
+
+* ═══════════════════════════════════════════════════════════════════════════════════
+* ── motion_follow_ego [motion.py motion_follow_ego] ──────────────────────────────
+* in: X -> object
+*
+* ★ Both inner loops are retries and both consume the generator a variable number of times, for
+* the same reason as wander: `while direction == 0: direction = rnd(8)` and
+* `while follow_count < stepSize: follow_count = rnd(d)`.
+* ★★ follow_count's decrement is stored into a BYTE and then tested AS SIGNED -- motion.py
+* spells this out: "a straight max(0, k) is not the same expression for k in 128..255 after
+* wrap". Reproduced as the byte-then-signed-test it is.
+* ═══════════════════════════════════════════════════════════════════════════════════
+vm_motion_follow_ego:
+                pshs    x
+* obj_x = obj.x + obj.xSize/2 ; obj_y = obj.y
+                lda     VMO_XSIZE,x
+                lsra
+                adda    VMO_X,x
+                sta     vm_fobjx
+                lda     VMO_Y,x
+                sta     vm_fobjy
+* ego_x = ego.x + ego.xSize/2 ; ego_y = ego.y
+                ldx     #VM_OBJ                 ; ★ the ego is entry 0
+                lda     VMO_XSIZE,x
+                lsra
+                adda    VMO_X,x
+                sta     vm_fegox
+                lda     VMO_Y,x
+                sta     vm_fegoy
+                ldx     ,s
+* direction = get_direction(obj_x, obj_y, ego_x, ego_y, follow_stepSize)
+                lda     VMO_FOLLOWSTEP,x
+                sta     vm_css
+                clra
+                ldb     vm_fobjx
+                pshs    d
+                clra
+                ldb     vm_fegox
+                subd    ,s++                    ; ★ 16-bit: see vm_check_step
+                jsr     vm_check_step
+                sta     vm_cs_x
+                clra
+                ldb     vm_fobjy
+                pshs    d
+                clra
+                ldb     vm_fegoy
+                subd    ,s++
+                jsr     vm_check_step
+                ldb     #3
+                mul
+                addb    vm_cs_x
+                ldx     #vm_dir_table
+                lda     b,x
+                sta     vm_fdir
+                ldx     ,s
+                tst     vm_fdir
+                bne     vm_fe_moving
+* ---- arrived: direction 0, back to normal, and the COMPLETION FLAG ----------------
+                clr     VMO_DIR,x
+                clr     VMO_MOTION,x            ; kMotionNormal
+                lda     VMO_FOLLOWFLAG,x
+                ldb     #1
+                jsr     vm_setflag
+                puls    x
+                rts
+vm_fe_moving:
+                lda     VMO_FOLLOWCNT,x
+                cmpa    #$FF
+                bne     vm_fe_notinit
+                clr     VMO_FOLLOWCNT,x
+                puls    x
+                rts
+vm_fe_notinit:
+                lda     VMO_FLAGS,x
+                bita    #fDidntMove_H
+                beq     vm_fe_count
+* ---- stuck: re-roll a NON-ZERO direction, then a follow_count >= stepSize ---------
+vm_fe_dirlp:    lda     #8
+                jsr     vm_rnd
+                ldx     ,s
+                sta     VMO_DIR,x
+                tsta
+                beq     vm_fe_dirlp             ; ★ retry until non-zero: a variable draw count
+* d = (|ego_y - obj_y| + |ego_x - obj_x|) / 2
+* ★ 16-bit for the same reason as check_step: each difference is -167..167 and their sum is not
+* a byte quantity either. `coma/comb/addd #1` is the 16-bit negate the 6809 does not have.
+                clra
+                ldb     vm_fobjy
+                pshs    d
+                clra
+                ldb     vm_fegoy
+                subd    ,s++
+                bpl     vm_fe_dy
+                coma
+                comb
+                addd    #1
+vm_fe_dy:       std     vm_ftmp
+                clra
+                ldb     vm_fobjx
+                pshs    d
+                clra
+                ldb     vm_fegox
+                subd    ,s++
+                bpl     vm_fe_dx
+                coma
+                comb
+                addd    #1
+vm_fe_dx:       addd    vm_ftmp
+                lsra
+                rorb
+                stb     vm_fd                   ; d <= 163, so the low byte is the whole answer
+* if d < stepSize: follow_count = stepSize; return
+                lda     VMO_STEPSIZE,x
+                cmpa    vm_fd
+                bls     vm_fe_cntlp
+                sta     VMO_FOLLOWCNT,x
+                puls    x
+                rts
+vm_fe_cntlp:    lda     vm_fd
+                jsr     vm_rnd
+                ldx     ,s
+                sta     VMO_FOLLOWCNT,x
+                cmpa    VMO_STEPSIZE,x
+                blo     vm_fe_cntlp             ; ★ retry until >= stepSize
+                puls    x
+                rts
+* ---- moving normally: count down, or steer ---------------------------------------
+vm_fe_count:
+                lda     VMO_FOLLOWCNT,x
+                beq     vm_fe_steer
+                suba    VMO_STEPSIZE,x          ; stored as a byte, then tested as SIGNED
+                sta     VMO_FOLLOWCNT,x
+                cmpa    #$80
+                blo     vm_fe_fdone             ; k <= 127: keep it
+                clr     VMO_FOLLOWCNT,x         ; k > 127 means it went negative -- zero
+vm_fe_fdone:    puls    x
+                rts
+vm_fe_steer:    lda     vm_fdir
+                sta     VMO_DIR,x
+                puls    x
+                rts
+
+* vm_rnd: A = maximum -> A = get_random_number(A).  ★ One home for "set rndmax, then draw":
+* motion has four call sites and vmop_random a fifth, and the state diff depends on every one
+* of them advancing the SAME generator in the SAME order.
+vm_rnd:
+                sta     vm_rndmax
+                jmp     vm_rnd_next
+
+vm_mwcnt        fcb     0
+vm_fobjx        fcb     0
+vm_fobjy        fcb     0
+vm_fegox        fcb     0
+vm_fegoy        fcb     0
+vm_fdir         fcb     0
+vm_fd           fcb     0
+vm_ftmp         fdb     0                       ; ★ 16-bit
+
 * ── motion_move_obj [motion.py] ──────────────────────────────────────────────────
 * in: X -> object
 vm_motion_move_obj:
                 pshs    x
-                lda     VMO_MOVEX,x
-                suba    VMO_X,x                 ; dest_x - obj_x, SIGNED delta
-                sta     vm_mdx
-                lda     VMO_MOVEY,x
-                suba    VMO_Y,x
-                sta     vm_mdy
-                lda     vm_mdx
-                ldb     VMO_STEPSIZE,x
+* ★★ THE DELTAS ARE 16-BIT. `lda dest / suba pos` is a byte subtract and dest-pos ranges over
+* -167..167; the wrap flipped both classifications and produced the OPPOSITE direction. See
+* vm_check_step's header -- this is the call site that found it.
+                lda     VMO_STEPSIZE,x
+                sta     vm_css
+                clra
+                ldb     VMO_X,x
+                pshs    d
+                clra
+                ldb     VMO_MOVEX,x
+                subd    ,s++                    ; D = move_x - x, 16-bit SIGNED
                 jsr     vm_check_step           ; A = 0/1/2
                 sta     vm_cs_x
-                lda     vm_mdy
-                ldb     VMO_STEPSIZE,x
+                clra
+                ldb     VMO_Y,x
+                pshs    d
+                clra
+                ldb     VMO_MOVEY,x
+                subd    ,s++                    ; D = move_y - y
                 jsr     vm_check_step
 * index = check_step(dx) + 3*check_step(dy)
                 ldb     #3
@@ -573,25 +804,58 @@ vm_ie_no:       clra
 
 * ── check_step(delta, step) [motion.py] ──────────────────────────────────────────
 * if -step >= delta: 0 ; if step <= delta: 2 ; else 1
-* ★★ delta is SIGNED (a coordinate difference) and step is a small positive byte. This is the
-* one place in the VM where a signed compare is CORRECT -- L-40 cuts both ways.
-* in: A = delta (signed byte), B = step -> A = 0/1/2
+*
+* ★★★ delta IS 16-BIT SIGNED AND IT HAS TO BE. It was a signed BYTE, and a coordinate
+* difference does not fit one: y runs to 167, so `20 - 167 = -147` wraps to +109 and the
+* classification comes out 2 where the truth is 0. ★★ Both axes invert together, so the
+* DIR_TABLE index goes from 2 to 6 -- **exactly the opposite direction** -- and SpaceQuest-2's
+* object 1 walked into the bottom border instead of away from it. The state diff called that
+* "var 4 = 1, var 5 = 3", two steps removed from the arithmetic.
+*
+* ★ THIRD INSTANCE OF ONE CLASS IN THIS TASK: the position pass held x/y in bytes, this held
+* the deltas in bytes, and follow.ego's distance did too. **A coordinate fits a byte; a
+* difference of two coordinates does not.** L-40 named the signed/unsigned half of this; the
+* WIDTH half is the same trap one step along.
+*
+* in: D = delta (SIGNED 16-bit), vm_css = step (0..255) -> A = 0/1/2
+* ★ Expressed as `delta + step <= 0` and `delta - step >= 0` so both are plain 16-bit signed
+* compares; delta is -255..255 and step 0..255, so neither intermediate can overflow.
 vm_check_step:
-                sta     vm_csd
-                stb     vm_css
-                lda     vm_css
-                nega                            ; A = -step
-                cmpa    vm_csd
-                bge     vm_cs_0                 ; SIGNED: -step >= delta
-                lda     vm_css
-                cmpa    vm_csd
-                ble     vm_cs_2                 ; SIGNED: step <= delta
+                std     vm_csd
+                clra
+                ldb     vm_css
+                std     vm_cstep                ; step, zero-extended: always non-negative
+                ldd     vm_csd
+                addd    vm_cstep
+* ═══════════════════════════════════════════════════════════════════════════════════
+* ★★★ AC-3's INJECTED FAULT LIVES HERE, BEHIND -DVM_FAULT, AND IT IS DELIBERATELY SUBTLE.
+*
+* A gate is only evidence if it can FAIL. `ble` -> `blt` moves ONE boundary by ONE: the case
+* delta == -step, which the reference classifies as 0 and the faulted build classifies as 1.
+* Nothing halts, no assertion fires, no screenshot looks wrong -- an object simply steps when it
+* should have stopped, on the exact frame it reaches its destination.
+*
+* ★★ THIS IS CLAUDE.md 2I's ARGUMENT MADE EXECUTABLE. "An AGI interpreter can look perfect and
+* be wrong": the faulted build renders identically and diverges in state. If the gate catches a
+* one-boundary error in a routine called a few times per cycle, it is measuring behaviour and
+* not appearance.
+* ★ Guarded, so the gated build carries none of it, and NAMED, so a green run with VM_FAULT set
+* would itself be the finding.
+                ifdef   VM_FAULT
+                blt     vm_cs_0                 ; ★ INJECTED FAULT: `ble` in the correct build
+                else
+                ble     vm_cs_0                 ; SIGNED: delta + step <= 0  <=>  -step >= delta
+                endc
+                ldd     vm_csd
+                subd    vm_cstep
+                bge     vm_cs_2                 ; SIGNED: delta - step >= 0  <=>  step <= delta
                 lda     #1
                 rts
 vm_cs_0:        clra
                 rts
 vm_cs_2:        lda     #2
                 rts
+vm_cstep        fdb     0
 
 * DIR_TABLE, 9 entries, generated from the pinned oracle [optable.py:369]
 vm_dir_table    equ     VMT_DIR_TABLE           ; ★ generated, not typed (L-29)
@@ -710,58 +974,69 @@ vm_xor_lp:      lda     ,x
                 rts
 
 * vm_mul32: vm_acc = vm_seed * vm_mul, low 32 bits.
-* ★ Schoolbook: 16 byte-products accumulated at their byte offsets. Only products landing
-* inside the low 4 bytes matter, so the loop is bounded by i+j <= 3.
+*
+* ★★★ SHIFT-AND-ADD, REPLACING A SCHOOLBOOK VERSION THAT THREW AWAY HALF OF EVERY PARTIAL
+* PRODUCT. `mul` leaves the 16-bit product in D, and that version did `addb ,x / stb ,x` -- the
+* LOW byte only. A, the high byte, was destroyed two instructions later by `lda vm_mt` and never
+* added anywhere. ★★ Every one of the sixteen partial products lost its top half, so the result
+* was not the product of anything; the random() opcode returned its low bound and KQ3's vars 37
+* and 38 sat at 39 and 77 for five hundred cycles while the oracle varied.
+*
+* ★★ THE SYMPTOM POINTED AT THE SEED AND THE SEED WAS FINE. The xorshift advanced correctly
+* ($C8C25BA7 after 20 cycles, from 12345) -- it was the multiply that flattened it. A constant
+* output from an advancing generator is a downstream fault, and the diagnostic that separated
+* the two was printing the seed rather than reasoning about the arithmetic.
+*
+* ★ Double-and-add is ~32x slower than schoolbook and is correct by inspection. That is the
+* right trade here: this routine has no build-time check, no assertion can catch it, and the
+* entire state diff for every title that calls random() rests on it. Cost is AC-7's problem and
+* the shipped interpreter is free to use its own generator anyway (2.1, stated above).
 vm_mul32:
-                ldx     #vm_acc
                 clra
-                sta     ,x
-                sta     1,x
-                sta     2,x
-                sta     3,x
-                ldb     #3                      ; i = index into vm_seed, LSB-first
-vm_mul_i:       stb     vm_mi
-                ldb     #3
-vm_mul_j:       stb     vm_mj
-* dest byte index (LSB-first) = (3-mi) + (3-mj); skip if > 3
-                lda     #3
-                suba    vm_mi
-                sta     vm_mt
-                lda     #3
-                suba    vm_mj
-                adda    vm_mt
-                cmpa    #3
-                bhi     vm_mul_jnext
-                sta     vm_mt                   ; LSB-first destination index
-                ldx     #vm_seed
-                ldb     vm_mi
-                lda     b,x
-                ldx     #vm_mul
-                ldb     vm_mj
-                ldb     b,x
-                mul                             ; D = product
-                ldx     #vm_acc+3
-                lda     vm_mt
-                nega
-                leax    a,x                     ; X -> acc byte for that LSB-first index
-                addb    ,x
-                stb     ,x
-                bcc     vm_mul_jnext
-                lda     #1                      ; propagate the carry toward the MSB
-vm_mul_c:       leax    -1,x
-                cmpx    #vm_acc
-                blo     vm_mul_jnext
-                inc     ,x
-                bne     vm_mul_jnext
-                bra     vm_mul_c
-vm_mul_jnext:
-                ldb     vm_mj
-                decb
-                bpl     vm_mul_j
-                ldb     vm_mi
-                decb
-                bpl     vm_mul_i
+                clrb
+                std     vm_acc
+                std     vm_acc+2
+                ldd     vm_mul                  ; a working copy, shifted left one bit per step
+                std     vm_mwk
+                ldd     vm_mul+2
+                std     vm_mwk+2
+                lda     #32
+                sta     vm_mcnt
+vm_mul_lp:
+* acc <<= 1, LSB-first so the carry runs toward the MSB
+                asl     vm_acc+3
+                rol     vm_acc+2
+                rol     vm_acc+1
+                rol     vm_acc
+* ★ A takes the multiplier's top byte BEFORE the shift; `lda` leaves C alone, so the asl/rol
+* chain below still sees the carry it needs.
+                lda     vm_mwk
+                asl     vm_mwk+3
+                rol     vm_mwk+2
+                rol     vm_mwk+1
+                rol     vm_mwk
+                tsta                            ; bit 7 of the PRE-shift top byte
+                bpl     vm_mul_next
+* acc += seed, 32-bit, LSB-first
+                ldb     vm_acc+3
+                addb    vm_seed+3
+                stb     vm_acc+3
+                ldb     vm_acc+2
+                adcb    vm_seed+2
+                stb     vm_acc+2
+                ldb     vm_acc+1
+                adcb    vm_seed+1
+                stb     vm_acc+1
+                ldb     vm_acc
+                adcb    vm_seed
+                stb     vm_acc
+vm_mul_next:
+                dec     vm_mcnt
+                bne     vm_mul_lp
                 rts
+
+vm_mwk          rmb     4                       ; the multiplier, consumed a bit at a time
+vm_mcnt         fcb     0
 
 * vm_mod32: A = vm_acc % (vm_rndmax + 1)
 * ★ The divisor is at most 256. Processing MSB->LSB with an 8-bit running remainder keeps every
@@ -794,20 +1069,41 @@ vm_mod_byte:    pshs    b
                 tfr     b,a
                 rts
 
-* vm_div16by8: D / vm_divisor -> B = remainder.  Restoring shift-subtract, 8 iterations.
+* vm_div16by8: D / vm_divisor -> B = remainder.  Restoring shift-subtract, SIXTEEN iterations.
+*
+* ★★★ IT RAN EIGHT, AND A 16-BIT DIVIDEND HAS SIXTEEN BITS. Eight iterations walk the HIGH byte
+* through the remainder and leave the LOW byte's eight bits sitting in the stack slot, never
+* shifted in. ★★ In vm_mod32 the high byte entering each step is the running remainder, which
+* is already < divisor -- so eight iterations reduced a value that needed no reducing and
+* discarded the byte that did. **Every byte returned 0, so acc % (max+1) was 0 for every input
+* and random() returned its low bound exactly.** KQ3's var 36 came out 1 where the reference
+* said 4, and the `if` on the next line took the other branch.
+*
+* ★ THE ARITHMETIC WAS RIGHT UP TO HERE AND THAT IS WHY IT TOOK THREE MEASUREMENTS. The seed
+* trajectory was correct (found at draw 19 of the reference's own sequence), and the 32-bit
+* product matched bit for bit ($C8C25BA7 * $DEADBF03 = $1E83ABF5). Three routines in a chain,
+* two of them right, and the symptom -- a constant random value -- looked most like the seed.
+*
+* ★★ THE CARRY OUT OF `rol vm_rem2` IS LOAD-BEARING at sixteen iterations. rem2 < divisor <= 255
+* going in, so after the shift the true value can reach 511 and does not fit the byte. When the
+* rol carries, the value is >= 256 > divisor and the subtraction is unconditional; `suba` then
+* yields 256+rem2-divisor, which is < 256 because rem2 <= divisor-1. One subtract is enough.
+* ★ The test has to sit IMMEDIATELY after the rol -- `cmpa` overwrites the carry.
 vm_div16by8:
                 pshs    a,b
-                clra
-                ldb     #8
+                ldb     #16
                 stb     vm_shcnt
                 clr     vm_rem2
 vm_dv_lp:       asl     1,s                     ; shift the 16-bit dividend left
                 rol     ,s
                 rol     vm_rem2
+                bcs     vm_dv_sub               ; ★ bit 8 set: certainly >= divisor
                 lda     vm_rem2
                 cmpa    vm_divisor
                 blo     vm_dv_next
-                suba    vm_divisor
+                bra     vm_dv_sub2
+vm_dv_sub:      lda     vm_rem2
+vm_dv_sub2:     suba    vm_divisor
                 sta     vm_rem2
 vm_dv_next:     dec     vm_shcnt
                 bne     vm_dv_lp
@@ -824,9 +1120,8 @@ vm_rem2         fcb     0
 vm_mdx          fcb     0
 vm_mdy          fcb     0
 vm_cs_x         fcb     0
-vm_csd          fcb     0
+vm_csd          fdb     0                       ; ★ 16-bit SIGNED delta -- see vm_check_step
 vm_css          fcb     0
 vm_celnr        fcb     0
 vm_roomnr       fcb     0
 vm_touch        fcb     0
-vm_keepret      fcb     0
