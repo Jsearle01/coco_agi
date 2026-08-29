@@ -430,4 +430,7 @@ Pushed to `methodology-candidate-pool` `cf6b050`, `seeds/AGI/live/`:
 
 ### 11 — Commit
 
-Recorded below after push.
+`8f76b3d` — pushed to origin/wip before this report was filed.
+
+★ The report is inside that commit; the hash is recorded after the fact and verified with
+`git rev-parse`, not predicted.
