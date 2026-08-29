@@ -11,6 +11,98 @@
 * source: V2_TESTS 20 entries, V2_COMMANDS 183 entries
 
 
+* ── constants, generated from optable.py ──────────────────────────
+* ★ Do not hand-edit and do not duplicate these in a .s file. Two were wrong when
+* they were typed, and a wrong variable NUMBER is invisible until the diff runs.
+VM_FLAG_AUTO_RESTART    equ     16
+VM_FLAG_DEBUGGER_ON     equ     10
+VM_FLAG_EGO_INVISIBLE   equ     1
+VM_FLAG_EGO_TOUCHED_P2  equ     3
+VM_FLAG_EGO_WATER       equ     0
+VM_FLAG_ENTERED_CLI     equ     2
+VM_FLAG_JOY_SENSITIVITY equ     8
+VM_FLAG_LOGIC_ZERO_FIRST_TIME equ     11
+VM_FLAG_MENUS_ACCESSIBLE equ     14
+VM_FLAG_NEW_ROOM_EXEC   equ     5
+VM_FLAG_OUTPUT_MODE     equ     15
+VM_FLAG_RESTART_GAME    equ     6
+VM_FLAG_RESTORE_JUST_RAN equ     12
+VM_FLAG_SAID_ACCEPTED_INPUT equ     4
+VM_FLAG_SCRIPT_BLOCKED  equ     7
+VM_FLAG_SOUND_ON        equ     9
+VM_FLAG_STATUS_SELECTS_ITEMS equ     13
+VM_VAR_AGI_ERROR_CODE   equ     17
+VM_VAR_AGI_ERROR_INFO   equ     18
+VM_VAR_BORDER_CODE      equ     4
+VM_VAR_BORDER_TOUCH_EGO equ     2
+VM_VAR_BORDER_TOUCH_OBJECT equ     5
+VM_VAR_COMPUTER         equ     20
+VM_VAR_CURRENT_ROOM     equ     0
+VM_VAR_DAYS             equ     14
+VM_VAR_EGO_DIRECTION    equ     6
+VM_VAR_EGO_VIEW_RESOURCE equ     16
+VM_VAR_FREE_PAGES       equ     8
+VM_VAR_HOURS            equ     13
+VM_VAR_JOYSTICK_SENSITIVITY equ     15
+VM_VAR_KEY              equ     19
+VM_VAR_MAX_INPUT_CHARACTERS equ     24
+VM_VAR_MAX_SCORE        equ     7
+VM_VAR_MINUTES          equ     12
+VM_VAR_MONITOR          equ     26
+VM_VAR_MOUSE_BUTTONSTATE equ     27
+VM_VAR_MOUSE_X          equ     28
+VM_VAR_MOUSE_Y          equ     29
+VM_VAR_PREVIOUS_ROOM    equ     1
+VM_VAR_SCORE            equ     3
+VM_VAR_SECONDS          equ     11
+VM_VAR_SELECTED_INVENTORY_ITEM equ     25
+VM_VAR_SOUNDGENERATOR   equ     22
+VM_VAR_TIME_DELAY       equ     10
+VM_VAR_VOLUME           equ     23
+VM_VAR_WINDOW_AUTO_CLOSE_TIMER equ     21
+VM_VAR_WORD_NOT_FOUND   equ     9
+fAdjEgoXY               equ     $8000
+fAnimated               equ     $0040
+fCycling                equ     $0020
+fDidntMove              equ     $4000
+fDontUpdate             equ     $1000
+fDrawn                  equ     $0001
+fFixLoop                equ     $2000
+fFixedPriority          equ     $0004
+fIgnoreBlocks           equ     $0002
+fIgnoreHorizon          equ     $0008
+fIgnoreObjects          equ     $0200
+fMotion                 equ     $0080
+fOnLand                 equ     $0800
+fOnWater                equ     $0100
+fUpdate                 equ     $0010
+fUpdatePos              equ     $0400
+kAgiComputerAmiga       equ     5
+kAgiComputerApple2      equ     3
+kAgiComputerApple2GS    equ     7
+kAgiComputerAtariST     equ     4
+kAgiComputerPC          equ     0
+kAgiMonitorCga          equ     0
+kAgiMonitorEga          equ     3
+kAgiMonitorHercules     equ     2
+kAgiSound2GSOld         equ     8
+kAgiSoundPC             equ     1
+kAgiSoundTandy          equ     3
+kCycleEndOfLoop         equ     1
+kCycleNormal            equ     0
+kCycleRevLoop           equ     2
+kCycleReverse           equ     3
+kMotionEgo              equ     4
+kMotionFollowEgo        equ     2
+kMotionMoveObj          equ     3
+kMotionNormal           equ     0
+kMotionWander           equ     1
+VMT_DIR_TABLE           fcb     $08,$01,$02,$07,$00,$03,$06,$05,$04
+VMT_DIR_DX              fcb     $00,$00,$01,$01,$01,$00,$FF,$FF,$FF
+VMT_DIR_DY              fcb     $00,$FF,$FF,$00,$01,$01,$01,$00,$FF
+VMT_LOOP_TABLE_2        fcb     $04,$04,$00,$00,$00,$04,$01,$01,$01
+VMT_LOOP_TABLE_4        fcb     $04,$03,$00,$00,$00,$02,$01,$01,$01
+
 * ── VMOP_ARGS: argument bytes per command opcode ──────────────────
 * ★ ScummVM: parameterSize = strlen(parameters). Every parameter is one byte.
 VMOP_ARGS:
@@ -58,103 +150,103 @@ VMTEST_ARGS:
 * diverge everything, so the diff would name a symptom, never the cause.
 VMOP_TAB:
                 fdb     vm_op_return            ; 00 return
-                fdb     vm_op_unimpl            ; 01 increment(v)
-                fdb     vm_op_unimpl            ; 02 decrement(v)
-                fdb     vm_op_unimpl            ; 03 assignn(vn)
-                fdb     vm_op_unimpl            ; 04 assignv(vv)
-                fdb     vm_op_unimpl            ; 05 addn(vn)
-                fdb     vm_op_unimpl            ; 06 addv(vv)
-                fdb     vm_op_unimpl            ; 07 subn(vn)
-                fdb     vm_op_unimpl            ; 08 subv(vv)
-                fdb     vm_op_unimpl            ; 09 lindirectv(vv)
-                fdb     vm_op_unimpl            ; 0A lindirect(vv)
-                fdb     vm_op_unimpl            ; 0B lindirectn(vn)
-                fdb     vm_op_unimpl            ; 0C set(n)
-                fdb     vm_op_unimpl            ; 0D reset(n)
-                fdb     vm_op_unimpl            ; 0E toggle(n)
-                fdb     vm_op_unimpl            ; 0F set.v(v)
-                fdb     vm_op_unimpl            ; 10 reset.v(v)
-                fdb     vm_op_unimpl            ; 11 toggle.v(v)
-                fdb     vm_op_unimpl            ; 12 new.room(n)
-                fdb     vm_op_unimpl            ; 13 new.room.v(v)
-                fdb     vm_op_unimpl            ; 14 load.logics(n)
-                fdb     vm_op_unimpl            ; 15 load.logics.v(v)
-                fdb     vm_op_unimpl            ; 16 call(n)
-                fdb     vm_op_unimpl            ; 17 call.v(v)
-                fdb     vm_op_unimpl            ; 18 load.pic(v)
+                fdb     vmop_increment          ; 01 increment(v)
+                fdb     vmop_decrement          ; 02 decrement(v)
+                fdb     vmop_assign_n           ; 03 assignn(vn)
+                fdb     vmop_assign_v           ; 04 assignv(vv)
+                fdb     vmop_add_n              ; 05 addn(vn)
+                fdb     vmop_add_v              ; 06 addv(vv)
+                fdb     vmop_sub_n              ; 07 subn(vn)
+                fdb     vmop_sub_v              ; 08 subv(vv)
+                fdb     vmop_lindirect_v        ; 09 lindirectv(vv)
+                fdb     vmop_rindirect          ; 0A lindirect(vv)
+                fdb     vmop_lindirect_n        ; 0B lindirectn(vn)
+                fdb     vmop_set                ; 0C set(n)
+                fdb     vmop_reset              ; 0D reset(n)
+                fdb     vmop_toggle             ; 0E toggle(n)
+                fdb     vmop_set_v              ; 0F set.v(v)
+                fdb     vmop_reset_v            ; 10 reset.v(v)
+                fdb     vmop_toggle_v           ; 11 toggle.v(v)
+                fdb     vmop_new_room           ; 12 new.room(n)
+                fdb     vmop_new_room_f         ; 13 new.room.v(v)
+                fdb     vmop_load_logic         ; 14 load.logics(n)
+                fdb     vmop_load_logic_f       ; 15 load.logics.v(v)
+                fdb     vmop_call               ; 16 call(n)
+                fdb     vmop_call_f             ; 17 call.v(v)
+                fdb     vmop_load_pic           ; 18 load.pic(v)
                 fdb     vm_op_modelled          ; 19 draw.pic(v)  [modelled]
                 fdb     vm_op_modelled          ; 1A show.pic()  [modelled]
-                fdb     vm_op_unimpl            ; 1B discard.pic(v)
+                fdb     vmop_discard_pic        ; 1B discard.pic(v)
                 fdb     vm_op_modelled          ; 1C overlay.pic(v)  [modelled]
                 fdb     vm_op_modelled          ; 1D show.pri.screen()  [modelled]
-                fdb     vm_op_unimpl            ; 1E load.view(n)
-                fdb     vm_op_unimpl            ; 1F load.view.v(v)
-                fdb     vm_op_unimpl            ; 20 discard.view(n)
-                fdb     vm_op_unimpl            ; 21 animate.obj(n)
-                fdb     vm_op_unimpl            ; 22 unanimate.all()
-                fdb     vm_op_unimpl            ; 23 draw(n)
-                fdb     vm_op_unimpl            ; 24 erase(n)
-                fdb     vm_op_unimpl            ; 25 position(nnn)
-                fdb     vm_op_unimpl            ; 26 position.v(nvv)
-                fdb     vm_op_unimpl            ; 27 get.posn(nvv)
-                fdb     vm_op_unimpl            ; 28 reposition(nvv)
-                fdb     vm_op_unimpl            ; 29 set.view(nn)
-                fdb     vm_op_unimpl            ; 2A set.view.v(nv)
-                fdb     vm_op_unimpl            ; 2B set.loop(nn)
-                fdb     vm_op_unimpl            ; 2C set.loop.v(nv)
-                fdb     vm_op_unimpl            ; 2D fix.loop(n)
-                fdb     vm_op_unimpl            ; 2E release.loop(n)
-                fdb     vm_op_unimpl            ; 2F set.cel(nn)
-                fdb     vm_op_unimpl            ; 30 set.cel.v(nv)
-                fdb     vm_op_unimpl            ; 31 last.cel(nv)
-                fdb     vm_op_unimpl            ; 32 current.cel(nv)
-                fdb     vm_op_unimpl            ; 33 current.loop(nv)
-                fdb     vm_op_unimpl            ; 34 current.view(nv)
-                fdb     vm_op_unimpl            ; 35 number.of.loops(nv)
-                fdb     vm_op_unimpl            ; 36 set.priority(nn)
-                fdb     vm_op_unimpl            ; 37 set.priority.v(nv)
-                fdb     vm_op_unimpl            ; 38 release.priority(n)
-                fdb     vm_op_unimpl            ; 39 get.priority(nn)
-                fdb     vm_op_unimpl            ; 3A stop.update(n)
-                fdb     vm_op_unimpl            ; 3B start.update(n)
-                fdb     vm_op_unimpl            ; 3C force.update(n)
-                fdb     vm_op_unimpl            ; 3D ignore.horizon(n)
-                fdb     vm_op_unimpl            ; 3E observe.horizon(n)
-                fdb     vm_op_unimpl            ; 3F set.horizon(n)
-                fdb     vm_op_unimpl            ; 40 object.on.water(n)
-                fdb     vm_op_unimpl            ; 41 object.on.land(n)
-                fdb     vm_op_unimpl            ; 42 object.on.anything(n)
-                fdb     vm_op_unimpl            ; 43 ignore.objs(n)
-                fdb     vm_op_unimpl            ; 44 observe.objs(n)
+                fdb     vmop_load_view          ; 1E load.view(n)
+                fdb     vmop_load_view_f        ; 1F load.view.v(v)
+                fdb     vmop_discard_view       ; 20 discard.view(n)
+                fdb     vmop_animate_obj        ; 21 animate.obj(n)
+                fdb     vmop_unanimate_all      ; 22 unanimate.all()
+                fdb     vmop_draw               ; 23 draw(n)
+                fdb     vmop_erase              ; 24 erase(n)
+                fdb     vmop_position           ; 25 position(nnn)
+                fdb     vmop_position_f         ; 26 position.v(nvv)
+                fdb     vmop_get_posn           ; 27 get.posn(nvv)
+                fdb     vmop_reposition         ; 28 reposition(nvv)
+                fdb     vmop_set_view           ; 29 set.view(nn)
+                fdb     vmop_set_view_f         ; 2A set.view.v(nv)
+                fdb     vmop_set_loop           ; 2B set.loop(nn)
+                fdb     vmop_set_loop_f         ; 2C set.loop.v(nv)
+                fdb     vmop_fix_loop           ; 2D fix.loop(n)
+                fdb     vmop_release_loop       ; 2E release.loop(n)
+                fdb     vmop_set_cel            ; 2F set.cel(nn)
+                fdb     vmop_set_cel_f          ; 30 set.cel.v(nv)
+                fdb     vmop_last_cel           ; 31 last.cel(nv)
+                fdb     vmop_current_cel        ; 32 current.cel(nv)
+                fdb     vmop_current_loop       ; 33 current.loop(nv)
+                fdb     vmop_current_view       ; 34 current.view(nv)
+                fdb     vmop_number_of_loops    ; 35 number.of.loops(nv)
+                fdb     vmop_set_priority       ; 36 set.priority(nn)
+                fdb     vmop_set_priority_f     ; 37 set.priority.v(nv)
+                fdb     vmop_release_priority   ; 38 release.priority(n)
+                fdb     vmop_get_priority       ; 39 get.priority(nn)
+                fdb     vmop_stop_update        ; 3A stop.update(n)
+                fdb     vmop_start_update       ; 3B start.update(n)
+                fdb     vmop_force_update       ; 3C force.update(n)
+                fdb     vmop_ignore_horizon     ; 3D ignore.horizon(n)
+                fdb     vmop_observe_horizon    ; 3E observe.horizon(n)
+                fdb     vmop_set_horizon        ; 3F set.horizon(n)
+                fdb     vmop_object_on_water    ; 40 object.on.water(n)
+                fdb     vmop_object_on_land     ; 41 object.on.land(n)
+                fdb     vmop_object_on_anything ; 42 object.on.anything(n)
+                fdb     vmop_ignore_objs        ; 43 ignore.objs(n)
+                fdb     vmop_observe_objs       ; 44 observe.objs(n)
                 fdb     vm_op_unimpl            ; 45 distance(nnv)
-                fdb     vm_op_unimpl            ; 46 stop.cycling(n)
-                fdb     vm_op_unimpl            ; 47 start.cycling(n)
-                fdb     vm_op_unimpl            ; 48 normal.cycle(n)
-                fdb     vm_op_unimpl            ; 49 end.of.loop(nn)
-                fdb     vm_op_unimpl            ; 4A reverse.cycle(n)
-                fdb     vm_op_unimpl            ; 4B reverse.loop(nn)
-                fdb     vm_op_unimpl            ; 4C cycle.time(nv)
-                fdb     vm_op_unimpl            ; 4D stop.motion(n)
-                fdb     vm_op_unimpl            ; 4E start.motion(n)
-                fdb     vm_op_unimpl            ; 4F step.size(nv)
-                fdb     vm_op_unimpl            ; 50 step.time(nv)
-                fdb     vm_op_unimpl            ; 51 move.obj(nnnnn)
-                fdb     vm_op_unimpl            ; 52 move.obj.v(nvvvv)
-                fdb     vm_op_unimpl            ; 53 follow.ego(nnn)
-                fdb     vm_op_unimpl            ; 54 wander(n)
-                fdb     vm_op_unimpl            ; 55 normal.motion(n)
-                fdb     vm_op_unimpl            ; 56 set.dir(nv)
-                fdb     vm_op_unimpl            ; 57 get.dir(nv)
-                fdb     vm_op_unimpl            ; 58 ignore.blocks(n)
-                fdb     vm_op_unimpl            ; 59 observe.blocks(n)
-                fdb     vm_op_unimpl            ; 5A block(nnnn)
-                fdb     vm_op_unimpl            ; 5B unblock()
-                fdb     vm_op_unimpl            ; 5C get(n)
-                fdb     vm_op_unimpl            ; 5D get.v(v)
-                fdb     vm_op_unimpl            ; 5E drop(n)
-                fdb     vm_op_unimpl            ; 5F put(nn)
-                fdb     vm_op_unimpl            ; 60 put.v(vv)
-                fdb     vm_op_unimpl            ; 61 get.room.v(vv)
+                fdb     vmop_stop_cycling       ; 46 stop.cycling(n)
+                fdb     vmop_start_cycling      ; 47 start.cycling(n)
+                fdb     vmop_normal_cycle       ; 48 normal.cycle(n)
+                fdb     vmop_end_of_loop        ; 49 end.of.loop(nn)
+                fdb     vmop_reverse_cycle      ; 4A reverse.cycle(n)
+                fdb     vmop_reverse_loop       ; 4B reverse.loop(nn)
+                fdb     vmop_cycle_time         ; 4C cycle.time(nv)
+                fdb     vmop_stop_motion        ; 4D stop.motion(n)
+                fdb     vmop_start_motion       ; 4E start.motion(n)
+                fdb     vmop_step_size          ; 4F step.size(nv)
+                fdb     vmop_step_time          ; 50 step.time(nv)
+                fdb     vmop_move_obj           ; 51 move.obj(nnnnn)
+                fdb     vmop_move_obj_f         ; 52 move.obj.v(nvvvv)
+                fdb     vmop_follow_ego         ; 53 follow.ego(nnn)
+                fdb     vmop_wander             ; 54 wander(n)
+                fdb     vmop_normal_motion      ; 55 normal.motion(n)
+                fdb     vmop_set_dir            ; 56 set.dir(nv)
+                fdb     vmop_get_dir            ; 57 get.dir(nv)
+                fdb     vmop_ignore_blocks      ; 58 ignore.blocks(n)
+                fdb     vmop_observe_blocks     ; 59 observe.blocks(n)
+                fdb     vmop_block              ; 5A block(nnnn)
+                fdb     vmop_unblock            ; 5B unblock()
+                fdb     vmop_get                ; 5C get(n)
+                fdb     vmop_get_f              ; 5D get.v(v)
+                fdb     vmop_drop               ; 5E drop(n)
+                fdb     vmop_put                ; 5F put(nn)
+                fdb     vmop_put_f              ; 60 put.v(vv)
+                fdb     vmop_get_room_f         ; 61 get.room.v(vv)
                 fdb     vm_op_modelled          ; 62 load.sound(n)  [modelled]
                 fdb     vm_op_modelled          ; 63 sound(nn)  [modelled]
                 fdb     vm_op_modelled          ; 64 stop.sound()  [modelled]
@@ -163,15 +255,15 @@ VMOP_TAB:
                 fdb     vm_op_modelled          ; 67 display(nns)  [modelled]
                 fdb     vm_op_modelled          ; 68 display.v(vvv)  [modelled]
                 fdb     vm_op_modelled          ; 69 clear.lines(nns)  [modelled]
-                fdb     vm_op_unimpl            ; 6A text.screen()
-                fdb     vm_op_unimpl            ; 6B graphics()
+                fdb     vmop_text_screen        ; 6A text.screen()
+                fdb     vmop_graphics           ; 6B graphics()
                 fdb     vm_op_modelled          ; 6C set.cursor.char(s)  [modelled]
                 fdb     vm_op_modelled          ; 6D set.text.attribute(nn)  [modelled]
                 fdb     vm_op_modelled          ; 6E shake.screen(n)  [modelled]
                 fdb     vm_op_modelled          ; 6F configure.screen(nnn)  [modelled]
                 fdb     vm_op_modelled          ; 70 status.line.on()  [modelled]
                 fdb     vm_op_modelled          ; 71 status.line.off()  [modelled]
-                fdb     vm_op_unimpl            ; 72 set.string(ns)
+                fdb     vmop_set_string         ; 72 set.string(ns)
                 fdb     vm_op_unimpl            ; 73 get.string(nsnnn)
                 fdb     vm_op_unimpl            ; 74 word.to.string(nn)
                 fdb     vm_op_unimpl            ; 75 parse(n)
@@ -187,11 +279,11 @@ VMOP_TAB:
                 fdb     vm_op_modelled          ; 7F init.disk()  [modelled]
                 fdb     vm_op_unimpl            ; 80 restart.game()
                 fdb     vm_op_modelled          ; 81 show.obj(n)  [modelled]
-                fdb     vm_op_unimpl            ; 82 random(nnv)
-                fdb     vm_op_unimpl            ; 83 program.control()
-                fdb     vm_op_unimpl            ; 84 player.control()
+                fdb     vmop_random             ; 82 random(nnv)
+                fdb     vmop_program_control    ; 83 program.control()
+                fdb     vmop_player_control     ; 84 player.control()
                 fdb     vm_op_modelled          ; 85 obj.status.v(v)  [modelled]
-                fdb     vm_op_unimpl            ; 86 quit(n)
+                fdb     vmop_quit               ; 86 quit(n)
                 fdb     vm_op_modelled          ; 87 show.mem()  [modelled]
                 fdb     vm_op_modelled          ; 88 pause()  [modelled]
                 fdb     vm_op_modelled          ; 89 echo.line()  [modelled]
@@ -204,13 +296,13 @@ VMOP_TAB:
                 fdb     vm_op_modelled          ; 90 log(s)  [modelled]
                 fdb     vm_op_modelled          ; 91 set.scan.start()  [modelled]
                 fdb     vm_op_modelled          ; 92 reset.scan.start()  [modelled]
-                fdb     vm_op_unimpl            ; 93 reposition.to(nnn)
-                fdb     vm_op_unimpl            ; 94 reposition.to.v(nvv)
+                fdb     vmop_reposition_to      ; 93 reposition.to(nnn)
+                fdb     vmop_reposition_to_f    ; 94 reposition.to.v(nvv)
                 fdb     vm_op_modelled          ; 95 trace.on()  [modelled]
                 fdb     vm_op_modelled          ; 96 trace.info(nnn)  [modelled]
                 fdb     vm_op_modelled          ; 97 print.at(snnn)  [modelled]
                 fdb     vm_op_modelled          ; 98 print.at.v(vnnn)  [modelled]
-                fdb     vm_op_unimpl            ; 99 discard.view.v(v)
+                fdb     vmop_discard_view       ; 99 discard.view.v(v)
                 fdb     vm_op_modelled          ; 9A clear.text.rect(nnnnn)  [modelled]
                 fdb     vm_op_modelled          ; 9B set.upper.left(nn)  [modelled]
                 fdb     vm_op_modelled          ; 9C set.menu(s)  [modelled]
@@ -222,10 +314,10 @@ VMOP_TAB:
                 fdb     vm_op_modelled          ; A2 show.obj.v(v)  [modelled]
                 fdb     vm_op_modelled          ; A3 open.dialogue()  [modelled]
                 fdb     vm_op_modelled          ; A4 close.dialogue()  [modelled]
-                fdb     vm_op_unimpl            ; A5 mul.n(vn)
-                fdb     vm_op_unimpl            ; A6 mul.v(vv)
-                fdb     vm_op_unimpl            ; A7 div.n(vn)
-                fdb     vm_op_unimpl            ; A8 div.v(vv)
+                fdb     vmop_mul_n              ; A5 mul.n(vn)
+                fdb     vmop_mul_v              ; A6 mul.v(vv)
+                fdb     vmop_div_n              ; A7 div.n(vn)
+                fdb     vmop_div_v              ; A8 div.v(vv)
                 fdb     vm_op_modelled          ; A9 close.window()  [modelled]
                 fdb     vm_op_modelled          ; AA set.simple(n)  [modelled]
                 fdb     vm_op_modelled          ; AB push.script()  [modelled]
@@ -317,20 +409,20 @@ VMOP_TAB:
 * ── VMTEST_TAB: handler per test opcode ───────────────────────────
 VMTEST_TAB:
                 fdb     vm_test_unimpl          ; 00 --
-                fdb     vm_test_unimpl          ; 01 equaln(vn)
-                fdb     vm_test_unimpl          ; 02 equalv(vv)
-                fdb     vm_test_unimpl          ; 03 lessn(vn)
-                fdb     vm_test_unimpl          ; 04 lessv(vv)
-                fdb     vm_test_unimpl          ; 05 greatern(vn)
-                fdb     vm_test_unimpl          ; 06 greaterv(vv)
-                fdb     vm_test_unimpl          ; 07 isset(n)
-                fdb     vm_test_unimpl          ; 08 issetv(v)
-                fdb     vm_test_unimpl          ; 09 has(n)
-                fdb     vm_test_unimpl          ; 0A obj.in.room(nv)
-                fdb     vm_test_unimpl          ; 0B posn(nnnnn)
-                fdb     vm_test_unimpl          ; 0C controller(n)
-                fdb     vm_test_unimpl          ; 0D have.key()
-                fdb     vm_test_unimpl          ; 0E said()
+                fdb     vmtest_equal            ; 01 equaln(vn)
+                fdb     vmtest_equal_v          ; 02 equalv(vv)
+                fdb     vmtest_less             ; 03 lessn(vn)
+                fdb     vmtest_less_v           ; 04 lessv(vv)
+                fdb     vmtest_greater          ; 05 greatern(vn)
+                fdb     vmtest_greater_v        ; 06 greaterv(vv)
+                fdb     vmtest_is_set           ; 07 isset(n)
+                fdb     vmtest_is_set_v         ; 08 issetv(v)
+                fdb     vmtest_has              ; 09 has(n)
+                fdb     vmtest_obj_in_room      ; 0A obj.in.room(nv)
+                fdb     vmtest_posn             ; 0B posn(nnnnn)
+                fdb     vmtest_controller       ; 0C controller(n)
+                fdb     vmtest_have_key         ; 0D have.key()
+                fdb     vmtest_said             ; 0E said()
                 fdb     vm_test_unimpl          ; 0F compare.strings(ss)
                 fdb     vm_test_unimpl          ; 10 obj.in.box(nnnnn)
                 fdb     vm_test_unimpl          ; 11 center.posn(nnnnn)

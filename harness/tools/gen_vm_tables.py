@@ -92,6 +92,38 @@ def build(implemented, status):
     tests = optable.V2_TESTS
     out = [HEADER.format(ntests=len(tests), ncmds=len(cmds))]
 
+    # ── constants ──────────────────────────────────────────────────────────────────────
+    # ★★★ ADDED AT P4.4, AFTER TYPING THEM BY HAND COST A GATE. The first VM assembly declared
+    # VAR_*/FLAG_*/kAgi* and the ViewFlag bits by hand and got TWO wrong:
+    # VM_VAR_MAX_INPUT_CHARACTERS as 53 (it is 24) and kAgiSoundPC as 0 (it is 1). Neither
+    # raises; they write the wrong variable and the state diff reports it three cycles later as
+    # "var 24 oracle=38 guest=0; var 53 oracle=0 guest=38".
+    # ★★ state.py records the SAME failure one layer up -- "the first draft typed them from
+    # memory and got four VM_VAR/VM_FLAG names or values wrong and the ENTIRE ViewFlags bit
+    # assignment wrong". That is L-29 twice in one project, so the constants are generated now.
+    out.append("\n* ── constants, generated from optable.py ──────────────────────────")
+    out.append("* ★ Do not hand-edit and do not duplicate these in a .s file. Two were wrong when")
+    out.append("* they were typed, and a wrong variable NUMBER is invisible until the diff runs.")
+    names = [n for n in dir(optable)
+             if n.startswith(("VM_VAR_", "VM_FLAG_", "kAgi", "kCycle", "kMotion", "f"))
+             and isinstance(getattr(optable, n), int)]
+    for n in sorted(names):
+        v = getattr(optable, n)
+        # ViewFlags are 16-bit masks; everything else is a small number
+        if n.startswith("f") and v > 255:
+            out.append("%-23s equ     $%04X" % (n, v))
+        elif n.startswith("f"):
+            out.append("%-23s equ     $%04X" % (n, v))
+        else:
+            out.append("%-23s equ     %d" % (n, v))
+
+    for tabname in ("DIR_TABLE", "DIR_DX", "DIR_DY", "LOOP_TABLE_2", "LOOP_TABLE_4"):
+        vals = getattr(optable, tabname, None)
+        if vals is None:
+            continue
+        out.append("VMT_%-19s fcb     %s"
+                   % (tabname, ",".join("$%02X" % (v & 0xFF) for v in vals)))
+
     # ── argument counts ────────────────────────────────────────────────────────────────
     out.append("\n* ── VMOP_ARGS: argument bytes per command opcode ──────────────────")
     out.append("* ★ ScummVM: parameterSize = strlen(parameters). Every parameter is one byte.")

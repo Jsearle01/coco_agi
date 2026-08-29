@@ -29,10 +29,20 @@
 * ★ Sized against MEASURED figures, not guesses:
 *     largest single resource across the gated set : 10,428 bytes (KQ3 LOGIC)
 *     largest LOGIC working set (call depth 2-3)   :  8,537 bytes (§ vm_resdepth.py)
+* ★★ THE THREE BASE ADDRESSES ARE OVERRIDABLE, and the default is P1.3's gated map. A client
+* that needs more room for CODE defines them before including this file; res_probe.s does not,
+* so P1.3's 1,264-resource gate keeps the exact layout it was verified against.
+* ★ vm_probe.s does override them: the VM plus the resource layer plus the HAL does not fit
+* below $2000, and the layout assertion at the bottom of the probe is what said so rather than
+* letting the code run into the DIR tables.
+                ifndef  RES_DIRS
 RES_DIRS        equ     $2000           ; four DIR tables, resident (see RES_DIR_* below)
-RES_DIR_STRIDE  equ     $0400           ; 1 KB per type: 341 slots, against 216 present max
+                endc
+                ifndef  RES_ARENA
 RES_ARENA       equ     $3000           ; the residency arena -- 12 KB
 RES_ARENA_END   equ     $6000
+                endc
+RES_DIR_STRIDE  equ     $0400           ; 1 KB per type: 341 slots, against 216 present max
 RES_SLOT        equ     RES_ARENA       ; a depth-0 fetch lands here; kept as a name for AC-2
 RES_SLOT_END    equ     RES_ARENA_END
 RES_MAXDEPTH    equ     8               ; ★ against a MEASURED maximum LOGIC call depth of 3
@@ -47,7 +57,17 @@ RES_SOUND       equ     3
 
 * ── state ─────────────────────────────────────────────────────────────────────────
 res_hdrlen      fcb     5               ; ★ A PARAMETER, NOT A BRANCH. v3 sets 7 here.
-res_volbase     fcb     0               ; physical block holding staged-volume offset 0
+* ★★ A TABLE, ONE ENTRY PER VOLUME, INDEXED BY THE DIR ENTRY'S VOLUME NIBBLE. P1.3 staged one
+* volume at a time and a single base was enough; the VM needs every volume resident at once,
+* because a logic can call a logic in any volume and there is no point in the cycle where a
+* restage would be safe. All three titles' volumes together fit: KQ3 is 651 KB across four
+* volumes against 56 free blocks (458 KB) -- so the biggest title does NOT fit, and the sweep
+* stages the volumes the gated window actually touches. Stated because "they all fit" was the
+* first assumption and it is false for KQ3.
+* ★ THE SINGLE-VOLUME CASE IS PRESERVED EXACTLY: res_sweep.lua fills all 16 entries with the
+* same base, so indexing by res_vol yields what the old scalar yielded and P1.3's
+* 1,264-resource gate is unaffected. Verified by re-running it, not assumed.
+res_volbase     rmb     16              ; physical block holding each volume's offset 0
 res_slicebase   fdb     0               ; the staged slice's first offset, >>8 (see the probe)
 res_len         fdb     0               ; length of the fetched resource
 res_vol         fcb     0               ; volume the last fetch came from
@@ -208,8 +228,12 @@ res_ptr:
                 rorb
                 lsra
                 rorb                            ; B = block index within the slice
-                addb    res_volbase
-                tfr     b,a
+* ★ the base for THIS resource's volume, not a global one
+                pshs    b
+                lda     res_vol
+                ldx     #res_volbase
+                lda     a,x
+                adda    ,s+
                 jsr     res_map_block
 
 * X = RES_WINDOW + (offset & $1FFF)

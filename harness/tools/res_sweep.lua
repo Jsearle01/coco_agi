@@ -135,7 +135,10 @@ local function stage()
         end
     end
 
-    prog:write_u8(SYM.res_volbase, VOLBASE)
+    -- ★ res_volbase is a 16-entry TABLE since P4.4 (a logic can call into any volume). This
+    -- sweep stages ONE volume, so every entry gets the same base and res_ptr's lookup returns
+    -- exactly what the old scalar returned. P1.3's gate is re-run to prove that, not assumed.
+    for v = 0, 15 do prog:write_u8(SYM.res_volbase + v, VOLBASE) end
     prog:write_u8(SYM.res_slicebase,     (SLICEBASE >> 8) & 0xFF)
     prog:write_u8(SYM.res_slicebase + 1,  SLICEBASE       & 0xFF)
     prog:write_u8(SYM.res_curblk, 0xFF)          -- ★ the host just moved the MMU; invalidate
