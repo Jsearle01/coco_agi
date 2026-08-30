@@ -433,4 +433,4 @@ or token` — fire-and-forget per §2C, does not gate. No credential copied anyw
 
 ### 11 — Commit
 
-`<filled at commit>` (pushed to origin/wip before this report)
+`87b8e38` (pushed to origin/wip)
