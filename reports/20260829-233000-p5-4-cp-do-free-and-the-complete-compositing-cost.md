@@ -346,4 +346,4 @@ edit it — folding is the reconciler's read-time job.
 
 ### 11 — Commit
 
-`<filled at commit>` (pushed to origin/wip before this report)
+`3fbef8d` (pushed to origin/wip)
