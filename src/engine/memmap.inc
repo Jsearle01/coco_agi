@@ -79,9 +79,33 @@ MAP_CODE        equ     $2000
 * ★★ P6.1 §7.4 called the 4 KB "a residual, not a requirement... to be CHECKED against the parser
 * and sound when they exist" -- which sanctions the spending and is exactly why the trend needs
 * a reader, not just a changelog line.
-MAP_CODE_END    equ     $5200           ; 12,800 B; packed P3b measures 12,651
-MAP_RESERVED    equ     $5200
-MAP_RESERVED_END equ    $6000           ; 3,584 B, parser + sound
+* ★★★★ THIRD REDUCTION, AND THIS ONE COMES WITH THE FLOOR THE LAST REPORT ASKED FOR.
+*     P6.1      reserved                                   4,096
+*     T-P0-034  packed span walk,  over by  11  -> $5100   3,840
+*     T-P0-036  LOGIC cache,       over by 107  -> $5200   3,584
+*     T-P0-037  the P3b cycle glue,over by 225  -> $5300   3,328
+* ★★★ T-P0-036 §8.4 recommended "a stated floor and an owner before it is reduced a third
+* time". This is the third time, so the floor lands with it rather than after it.
+* ★★★★ A FOURTH REDUCTION WAS TAKEN AND THEN GIVEN BACK. Adding halt detection needed 7 more
+* bytes; the floor assertion refused the build, I moved the boundary to $5400 deliberately, and
+* the resulting run was worse in every respect (stack wild, status block scribbled). **So the
+* 7 bytes bought nothing and the reservation was restored.**
+* ★★★ Recorded because the useful part is that the floor worked: it turned a slide into a
+* decision, and the decision was reversible because it had been made explicitly rather than
+* absorbed. The reservation stands at 3,328 with 256 bytes above the floor.
+MAP_CODE_END    equ     $5300           ; 13,056 B; the P3b glue measures 13,041
+MAP_RESERVED    equ     $5300
+MAP_RESERVED_END equ    $6000           ; 3,328 B, parser + sound (floor 3,072)
+* ★★★★ THE FLOOR IS DELIBERATELY ARBITRARY AND THAT IS ITS VALUE. Nobody has estimated the
+* parser or sound, so any number here would be invented -- **the point is not to model them but
+* to make the next reduction impossible to take silently.** A fourth bite now fails the build
+* and forces someone to either raise a real estimate or lower this line on purpose.
+* ★★ Without it the only check is that the regions do not overlap, which stays true as the
+* boundary slides -- which is exactly how 12.5% went in three tasks with every step justified.
+MAP_RESERVED_MIN equ    3072            ; 3 KB. See above: a tripwire, not an estimate.
+                ifgt    MAP_RESERVED_MIN-(MAP_RESERVED_END-MAP_RESERVED)
+                error   "parser/sound reservation is below MAP_RESERVED_MIN -- raise a real estimate or lower the floor DELIBERATELY, do not slide the boundary again"
+                endc
 
 * ── slots 3-4: the residency arena's WINDOW ──────────────────────────────────────
 * ★★★★ SIXTEEN KB, AND THE SIZE IS FORCED BY A MEASUREMENT, NOT CHOSEN. The largest single

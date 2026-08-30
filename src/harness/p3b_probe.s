@@ -133,6 +133,28 @@ p3b_entry:
                 jsr     HAL_sys_init
                 sta     $FFDF                   ; all-RAM; sys.s:118-128 does not do this
                 jsr     p3_zero
+* ★★★★ vm_start, AND OMITTING IT PRODUCED A PLAUSIBLE WRONG RUN RATHER THAN A FAILURE.
+* Without it the object table is never cleared, so every one of the 255 entries read fDrawn from
+* uninitialised RAM: the staging array filled to its 16-sprite cap **every cycle**, the
+* compositor then opened 16 garbage VIEW numbers, and the measured rate was 1.93 cycles/second.
+* ★★★ None of that looked like a crash. It looked like a slow interpreter -- which is exactly
+* the number this task exists to report, so it would have been reported [L-56: the first
+* measurement of a new subsystem often measures the scaffolding].
+* ★ vm_probe.s:126 calls it before its loop; copying the sequence rather than inventing one is
+* what keeps this build's VM identical to the gated one.
+                jsr     vm_start
+* ★★★★ ALLOCATE THE PHASE BLOCKS. mmu_phase.s declares ph_blk_pri / ph_blk_fb "filled at init by
+* the allocator" and **nothing filled them** -- they were 0, so every phase_draw mapped BOTH
+* slot 5 and slot 6 to physical block 0. The two planes landed on top of each other, and slot 5
+* stayed at block 0 afterwards because phase_vm never restores it, so VM_OBJ read priority-plane
+* bytes: the sprite count jumped from 0 on cycle 1 to the 16-sprite cap on every cycle after.
+* ★★★ A declaration that says "filled at init" is not an initialisation, and nothing in the
+* build objects to the difference.
+* ★ Blocks 0-1 priority (13,440 B), 2-5 framebuffer (26,880 B). The host stages volumes from
+* block 8 up, and $38-$3F are the CPU window, so 0-7 are free.
+                clr     ph_blk_pri
+                lda     #2
+                sta     ph_blk_fb
 p3_loop:
                 clr     P3_GO
 p3_wait:        lda     P3_GO
@@ -143,12 +165,40 @@ p3_wait:        lda     P3_GO
                 bra     p3_loop
 
 * ── one interpreter cycle: VM, then render if the room changed, then composite ───
+* ★★★ THE ORDER IS THE PHASE DISCIPLINE AND EVERY LINE OF IT IS LOAD-BEARING:
+*   phase_vm          no plane mapped; slot 6 is the volume window
+*   p3_run_vm         the interpreter -- may change the room, may fetch resources
+*   p3_stage_sprites  slot 5 still holds VM_OBJ, so copy the sprite fields out NOW
+*   p3_room_check     fetches in the VM phase, then enters the draw phase itself if it renders
+*   phase_draw_enter  idempotent: the pair, exactly two MMU writes
+*   p3_composite_all  planes mapped; cels decoded from the arena, which is resident in both
+* ★★ p3_room_check is AFTER staging because it may switch phase, and staging must not be split
+* across a remap.
 p3_do_cycle:
                 jsr     p3_zero_timers
-                jsr     phase_vm                ; ★ AC-6: no plane mapped
+                jsr     phase_vm                ; ★ AC-7: no plane mapped
+* ★★★★ RESTORE SLOT 5 TO THE OBJECT TABLE, AND THIS IS A GAP IN THE ENGINE'S PHASE MODEL.
+* mmu_phase.s's phase_vm touches slot 6 ONLY, and says so deliberately: *"SLOT 5 IS LEFT ALONE,
+* NOT CLEARED... the VM phase is defined by what it does NOT touch."* That is correct for a VM
+* phase in which slot 5 holds nothing.
+* ★★★ But P6.1's map put VM_OBJ in slot 5 precisely BECAUSE it is idle during draw -- so the two
+* decisions, each sound alone, leave the object table unmapped after the first draw phase.
+* VM_OBJ then reads priority-plane bytes: **the sprite count went 0 on cycle 1 and pinned to the
+* 16-sprite cap on every cycle after**, which reads as "lots of sprites" rather than as a fault.
+* ★★ Fixed here in the harness rather than in mmu_phase.s: the engine needs a ph_blk_obj and a
+* phase_vm that restores it, and that is a design change to report, not to slip into this task.
+                lda     #$3D                    ; the block the host pre-set slot 5 to at boot
+                sta     MMU_SLOT5
+* ★★★ INVALIDATE THE VOLUME WINDOW'S CACHE. phase_vm writes slot 6 directly, but res_core tracks
+* what it believes is mapped in res_curblk and SKIPS the write when it matches -- so after a
+* phase change it would read the wrong block while being certain it had the right one.
+* ★★ The two owners of $FFA6 have to agree, and the phase machinery is the one that moved it.
+                lda     #$FF
+                sta     res_curblk
                 jsr     p3_run_vm
                 jsr     p3_stage_sprites        ; ★ BEFORE the remap -- slot 5 still holds VM_OBJ
-                jsr     phase_draw_enter        ; ★ AC-6: the pair, exactly two MMU writes
+                jsr     p3_room_check           ; fetch in VM phase, render in draw phase
+                jsr     phase_draw_enter        ; ★ AC-7: the pair, exactly two MMU writes
                 jsr     p3_composite_all
                 ldd     P3_CYCLE
                 addd    #1
@@ -156,8 +206,11 @@ p3_do_cycle:
                 bra     p3_loop
 
 p3_zero:
-                ldx     #MAP_STATUS+4
-                ldb     #30
+* ★ FROM +2, NOT +4. P3_ERR is MAP_STATUS+3 and was never cleared, so a diagnostic run reported
+* "err 255" -- not a RES_E_* code at all, just uninitialised RAM reading as a failure. A status
+* byte the host prints must be initialised by the guest that owns it.
+                ldx     #MAP_STATUS+2
+                ldb     #32
 p3_z1:          clr     ,x+
                 decb
                 bne     p3_z1
@@ -171,10 +224,188 @@ p3_z2:          clr     ,x+
                 bne     p3_z2
                 rts
 
-* ── stubs the host drives; the real bodies land as the integration proceeds ──────
-p3_run_vm:      rts
-p3_stage_sprites: rts
-p3_composite_all: rts
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★ THE CYCLE GLUE. This is what P3b.1 could not build because the phase did not fit.
+*
+* ★★★ THE PHASE SPLIT IS THE DESIGN, NOT AN OPTIMISATION. VM_OBJ lives in slot 5, which becomes
+* the PRIORITY SLICE during a draw phase -- so the object table is NOT addressable while
+* compositing. Everything the compositor needs is therefore copied out BEFORE the remap, into a
+* staging array that lives in always-resident memory.
+* ★★ What is NOT staged: the cel pixels. The VIEW resource lives in the arena (slots 3-4), which
+* memmap.inc keeps mapped in BOTH phases, so a cel can be decoded during the draw phase from a
+* resource that was fetched during the VM phase. **That is what keeps this at two remaps per
+* cycle instead of two per sprite.**
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+
+P3_SPR_MAX      equ     16              ; staged sprites; AGI draws far fewer per cycle
+P3_SPR_SIZE     equ     6               ; x, y, prio, view, loop, cel
+
+* ── p3_run_vm — one interpreter cycle, exactly as vm_probe drives it ─────────────
+* ★ pace, interpret, post. Splitting pace from the cycle body is what makes cycle number and
+* virtual time track each other [vm_cycle.s]; copying the sequence rather than inventing one
+* keeps this build's VM identical to the gated one.
+p3_run_vm:
+                jsr     vm_pace
+* ★★ HALT DETECTION IS MISSING HERE AND vm_probe HAS IT (`lda vm_quit / bne vp_halted`). Adding
+* it pushed the image 7 bytes past the code region, and taking those 7 bytes destabilised the
+* run entirely -- so it is reported as a gap rather than carried. **A halted VM currently keeps
+* being cycled by the host and reports plausible timings for doing nothing**, which is the same
+* shape as the uninitialised object table and should be closed before AC-5 is trusted.
+                jsr     vm_interpret_cycle
+                jsr     vm_post_cycle
+                rts
+
+* ── p3_room_check — fetch and render the room's PICTURE when the room changes ────
+* ★★★ THE FETCH RUNS IN THE VM PHASE AND THE RENDER IN THE DRAW PHASE, and they cannot be
+* swapped. res_open needs the VOLUME window, which is slot 6; the renderer needs the FRAMEBUFFER
+* slice, which is also slot 6. **The bytes bridge the two because they land in the arena, which
+* is resident in both.** Getting this backwards is a remap per picture opcode.
+p3_room_check:
+* ★★★★ VAR 0, NOT vm_roomnr. VAR_CURRENT_ROOM is the room; `vm_roomnr` is a port-side shadow
+* that only vm_new_room writes, and vm_new_room is only reached via the new.room COMMAND.
+* ★★★ The oracle is in room 83 from cycle 0 -- checked, not assumed -- and our VM matches it on
+* var 0 (that is what the nine-title gate compares). But vm_roomnr stayed 0 for 300 cycles, so
+* the probe fetched PICTURE 0, got RES_E_EMPTY, and rendered nothing. **The room was right and
+* the variable I read was not.**
+                lda     VM_VARS+0
+                sta     P3_ROOM                 ; ★ publish it: the host was reading a byte the
+                cmpa    p3_lastroom             ;   probe never wrote, and reported room 0
+                beq     prc_out                 ;   while the VM was elsewhere
+                sta     p3_lastroom
+* ── still in the VM phase: fetch the PICTURE by (type, index) ──
+                lda     #RES_PICTURE
+                ldb     p3_lastroom
+                jsr     res_open
+                lda     res_err
+                bne     prc_fail
+                ldx     res_base
+                stx     p3_picptr
+* ★ The step markers that localised the render hang lived here and are removed: they had done
+* their job, and keeping them put the image 5 bytes over the code region -- which would have
+* meant a fourth bite out of the parser/sound reservation to carry debug scaffolding.
+* ── now the draw phase, and only now ──
+                jsr     phase_draw_enter
+                jsr     p3_clear_planes
+                ldx     p3_picptr
+                stx     pic_ptr
+                jsr     pic_render_at
+                jsr     res_close
+                lda     #1
+                sta     p3_drew
+                rts
+prc_fail:       lda     res_err
+                sta     P3_ERR
+prc_out:        rts
+
+* ── p3_clear_planes — AGI's defaults: visual 15 (white), priority 4 (red) ────────
+* ★★ NOT the HAL's clear. HAL_gfx_set_mode clears to palette index 0, which is correct for the
+* HAL and wrong for an AGI picture [pic_core.s]. ★ The priority plane is PACKED, so the fill
+* value is $44 and the length is halved -- the same pair of changes pri_clear needed in
+* T-P0-034, and getting either alone wrong corrupts every other pixel.
+p3_clear_planes:
+                ldx     #FB_BASE
+                ldd     #$FFFF                  ; visual 15, both nibbles (the pixel doubling)
+p3_cv:          std     ,x++
+                cmpx    #FB_BASE+(PIC_W*PIC_H)
+                blo     p3_cv
+                ldx     #PRI_BASE
+                ldd     #$4444                  ; four packed pixels of priority 4
+p3_cp:          std     ,x++
+                cmpx    #PRI_BASE+(PIC_W*PIC_H/2)
+                blo     p3_cp
+                rts
+
+* ── p3_stage_sprites — VM PHASE ONLY. Copy out what the compositor will need ─────
+* ★★★ Runs while slot 5 still holds VM_OBJ. After phase_draw_enter that memory is the priority
+* plane, so anything not copied here is unreachable for the rest of the cycle.
+* ★ fDrawn is the oracle's own test for "this object is on screen" [sprite.cpp's drawSprites].
+p3_stage_sprites:
+                clr     p3_nspr
+                ldy     #p3_spr
+                ldx     #VM_OBJ
+                clrb
+pss_lp:
+                lda     VMO_FLAGS+1,x           ; low byte: fDrawn is $0001
+                bita    #fDrawn
+                beq     pss_next
+                lda     p3_nspr
+                cmpa    #P3_SPR_MAX
+                bhs     pss_done                ; ★ full: drop the rest rather than overrun
+                lda     VMO_X,x
+                sta     ,y+
+                lda     VMO_Y,x
+                sta     ,y+
+                lda     VMO_PRIORITY,x
+                sta     ,y+
+                lda     VMO_VIEW,x
+                sta     ,y+
+                lda     VMO_LOOP,x
+                sta     ,y+
+                lda     VMO_CEL,x
+                sta     ,y+
+                inc     p3_nspr
+pss_next:
+                leax    VMO_SIZE,x
+                incb
+                cmpb    #VM_OBJ_MAX
+                blo     pss_lp
+pss_done:
+                lda     p3_nspr
+                sta     P3_NSPR
+                rts
+
+* ── p3_composite_all — DRAW PHASE. Decode each staged cel and composite it ───────
+* ★★ The VIEW resource is fetched here, per sprite, from the arena -- which is resident in this
+* phase. The decoded cel goes to CP_CEL, one at a time, because a single 4,784-byte staging
+* buffer is all the map has for it.
+p3_composite_all:
+                lda     p3_nspr
+                beq     pca_out
+                ldy     #p3_spr
+                clr     p3_si
+pca_lp:
+                lda     ,y+
+                sta     CP_X
+                lda     ,y+
+                sta     CP_Y
+                lda     ,y+
+                sta     CP_PRIO
+                lda     ,y+
+                sta     p3_view
+                lda     ,y+
+                sta     vc_loop
+                lda     ,y+
+                sta     vc_cel
+                pshs    y
+* ── the VIEW resource, through the real path ──
+                lda     #RES_VIEW
+                ldb     p3_view
+                jsr     res_open
+                lda     res_err
+                bne     pca_skip
+                ldx     res_base
+                stx     vc_view
+                ldx     #CP_CEL
+                stx     vc_dest
+                jsr     vc_decode_cel
+                lda     vc_err
+                bne     pca_close
+                jsr     cp_composite
+pca_close:      jsr     res_close
+pca_skip:       puls    y
+                inc     p3_si
+                lda     p3_si
+                cmpa    p3_nspr
+                blo     pca_lp
+pca_out:        rts
+
+p3_lastroom     fcb     $FF             ; ★ $FF: no room yet, so the first cycle always renders
+p3_picptr       fdb     0
+p3_drew         fcb     0
+p3_nspr         fcb     0
+p3_si           fcb     0
+p3_view         fcb     0
+p3_spr          rmb     P3_SPR_MAX*P3_SPR_SIZE
 
 * ── the phase pair, counted ──────────────────────────────────────────────────────
 * ★★ COUNTS ITS OWN REMAPS so AC-6 is measured rather than asserted. §3.4's claim is "two per

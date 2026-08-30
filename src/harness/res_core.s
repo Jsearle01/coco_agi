@@ -360,15 +360,36 @@ res_cache_stash:
                 cmpd    res_top
                 blo     rcs_out                 ; ★ would collide with the stack -- UNSIGNED
                 std     res_ccur                ; commit the downward allocation
-                tfr     d,y                     ; Y = destination
-                ldu     res_base                ; U = source, on the stack
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★ COPIED BACKWARD, BECAUSE SOURCE AND DESTINATION CAN OVERLAP AND THE FIRST VERSION DID
+* NOT NOTICE. The scratch grows UP from res_top and the cache grows DOWN from res_ccur; whether
+* they overlap depends entirely on how big the arena is:
+*     vm_probe.s  arena 21,760 B ($6B00-$C000): logic0's scratch ends $8E27, its cache
+*                 destination starts $9CD9 -- **no overlap, so the nine-title gate passes**
+*     p3b_probe.s arena 16,384 B ($6000-$A000): scratch ends $8327, destination starts $7CD9
+*                 -- **~1.4 KB of overlap**
+* ★★★ Copying FORWARD into an overlapping region that sits ABOVE the source overwrites bytes the
+* read pointer has not reached yet. The integrated probe hung with the CPU bouncing between
+* rcs_lp and $0102, executing corrupted memory.
+* ★★ **The bug was invisible to every existing gate** because the gate's arena happens to be
+* large enough to separate the two regions. It is a property of the ARENA SIZE, not of the code
+* under test -- so a client with a smaller arena inherits a latent corruption [L-63's shape: the
+* binding constraint was a property of the configuration, not the routine].
+* ★ The destination is always ABOVE the source here (the cache is above the stack), so copying
+* from the high end downward is always safe and needs no overlap test.
+                addd    res_len
+                tfr     d,y                     ; Y = one past the destination's last byte
+                ldd     res_base
+                addd    res_len
+                tfr     d,u                     ; U = one past the source's last byte
                 ldx     res_len
                 beq     rcs_done
-rcs_lp:         lda     ,u+
-                sta     ,y+
+rcs_lp:         lda     ,-u
+                sta     ,-y
                 leax    -1,x
                 bne     rcs_lp
 rcs_done:
+* ═══════════════════════════════════════════════════════════════════════════════════════════
                 ldd     res_ccur
                 std     res_base                ; ★ callers now see the CACHED copy
 * ── record: key, address, length ──

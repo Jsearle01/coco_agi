@@ -148,6 +148,11 @@ pp_out:         rts
 pic_render:
                 ldx     #PIC_DATA
                 stx     pic_ptr
+* ★★ ENTRY WITH pic_ptr ALREADY SET, for a caller that fetched the PICTURE through the resource
+* layer rather than having it poked to a fixed address. p3b_probe.s enters here: res_open leaves
+* the bytes at res_base, which is wherever the arena put them, so PIC_DATA cannot name it.
+* ★ A LABEL ONLY -- no instruction is added or moved, and pic_probe.bin stays byte-identical.
+pic_render_at:
 pr_next:        jsr     pic_get
                 cmpa    #$FF
                 beq     pr_done
