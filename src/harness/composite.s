@@ -38,6 +38,34 @@
 
 CO_CTRL_MAX     equ     2               ; priority <= 2 is control data, not depth
 
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★ -DPRI_PACKED: THE PRIORITY PLANE AT 4 BITS PER PIXEL. THIS IS NOT AN OPTIMISATION.
+* memmap.inc has specified 13,440 B since P6.1 and every subsystem wrote 26,880. P3b measured
+* the draw phase at **72,194 bytes against 65,280 available** -- and packing saves exactly
+* 13,440, which is the whole of the 6,914-byte overrun and 6,526 to spare. **Without it nothing
+* integrates** [L-64: P6.1 recorded this as a divergence with a cost, which concealed that it
+* was a requirement].
+*
+* ★★ AGI priority values are 0-15, so four bits are lossless. The plane becomes 80 x 168.
+*
+* ★★★ THE NIBBLE CONVENTION, STATED ONCE AND USED EVERYWHERE:
+*     byte index = (y * 160 + x) >> 1  =  y * 80 + (x >> 1)
+*     EVEN x -> HIGH nibble          ODD x -> LOW nibble
+* ★ Left-to-right raster order, so a hex dump reads in pixel order. Six sites depend on it:
+* co_rowset, co_rownext, co_opaque's read, co_depth's stamp, co_checkctrl's walk, and
+* put_pixel in pic_core.s. **A convention disagreement between any two of them is a silent
+* half-pixel shift**, which is why it is written here and referenced rather than re-derived.
+*
+* ★★ THE COST IS A NIBBLE EXTRACT ON READ AND A READ-MODIFY-WRITE ON WRITE. P5.4 measured the
+* priority test at 2.7% of composite cost against the transparency test's 70.9%, so this lands
+* on the cheap path -- but that was an inference and AC-4/AC-7 measure it rather than assume.
+                ifdef   PRI_PACKED
+PRI_STRIDE      equ     PRI_W/2         ; 80 bytes per row
+                else
+PRI_STRIDE      equ     PRI_W           ; 160 -- one byte per pixel, the gate's shape
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+
 co_rowvis       fdb     0               ; -> visual row base for curY
 co_rowpri       fdb     0               ; -> priority row base for curY
 co_src          fdb     0               ; -> next cel pixel
@@ -133,8 +161,25 @@ co_opaque:
                 ldx     co_rowpri
                 clra
                 ldb     co_curx
+                ifdef   PRI_PACKED
+* ★ byte = row + (x >> 1); EVEN x -> high nibble, ODD x -> low. See the convention block.
+                lsrb                            ; A is 0, so D = x >> 1
+                leax    d,x
+                lda     ,x
+                ldb     co_curx
+                bitb    #1
+                bne     co_op_lo
+                lsra
+                lsra
+                lsra
+                lsra
+                bra     co_op_got
+co_op_lo:       anda    #$0F
+co_op_got:
+                else
                 leax    d,x
                 lda     ,x                      ; A = screenPriority
+                endc
                 cmpa    #CO_CTRL_MAX
                 bhi     co_depth                ; > 2: ordinary depth comparison
 
@@ -170,9 +215,34 @@ co_depth:
                 ldx     co_rowpri
                 clra
                 ldb     co_curx
+                ifdef   PRI_PACKED
+* ★★ THE READ-MODIFY-WRITE. Packing makes a plane store into a load, a mask, an or and a store
+* -- this is the write half of the packing cost, and AC-7 measures it rather than assuming it.
+                lsrb
+                leax    d,x
+* ★★ Same ordering trap as put_pixel: load first, THEN test parity on B, or the `bne` reads the
+* flags `lda ,x` just set.
+                lda     ,x
+                ldb     co_curx
+                bitb    #1
+                bne     co_st_lo
+                anda    #$0F                    ; even x: keep the ODD pixel, replace the high
+                ldb     co_prio
+                aslb
+                aslb
+                aslb
+                aslb
+                pshs    b
+                ora     ,s+
+                bra     co_st_put
+co_st_lo:       anda    #$F0                    ; odd x: keep the EVEN pixel, replace the low
+                ora     co_prio
+co_st_put:      sta     ,x
+                else
                 leax    d,x
                 lda     co_prio
                 sta     ,x                      ; ★ the sprite stamps the priority plane
+                endc
                 bra     co_nextx
 
 co_reject_pri:
@@ -195,7 +265,7 @@ co_rownext:
                 addd    #PRI_W
                 std     co_rowvis
                 ldd     co_rowpri
-                addd    #PRI_W
+                addd    #PRI_STRIDE
                 std     co_rowpri
                 lbra    co_row
 
@@ -292,6 +362,11 @@ co_rowset:
                 addd    #CP_VIS
                 std     co_rowvis
                 ldd     co_tmp
+* ★ y*160 >> 1 = y*80, the packed row base. One shift rather than a second multiply chain.
+                ifdef   PRI_PACKED
+                lsra
+                rorb
+                endc
                 addd    #CP_PRI
                 std     co_rowpri
                 rts
@@ -316,6 +391,9 @@ co_checkctrl:
                 ldx     co_rowpri
                 clra
                 ldb     co_curx
+                ifdef   PRI_PACKED
+                lsrb                            ; A is 0, so D = x >> 1
+                endc
                 leax    d,x
                 stx     co_ctrloff
 co_cc_lp:
@@ -323,7 +401,7 @@ co_cc_lp:
                 addd    #1
                 std     co_ctrly
                 ldx     co_ctrloff
-                leax    PRI_W,x
+                leax    PRI_STRIDE,x
                 stx     co_ctrloff
                 ifndef  COMP_NOCOUNT
                 ldu     #co_ctrlstep
@@ -337,6 +415,21 @@ co_cc_lp:
 co_cc_read:
                 ldx     co_ctrloff
                 lda     ,x
+* ★ x does not change down a column, so the nibble selector is FIXED for the whole walk -- but
+* it is re-tested per step rather than hoisted, because the walk is 2.7% of composite cost
+* [P5.4] and hoisting it would be an optimisation, which this task does not authorise (§13).
+                ifdef   PRI_PACKED
+                ldb     co_curx
+                bitb    #1
+                bne     co_cc_lo
+                lsra
+                lsra
+                lsra
+                lsra
+                bra     co_cc_got
+co_cc_lo:       anda    #$0F
+co_cc_got:
+                endc
                 cmpa    #CO_CTRL_MAX
                 bls     co_cc_lp                ; still control data: keep walking
                 cmpa    co_prio

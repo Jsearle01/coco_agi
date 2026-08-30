@@ -97,10 +97,41 @@ put_pixel:
 pp_pri:         lda     pri_on
                 beq     pp_out
                 ldd     pix_off
+* ★★★★ -DPRI_PACKED: the sixth site of the nibble convention, which is stated in full at the
+* head of composite.s. byte = (y*160+x) >> 1; EVEN x -> HIGH nibble, ODD x -> LOW.
+* ★★ pix_off is already y*160+x, so one shift gives the packed offset -- the renderer needs no
+* second address computation. ★ The write becomes a read-modify-write, which is the cost.
+                ifdef   PRI_PACKED
+                lsra
+                rorb
+                addd    #PRI_BASE
+                tfr     d,x
+* ★★ ORDER IS LOAD-BEARING: `lda ,x` sets N/Z from the byte it loads, so the parity test must
+* come AFTER it, on B. Writing `bitb #1 / lda ,x / bne` tests the loaded byte instead of the
+* parity -- caught here before assembly, and it is the flag-clobber shape x_liveness.py was
+* built for, one register further along.
+                lda     ,x
+                ldb     cur_x
+                bitb    #1
+                bne     pp_pri_lo
+                anda    #$0F                    ; even x: keep the ODD pixel
+                ldb     pri_color
+                aslb
+                aslb
+                aslb
+                aslb
+                pshs    b
+                ora     ,s+
+                bra     pp_pri_put
+pp_pri_lo:      anda    #$F0                    ; odd x: keep the EVEN pixel
+                ora     pri_color
+pp_pri_put:     sta     ,x
+                else
                 addd    #PRI_BASE
                 tfr     d,x
                 lda     pri_color
                 sta     ,x
+                endc
 pp_out:         rts
 
                 include "src/harness/pic_draw.s"

@@ -258,9 +258,29 @@ P3_CODE_END     equ     *
 * about the tree rather than a paragraph in a report [L-27: a finding that cannot fail is not a
 * finding]. -DP3B_ACCEPT_OVERRUN builds anyway, for measuring the parts.
 * ★ Everything except the code, which is P3_CODE_END and is measured rather than estimated.
-P3B_DRAW_NEED   equ     26880+26880+4784+1024+768+90
+* ★★★★ THE PRIORITY TERM IS NOW THE BUILD'S ACTUAL PLANE SIZE, not a constant. Under
+* -DPRI_PACKED it is 13,440; without it 26,880. **So this assertion no longer merely records
+* the overrun -- it is the AC-2 test**, and whether the draw phase fits is decided by the same
+* flag that decides how the six nibble sites assemble. A packed build that still overran would
+* fail here rather than in a report.
+                ifdef   PRI_PACKED
+P3B_PRI_BYTES   equ     13440           ; 80 x 168, 4 bpp
+                else
+P3B_PRI_BYTES   equ     26880           ; 160 x 168, 1 B/px -- what P3b measured
+                endc
+* ★★★★ THE ASSERTION WAS OVER-STRICT BY 8,192 AND P3b DID NOT CATCH IT.
+* It read `P3B_DRAW_NEED + P3_CODE_END`, and **P3_CODE_END is an ADDRESS** (MAP_CODE + size),
+* so it charged the draw phase for the 8,192 bytes below MAP_CODE a second time -- the status,
+* stacks and DIRs are already itemised in P3B_DRAW_NEED. The code SIZE is what belongs here.
+* ★★★ It went unnoticed because the unpacked case is over the limit either way: 72,194 by hand
+* against 80,386 by the assertion, both > 65,280, **same verdict from different arithmetic.**
+* ★★ P3b's REPORTED figure (72,194) was summed by hand and is correct; the assertion was not
+* measuring what it claimed. **A check that agrees with you for the wrong reason is the one you
+* never audit** -- and it only surfaced because packing made the two disagree.
+P3B_CODE_SIZE   equ     P3_CODE_END-MAP_CODE
+P3B_DRAW_NEED   equ     26880+P3B_PRI_BYTES+4784+1024+768+90
                 ifndef  P3B_ACCEPT_OVERRUN
-                ifgt    P3B_DRAW_NEED+P3_CODE_END-$FF00
+                ifgt    P3B_DRAW_NEED+P3B_CODE_SIZE-$FF00
                 error   "DRAW PHASE DOES NOT FIT: planes+code+cel+stacks exceed $0000-$FEFF. 4bpp priority packing (memmap.inc MAP_PRI_BYTES) is unimplemented and is load-bearing. See the block above. -DP3B_ACCEPT_OVERRUN to build anyway."
                 endc
                 endc

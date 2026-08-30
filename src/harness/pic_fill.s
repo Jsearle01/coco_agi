@@ -58,6 +58,40 @@ FC_VISUAL       equ     0               ; test visual == 15   (70.3% of calls)
 FC_PRIORITY     equ     1               ; test priority == 4  (6.4%)
 FC_NEVER        equ     2               ; always false        (the rest)
 
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★ -DPRI_PACKED IS NOT COMPLETE IN THIS FILE, AND THIS ERROR IS DELIBERATE (§9 trigger 1).
+*
+* T-P0-033 packed the priority plane and it DOES make the draw phase fit -- 58,842 against
+* 65,280, 6,438 spare, proven by p3b_probe.s's own assertion. The compositor packs cleanly and
+* its gate passes 20/20 with the injected fault still detected 20/20. **The renderer does not**,
+* and the reason is structural rather than a missing case:
+*
+* ★★★ 1. `PRI_DELTA equ PRI_BASE-FB_BASE` is a CONSTANT offset from a visual pointer to the
+*    same pixel's priority byte, and it exists ONLY because both planes share geometry. At 80
+*    bytes per row against 160 there is no such constant. **Fixed** -- ff_store_pri recomputes
+*    from (x, y) -- and the fix costs the second write a multiply it did not previously do.
+*
+* ★★★★ 2. THE SPAN WALK IS A BYTE-POINTER WALK AND THIS IS THE BLOCKER. `abx` forms
+*    `X = &row[fc_x]`, then the left and right scans step `leax -1,x` / `leax 1,x` once per
+*    PIXEL and read `lda ,x`. Packed, the pointer advances every OTHER pixel and the nibble
+*    alternates, so the step becomes conditional and the read gains a shift. **That restructures
+*    the inner loop P3.3 took from 11.1 s to 2.7 s across three decompositions**, whose
+*    per-pixel cost is documented here down to the cycle.
+*
+* ★★ SO THE MAP'S FRAMING WAS WRONG A SECOND TIME, ONE LEVEL DEEPER. P6.1 said the cost of
+* packing was "a nibble extract on the priority read". The read is the cheap part; the plane's
+* GEOMETRY is load-bearing for the fill's two central optimisations, and neither survives.
+* ★ [L-64 again: a divergence described by its cost concealed what it actually required.]
+*
+* ★★★ Reported rather than worked around, per §9 trigger 1. Building the renderer packed would
+* silently mis-render priority-only pictures (9 of the gated 45), so it fails here instead.
+                ifdef   PRI_PACKED
+                ifndef  PRI_PACKED_FILL_KNOWN_INCOMPLETE
+                error   "pic_fill.s: -DPRI_PACKED needs the span walk restructured (byte-pointer -> nibble walk). See the block above; this is T-P0-033 §9 trigger 1. -DPRI_PACKED_FILL_KNOWN_INCOMPLETE to build the partial for measurement."
+                endc
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+
 * ★ Offset from a VISUAL-plane pointer to the same pixel's PRIORITY byte. Constant, so the
 * secondary write needs no address arithmetic beyond one LEA.
 PRI_DELTA       equ     PRI_BASE-FB_BASE
@@ -293,8 +327,21 @@ ff_pop_lp:
 * walk. ★ Also decides once whether the rows above and below exist, which is the y half of the
 * bounds test fill_check was repeating per call.
                 lda     fc_y
+                ifdef   PRI_PACKED
+* ★★ The TEST plane is priority only in the FC_PRIORITY case (6.4% of calls, P3.3), and only
+* then is the row 80 bytes wide. Branching once per SPAN rather than per pixel keeps this off
+* the inner loop -- the same reasoning that put fc_case on the span in the first place.
+                ldb     fc_case
+                cmpb    #FC_PRIORITY
+                bne     ffr_vis160
+                ldb     #PIC_W/2
+                mul                             ; D = y * 80
+                bra     ffr_rowbase
+ffr_vis160:
+                endc
                 ldb     #PIC_W
                 mul                             ; D = y * 160
+ffr_rowbase:
                 addd    fc_pbase
                 std     ff_row                  ; row base in the TEST plane
                 lda     fc_y
@@ -453,17 +500,32 @@ ff_flush:
 ffl_nocnt:
                 endc
 
+* ★★★ THE PRIMARY WRITE IS THE PRIORITY PLANE WHENEVER fc_case IS FC_PRIORITY, so packing has
+* to be handled on BOTH write paths, not only the secondary one. Missing this leaves
+* priority-only pictures (9 of the gated 45) writing byte-per-pixel into a packed plane.
+                ifdef   PRI_PACKED
+                lda     fc_case
+                cmpa    #FC_PRIORITY
+                bne     ffl_vis
+                jsr     ff_store_pri            ; primary plane IS priority, packed
+                bra     ff_flush_done
+ffl_vis:
+                endc
                 ldx     ff_runp
                 lda     ff_wval
                 ldb     ff_runn
                 bsr     ff_store                ; primary plane
                 lda     ff_sec
                 beq     ff_flush_done
+                ifdef   PRI_PACKED
+                jsr     ff_store_pri            ; ★ recomputed from (x, y): no PRI_DELTA
+                else
                 ldx     ff_runp
                 leax    PRI_DELTA,x
                 lda     pri_color
                 ldb     ff_runn
                 bsr     ff_store                ; the second plane, same run
+                endc
 ff_flush_done:  lbra    ff_pop_lp
 
 * ── ff_store — B bytes of A, starting at X ────────────────────────
@@ -473,6 +535,85 @@ ffs_lp:         sta     ,x+
                 decb
                 bne     ffs_lp
                 rts
+
+                ifdef   PRI_PACKED
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★ ff_store_pri -- the packed run store, and the reason packing is not free HERE.
+*
+* The unpacked second write is `leax PRI_DELTA,x` plus ff_store: ONE lea and a byte run,
+* because PRI_DELTA is a CONSTANT offset from a visual pointer to the same pixel's priority
+* byte. **That constant exists only because both planes have identical geometry**, and packing
+* destroys it -- 80 bytes per row against 160 is not a fixed displacement.
+* ★★★ So the second write must recompute its address from (x, y) and handle three pieces: a
+* possible odd leading pixel, a run of whole bytes, and a possible odd trailing pixel.
+* ★★ THE RUN ITSELF GETS CHEAPER -- half as many stores -- and the ends get more expensive.
+* Which wins depends on run length, and P3.3 measured the fill's median span at 9 bytes, so the
+* ends are NOT amortised away. **AC-7 reports this rather than assuming it.**
+* ★ in: ff_runx = start x, fc_y = row, ff_runn = pixel count, pri_color = value.
+ff_store_pri:
+                lda     ff_runn
+                beq     ffsp_out
+                sta     ff_pn
+                lda     fc_y
+                ldb     #PIC_W/2
+                mul                             ; D = y * 80
+                addd    #PRI_BASE
+                std     ff_ptmp
+                lda     ff_runx
+                lsra
+                tfr     a,b
+                clra
+                addd    ff_ptmp
+                tfr     d,x                     ; X -> the run's first byte
+* ★ the doubled nibble byte, formed once for the whole run
+                lda     pri_color
+                asla
+                asla
+                asla
+                asla
+                ora     pri_color
+                sta     ff_pval
+* ── odd leading pixel: patch the LOW nibble, keeping the EVEN pixel beside it ──
+                lda     ff_runx
+                bita    #1
+                beq     ffsp_whole
+                lda     ,x
+                anda    #$F0
+                ora     pri_color
+                sta     ,x+
+                dec     ff_pn
+                beq     ffsp_out
+ffsp_whole:
+                lda     ff_pn
+                lsra                            ; whole bytes = pixels / 2
+                beq     ffsp_tail
+                tfr     a,b
+                lda     ff_pval
+ffsp_lp:        sta     ,x+
+                decb
+                bne     ffsp_lp
+ffsp_tail:
+* ── odd trailing pixel: patch the HIGH nibble, keeping the ODD pixel beside it ──
+                lda     ff_pn
+                bita    #1
+                beq     ffsp_out
+                lda     ,x
+                anda    #$0F
+                ldb     pri_color
+                aslb
+                aslb
+                aslb
+                aslb
+                pshs    b
+                ora     ,s+
+                sta     ,x
+ffsp_out:       rts
+
+ff_ptmp         fdb     0
+ff_pn           fcb     0
+ff_pval         fcb     0
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+                endc
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★ THE STACK BLAST WAS BUILT, GATED AND MEASURED, AND IT IS NOT WORTH IT. AD-45 IS CLOSED.
 *

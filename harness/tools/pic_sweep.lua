@@ -148,8 +148,19 @@ local function finish()
         local fb = io.open(OUTDIR .. "/" .. cur .. ".fb.bin", "wb")
         for i = 0, PLANE - 1 do fb:write(string.char(prog:read_u8(FB_BASE + i))) end
         fb:close()
+        -- ★★★★ PIC_PACKED: the guest's priority plane is 4 bpp, the ORACLE'S IS NOT. Expand the
+        -- GUEST here and never pack the oracle -- §2O.1, so a packing bug cannot cancel a
+        -- rendering bug. Packed byte j holds unpacked pixels 2j (high nibble) and 2j+1 (low),
+        -- the convention stated at the head of composite.s.
         local pr = io.open(OUTDIR .. "/" .. cur .. ".pri.bin", "wb")
-        for i = 0, PLANE - 1 do pr:write(string.char(prog:read_u8(PRI_BASE + i))) end
+        if os.getenv("PIC_PACKED") then
+            for j = 0, (PLANE // 2) - 1 do
+                local b = prog:read_u8(PRI_BASE + j)
+                pr:write(string.char((b >> 4) & 0x0F), string.char(b & 0x0F))
+            end
+        else
+            for i = 0, PLANE - 1 do pr:write(string.char(prog:read_u8(PRI_BASE + i))) end
+        end
         pr:close()
     end
 end

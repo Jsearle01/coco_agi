@@ -29,6 +29,25 @@ local CW, CH, CKEY = 0x0088, 0x0089, 0x008A
 local W, H = 160, 168
 local PLANE = W * H
 
+-- ★★★★ COMP_PACKED: the guest's priority plane is 4 bpp (13,440 B) and the ORACLE'S IS NOT.
+-- The comparison stays against the oracle's 26,880-byte array -- §2O.1: the baseline is the
+-- pinned reference, never our own representation. So the guest's bytes are EXPANDED here and
+-- the oracle's are never packed. **Packing the oracle instead would let a packing bug cancel a
+-- compositing bug and the suite would stay green.**
+-- ★★ The expansion is sequential and that is not a coincidence: packed byte j covers unpacked
+-- indices 2j and 2j+1, because y*80+(x>>1) doubles to y*160+(x & ~1). EVEN x is the HIGH
+-- nibble, matching the convention stated at the head of composite.s.
+local PACKED   = os.getenv("COMP_PACKED") ~= nil
+local PRI_BYTES = PACKED and (PLANE // 2) or PLANE
+
+local function read_pri(prog, base, i)      -- i is 1-based, in ORACLE (unpacked) space
+    if not PACKED then return prog:read_u8(base + i - 1) end
+    local k = i - 1
+    local b = prog:read_u8(base + (k >> 1))
+    if (k & 1) == 0 then return (b >> 4) & 0x0F end
+    return b & 0x0F
+end
+
 local m    = manager.machine
 local cpu  = m.devices[":maincpu"]
 local prog = cpu.spaces["program"]
@@ -65,7 +84,14 @@ local function loadFrame(n)
     local pre_p = slurp(FRAMES .. "/frame" .. n .. ".before.priority.bin")
     if not pre_v or not pre_p then return false end
     for i = 1, PLANE do prog:write_u8(CP_VIS + i - 1, pre_v:byte(i)) end
-    for i = 1, PLANE do prog:write_u8(CP_PRI + i - 1, pre_p:byte(i)) end
+    if PACKED then
+        -- ★ stage the BEFORE plane packed: two oracle pixels per guest byte, even x high.
+        for j = 0, PRI_BYTES - 1 do
+            prog:write_u8(CP_PRI + j, ((pre_p:byte(2*j + 1) & 0x0F) << 4) | (pre_p:byte(2*j + 2) & 0x0F))
+        end
+    else
+        for i = 1, PLANE do prog:write_u8(CP_PRI + i - 1, pre_p:byte(i)) end
+    end
     sprites = {}
     local f = io.open(STAGE .. "/f" .. n .. ".spr.txt", "r")
     for line in f:lines() do
@@ -89,7 +115,7 @@ local function compareFrame(n)
         end
     end
     for i = 1, PLANE do
-        if prog:read_u8(CP_PRI + i - 1) ~= want_p:byte(i) then
+        if read_pri(prog, CP_PRI, i) ~= want_p:byte(i) then
             bad = bad + 1
             if at < 0 then plane, at = "priority", i - 1 end
         end
@@ -101,7 +127,7 @@ local function compareFrame(n)
         local fp = io.open(OUT .. "/guest" .. n .. ".priority.bin", "wb")
         local tv, tp = {}, {}
         for i = 1, PLANE do tv[i] = string.char(prog:read_u8(CP_VIS + i - 1)) end
-        for i = 1, PLANE do tp[i] = string.char(prog:read_u8(CP_PRI + i - 1)) end
+        for i = 1, PLANE do tp[i] = string.char(read_pri(prog, CP_PRI, i)) end
         fv:write(table.concat(tv)); fv:close()
         fp:write(table.concat(tp)); fp:close()
     end

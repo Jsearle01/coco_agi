@@ -114,6 +114,14 @@ vm_rl_loop:
 * answered from the host, because the host cannot see which opcodes a given run took. ★ It is
 * also the cheapest possible probe -- two instructions on the dispatch path -- and it doubles as
 * the answer to "did this opcode execute at all", which is the question a state diff cannot ask.
+* ★★★ THE COMMENT SAYS "two instructions on the dispatch path" AND IT IS SEVEN. It is also
+* UNGUARDED, on the hottest path in the interpreter, and duplicated at the test-dispatch site
+* below. T-P0-033 added -DVM_NOCOUNT so AC-4 can ABLATE it rather than argue about it: removing
+* a counter cannot change control flow, which makes this one of the few honest ablations
+* available in a VM where deleting real work diverges the run [L-43].
+* ★★ Third file with this shape -- composite.s guards its counters, pic_fill.s guards its
+* counters, pic_draw.s and this did not. **The measured answer is in AC-4.**
+                ifndef  VM_NOCOUNT
                 ldx     #VM_OPSEEN
                 pshs    a
                 clra
@@ -121,6 +129,7 @@ vm_rl_loop:
                 leax    d,x                     ; ★ D-offset: UNSIGNED (the signed-index lesson)
                 inc     ,x
                 puls    a
+                endc
 * ★★★ THE OPCODE GOES ON THE STACK *HERE*, above the VMOP_TAB index computation and not below
 * it. The first version of this fix pushed after the `clra` that zeroes D's high half for the
 * table index -- so it pushed 0, and every command looked up VMOP_ARGS[0] = 0 args. ip then
@@ -248,6 +257,7 @@ vm_tic_loop:
 * exactly this: 319 opcodes across TWO ORTHOGONAL AXES, and a figure can be exactly right while
 * meaning something other than what quoting it implies. Tests and commands are separate opcode
 * SPACES -- test $01 and command $01 are different instructions -- so they need separate tables.
+                ifndef  VM_NOCOUNT
                 ldx     #VM_TESTSEEN
                 pshs    a
                 clra
@@ -255,6 +265,7 @@ vm_tic_loop:
                 leax    d,x                     ; ★ D-offset: UNSIGNED (the signed-index lesson)
                 inc     ,x
                 puls    a
+                endc
                 ldx     #VMTEST_TAB
                 tfr     a,b
                 clra

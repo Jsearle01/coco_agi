@@ -462,11 +462,28 @@ ps_byte:        sta     ,u+
                 rts
                 endc
 
+* ★★★★ THE SEVENTH SITE OF THE NIBBLE CONVENTION, AND IT WAS NOT ON THE LIST OF SIX.
+* Packing the plane broke the renderer gate on every picture -- visual identical, priority
+* differing by ~13,440 pixels, which is EXACTLY half the plane. The cause is here: the clear
+* wrote `$0404` (two bytes of priority 4) over PIC_W*PIC_H bytes, so packed it left every EVEN
+* pixel's high nibble at 0 and every odd pixel at 4, and overran the 13,440-byte plane by
+* another 13,440 into the framebuffer window.
+* ★★★ I enumerated six sites by grepping for plane ACCESS and missed the one that INITIALISES
+* it -- a clear is not a read and not a write of a pixel, so it matched no pattern I searched
+* for. **The half-the-plane symptom is what named it: a wrong nibble convention corrupts every
+* other pixel, and 13,114-of-26,880 is that signature.**
+* ★★ Both the fill value and the LENGTH change; either alone still fails.
 pri_clear:
                 ldx     #PRI_BASE
+                ifdef   PRI_PACKED
+                ldd     #$4444                  ; four packed pixels of priority 4
+pc_lp:          std     ,x++
+                cmpx    #PRI_BASE+(PIC_W*PIC_H/2)
+                else
                 ldd     #$0404
 pc_lp:          std     ,x++
                 cmpx    #PRI_BASE+(PIC_W*PIC_H)
+                endc
                 blo     pc_lp
                 rts
 
