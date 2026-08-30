@@ -82,6 +82,33 @@ res_depth       fcb     0               ; how many resources are currently resid
 res_marks       rmb     2*RES_MAXDEPTH  ; res_top as it was before each open
 res_base        fdb     0               ; where the LAST open put its bytes
 res_dest        fdb     RES_ARENA       ; where res_fetch copies to
+* ★ ABLATION-ONLY storage. Absent from every shipped build -- see res_fetch's ABL_NOCOPY block.
+* ★★★★ EXPLICIT ZEROS, NOT `rmb`, AND THE SLOT HOLDS type+1 -- BOTH ARE BUG FIXES.
+* The first version used `rmb`, which reserves space WITHOUT emitting bytes, so the memo booted
+* holding whatever RAM held. A slot that happened to match the incoming (type, index) produced a
+* FALSE HIT on a FIRST fetch, skipped a copy that was needed, and left the VM interpreting
+* garbage: **opcount fell from 184 to 15 and the ablation "measured" 2.076 ms/cycle -- a 98.7%
+* saving that was really a VM that had stopped working.**
+* ★★★ Storing type+1 makes a zeroed slot unmatchable, because a real type+1 is always >= 1.
+* ★★ THE NUMBER WAS CAUGHT BY opcount, NOT BY THE TIMING. The timing looked spectacular and
+* plausible; only the instruction count showed the run was not doing the work [L-37 -- instrument
+* something that can contradict you].
+                ifdef   ABL_NOCOPY
+abl_type        fcb     0
+abl_idx         fcb     0
+abl_memo        fcb     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     ; 2 * RES_MAXDEPTH, ZEROED
+                endc
+* ★★★ A SECOND ABLATION LEVEL. ABL_NOCOPY skips the byte-moving loop but still pays res_find's
+* DIR lookup and res_ptr's block mapping on every fetch. ABL_NOFETCH skips the WHOLE fetch on a
+* repeat, so the difference between the two levels isolates that per-fetch overhead -- which is
+* exactly the term AD-83's 1,022-cycles-per-call coefficient was carrying.
+* ★ Needs res_len remembered as well, since res_open uses it to push the arena.
+                ifdef   ABL_NOFETCH
+abn_type        fcb     0
+abn_idx         fcb     0
+abn_memo        fcb     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     ; (type+1, idx) per depth
+abn_lens        fcb     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     ; res_len per depth
+                endc
 res_ceil        fdb     RES_ARENA_END   ; the byte res_fetch must not write at or past
 
 RES_E_EMPTY     equ     1               ; the DIR slot is FF FF FF
@@ -310,6 +337,61 @@ rf_ok:          rts
 * the volume file and is NOT in the mapped window.
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 res_fetch:
+                ifdef   ABL_NOCOPY
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★ -DABL_NOCOPY: AN ABLATION, NOT A CHANGE. MEASUREMENT ONLY, NEVER SHIPPED.
+*
+* AC-4 needs the resource copy's cost by ABLATION rather than by coefficient [L-43], and in a
+* VM you normally cannot remove real work without diverging control flow -- deleting the copy
+* leaves garbage bytecode and the dispatch then runs a different program.
+*
+* ★★★ AC-3 IS WHAT MAKES THIS ONE LEGITIMATE. Suppressing the re-fetch in the REFERENCE and
+* diffing against the unsuppressed reference gave byte-identical 288-byte state on all 300
+* cycles of six titles. **So skipping a REPEAT fetch cannot change what executes**, and this
+* ablation removes only the byte-moving loop while every piece of bookkeeping -- res_open's
+* push, res_len, res_marks, res_depth, res_close's pop -- runs exactly as before.
+*
+* ★★ Keyed by DEPTH because the arena is a stack: the same cycle invokes the same logics in the
+* same order, so each depth sees the same (type, index) and the same destination address every
+* cycle. That is the 99.7% redundancy AC-2 measured, and it is what this skips.
+* ★ A first fetch at any depth still copies, so the arena is never read uninitialised.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+                sta     abl_type
+                stb     abl_idx
+                endc
+                ifdef   ABL_NOFETCH
+* ★★ SKIP THE ENTIRE FETCH on a repeat -- lookup, block mapping and copy. res_len is restored
+* from the memo so res_open's arena push is identical to the unablated build.
+                sta     abn_type
+                stb     abn_idx
+                pshs    a,b,x
+                ldb     res_depth
+                lslb
+                ldx     #abn_memo
+                abx
+                lda     abn_type
+                inca
+                cmpa    ,x
+                bne     abn_miss
+                lda     abn_idx
+                cmpa    1,x
+                bne     abn_miss
+                ldb     res_depth
+                lslb
+                ldx     #abn_lens
+                abx
+                ldd     ,x
+                std     res_len
+                puls    a,b,x
+                clr     res_err
+                rts                             ; ★ ABLATED: no lookup, no mapping, no copy
+abn_miss:       lda     abn_type
+                inca
+                sta     ,x
+                lda     abn_idx
+                sta     1,x
+                puls    a,b,x
+                endc
                 jsr     res_find
                 lda     res_err
                 lbne    rfe_out
@@ -348,6 +430,39 @@ res_fetch:
                 inc     res_offhi               ; the offset is 20 bits; carry into the high part
 rfe_nocarry:
 
+                ifdef   ABL_NOFETCH
+* ★ record the length for this depth, now that res_find has produced it, so a later repeat can
+* restore it without re-reading the header.
+                pshs    a,b,x
+                ldb     res_depth
+                lslb
+                ldx     #abn_lens
+                abx
+                ldd     res_len
+                std     ,x
+                puls    a,b,x
+                endc
+                ifdef   ABL_NOCOPY
+* ★ memo slot for this depth: 2 bytes, (type, index). Hit -> the arena already holds these
+* exact bytes from the previous fetch at this depth, so the copy is redundant work.
+                ldb     res_depth
+                lslb
+                ldx     #abl_memo
+                abx
+* ★ type+1, so a zeroed slot (never fetched at this depth) cannot match -- see the storage note.
+                lda     abl_type
+                inca
+                cmpa    ,x
+                bne     abl_miss
+                lda     abl_idx
+                cmpa    1,x
+                beq     rfe_done                ; ★ ABLATED: skip the byte-moving loop entirely
+abl_miss:       lda     abl_type
+                inca
+                sta     ,x
+                lda     abl_idx
+                sta     1,x
+                endc
                 ldu     res_dest                ; ★ the CALLER chooses where bytes land
                 ldd     res_len
                 std     res_cnt                 ; bytes still to copy

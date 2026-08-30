@@ -15,16 +15,23 @@
 #   VM_NOCOUNT   -- the interpreter's own opcode/test counters. Removing a counter cannot
 #                   change a branch. Safe.
 #   VM_PACEONLY  -- interpret_cycle is never called; measures the harness + pacing FLOOR.
-# ★★★ The resource copy is deliberately NOT ablated: skipping it leaves stale bytes in the
-# arena and the dispatch then runs different opcodes, which is a different program rather than
-# the same program with a part removed. **Its share is estimated from an independently measured
-# coefficient instead, and reported as a second method rather than as an ablation** [L-61].
+#   ABL_NOCOPY   -- the resource copy's byte-moving loop, skipped on a REPEAT fetch only.
+#
+# ★★★★ T-P0-033 SAID THE COPY COULD NOT BE HONESTLY ABLATED AND T-P0-035 MADE IT POSSIBLE.
+# The objection was real: deleting the copy leaves stale bytes and the dispatch then executes a
+# different program, so the measurement would not be "the same program minus a part" [L-43].
+# ★★★ AC-3 removed the objection by experiment rather than by argument -- suppressing the
+# re-fetch in the REFERENCE and diffing against the unsuppressed reference gave byte-identical
+# 288-byte state on all 300 cycles across six titles [L-58]. **A repeat fetch cannot change what
+# executes, so skipping one is a true ablation.** 99.7% of copied bytes are repeats.
+# ★★ ABL_NOCOPY therefore skips ONLY repeats, keyed by arena depth, and leaves every piece of
+# bookkeeping intact. It is a measurement build and is never shipped.
 $ErrorActionPreference = "Stop"
 Set-Location C:\Projects\coco_agi
 
 $TITLE  = if ($env:ABL_TITLE)  { $env:ABL_TITLE }  else { "Kingquest1" }
 $TIMED  = if ($env:ABL_TIMED)  { $env:ABL_TIMED }  else { "200" }
-$VARIANTS = @("baseline", "VM_NOCOUNT", "VM_PACEONLY")
+$VARIANTS = @("baseline", "VM_NOCOUNT", "VM_PACEONLY", "ABL_NOCOPY", "ABL_NOFETCH")
 
 $WANT = @("res_volbase","res_slicebase","res_curblk","vm_icguard","res_depth","res_top",
           "vm_code","vm_codelen","vm_ip","vm_curlogic")
