@@ -68,7 +68,20 @@ FB_BASE         equ     $8000           ; GFX_DB_WINDOW
 * HAL_gfx_set_mode CLEARS it, so anything staged up there is destroyed before the first opcode
 * is read. The gap between the code (~$1125) and the priority plane ($1700) is the only space
 * that is neither cleared nor overwritten, so both live there.
+* ★★★★ PACKING PAYS FOR ITS OWN CODE GROWTH, IN THIS PROBE'S MAP.
+* The packed priority plane is 13,440 B, not 26,880, so it ends at $4B80 instead of $8000 --
+* **freeing 13,440 bytes between $4B80 and the framebuffer window.** The packed span walk grows
+* the code past $1200, so PIC_DATA moves into that freed space and the code region becomes
+* $0800..$1700 instead of $0800..$1200.
+* ★★ This is the GATE PROBE's layout, not the shipped map -- it exists so 45 pictures can be
+* poked and compared, and it is free to differ. The shipped figure is p3b_probe.s's assertion.
+* ★ Stated because "the code got bigger so I moved a buffer" is exactly the kind of change that
+* silently invalidates a gate if the buffer lands somewhere the plane clears.
+                ifdef   PRI_PACKED
+PIC_DATA        equ     $5000           ; ★ in the space the packed plane vacated ($4B80..$8000)
+                else
 PIC_DATA        equ     $1200           ; picture resource, poked in by the MAME side.
+                endc
                                         ;   $1200..$16EF = 1,264 B; picture 80 is 211 B.
 * ★★ STATUS MOVED TO LOW RAM (T-P0-012). It was at $16F0, inside the PIC_DATA window, which
 * capped a resource at 1,264 bytes; the gated set's largest is 1,254 and 31 of 45 exceed 1 KB.

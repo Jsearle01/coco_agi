@@ -30,8 +30,15 @@ local PLANES = os.getenv("PIC_PLANES") ~= "0"   -- "0" = timing only, skip the 5
 -- ★ P3.13: moved down 256 B with the assembly origin, to keep the code clear of
 -- PIC_DATA after the counted build grew past it. LOAD and the .s org must agree.
 local LOAD     = 0x0700
-local PIC_DATA = 0x1200
-local PIC_MAX  = 0x1700 - PIC_DATA              -- 1280 bytes
+-- ★★★★ PIC_DATA MOVES WITH THE PACKED BUILD AND THE TWO MUST AGREE.
+-- Packing the priority plane frees $4B80..$8000 in pic_probe's map, and the packed span walk
+-- grows the code past $1200, so pic_probe.s relocates PIC_DATA to $5000. **If this side keeps
+-- poking $1200 the picture lands inside the code and the gate reports a rendering failure for
+-- a staging bug** -- the P3.13 shape exactly, which is why pic_probe.s carries an assembly-time
+-- assertion for it and why this constant is guarded rather than assumed.
+local PACKED_PIC = os.getenv("PIC_PACKED") ~= nil
+local PIC_DATA = PACKED_PIC and 0x5000 or 0x1200
+local PIC_MAX  = PACKED_PIC and (0x8000 - 0x5000) or (0x1700 - PIC_DATA)
 local PRI_BASE = 0x1700
 local FB_BASE  = 0x8000
 local STATUS   = 0x0080                         -- moved out of the PIC_DATA window

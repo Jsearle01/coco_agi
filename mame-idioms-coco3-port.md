@@ -2361,6 +2361,27 @@ matches (CLAUDE.md §2H check 1). `hal.inc` labelled `HAL_gfx_present` *"a stub"
 `[no-ref:]` marker on its VOFFSET derivation — visible without running anything. *Candidates:*
 `the-verification-path-and-the-consumer-path-must-be-the-same-path`.
 
+### 19j-bis. The SAME probe built `-DPIC_PRESENT` produces MEANINGLESS framebuffer dumps — read back BEFORE the flip or not at all
+★★★★ **19j says a byte-identical buffer proves nothing about the screen. This is the converse and it
+bites in the other direction: with the flip enabled, the buffer READBACK stops being valid.**
+
+`-DPIC_PRESENT` calls `HAL_gfx_swap` at the end of each picture. The swap remaps the framebuffer
+window, so the sweep's `finish()` — which reads 26,880 bytes at CPU `$8000` — is reading the **back
+buffer**, not the page just drawn. ★★ **Symptom, and it is a clean one: every `.fb.bin` from a
+PRESENT build is byte-identical to every other**, because they are all the same untouched page. In
+T-P0-034 three different rooms (fills 33/6/30, spans 1249/534/1066, px 28075/28425/28710 — provably
+three different renders) produced three identical dumps hashing `010928b46bb6`.
+
+★★★ **The rule: the GATE build (no `PIC_PRESENT`) owns the buffer dumps; the PRESENT build owns the
+PNGs.** Never compare a PRESENT build's `.fb.bin` to anything — not to the oracle, not to a gate
+build, not to each other. ★ The two builds answer different questions and only one of them can
+answer each.
+
+★★ **Why this is easy to miss:** the run log looks perfect. Three pictures rendered, three distinct
+counter sets, three snapshots taken, three PNGs of different sizes. **Only the dump hashes
+disagree**, and nothing compares them unless you go looking. *Candidate:*
+`a-flip-invalidates-the-readback-that-shares-its-window`.
+
 ### 19k. `-snapview` defaults to `native` = SQUARE pixels — every snapshot is aspect-wrong until you fix it
 **Three captures were handed to the operator stretched 2x horizontally before he said so.** MAME's
 `-snapview` documents `native` as *"per-screen pixel-aspect views"*: the raw framebuffer, square

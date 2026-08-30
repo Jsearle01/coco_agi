@@ -60,13 +60,18 @@ MAP_DIRS_END    equ     $2000           ;   4 types x 1 KB = 4,096 B
 
 * ── slots 1-2: engine code, always resident ──────────────────────────────────────
 MAP_CODE        equ     $2000
-MAP_CODE_END    equ     $5000           ; ★ 12,288 B, against vm_probe.bin's MEASURED 9,089
-* ★★★ RESERVED FOR THE PARSER AND SOUND, WHICH ARE NOT BUILT. Named here so the map does not
-* have to move when they arrive [T-P0-031 AC-3]. 4 KB is not a guess dressed as a measurement:
-* it is what is left in slot 2 once the code region is sized, and it is stated as an
-* allocation to be CHECKED against the parser and sound when they exist, not as a prediction.
-MAP_RESERVED    equ     $5000
-MAP_RESERVED_END equ    $6000           ; 4,096 B, parser + sound
+* ★★★★ BOUNDARY MOVED $5000 -> $5100 BY T-P0-034, AND THE REASON IS RECORDED BECAUSE IT COSTS
+* THE PARSER/SOUND RESERVATION 256 BYTES. The packed span walk (pic_fill.s's FC_PRIORITY loop)
+* made the P3b image **12,299 bytes against a 12,288 region -- over by ELEVEN.** One page moves
+* it: code 12,544 with 245 spare, reservation 4,096 -> 3,840.
+* ★★★ P6.1 §7.4 flagged the 4 KB as "a residual, not a requirement... to be CHECKED against the
+* parser and sound when they exist", so spending 256 of it is sanctioned rather than silent --
+* **but it is a reservation AC-3 required, and shrinking one is exactly the kind of change that
+* should never happen inside another task's diff without being said out loud.**
+* ★ Both slots stay in slot 2; the PHASE total is unchanged, so AC-2's fit figure does not move.
+MAP_CODE_END    equ     $5100           ; 12,544 B; packed P3b measures 12,299
+MAP_RESERVED    equ     $5100
+MAP_RESERVED_END equ    $6000           ; 3,840 B, parser + sound
 
 * ── slots 3-4: the residency arena's WINDOW ──────────────────────────────────────
 * ★★★★ SIXTEEN KB, AND THE SIZE IS FORCED BY A MEASUREMENT, NOT CHOSEN. The largest single

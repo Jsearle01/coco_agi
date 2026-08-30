@@ -83,13 +83,30 @@ FC_NEVER        equ     2               ; always false        (the rest)
 * GEOMETRY is load-bearing for the fill's two central optimisations, and neither survives.
 * ★ [L-64 again: a divergence described by its cost concealed what it actually required.]
 *
-* ★★★ Reported rather than worked around, per §9 trigger 1. Building the renderer packed would
-* silently mis-render priority-only pictures (9 of the gated 45), so it fails here instead.
-                ifdef   PRI_PACKED
-                ifndef  PRI_PACKED_FILL_KNOWN_INCOMPLETE
-                error   "pic_fill.s: -DPRI_PACKED needs the span walk restructured (byte-pointer -> nibble walk). See the block above; this is T-P0-033 §9 trigger 1. -DPRI_PACKED_FILL_KNOWN_INCOMPLETE to build the partial for measurement."
-                endc
-                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★ T-P0-034 RESOLVES BOTH, AND THE OPTION IS (b): PRIORITY PACKED, VISUAL LEFT ALONE.
+*
+* ★★★ THE VISUAL PLANE IS NOT "UNPACKED" -- IT IS THE FRAMEBUFFER. Mode 2 is 4 bpp and AGI is
+* 160 wide against the CoCo3's 320, so one AGI pixel is exactly one byte with the colour in
+* both nibbles, and 160 B/row IS mode 2's stride [pic_probe.s]. **Packing it would mean 80
+* B/row = 160 CoCo3 pixels: a horizontal RESOLUTION HALVING, not a packing.** So §4's option
+* (a) does not exist at this resolution, and (b) is not a preference -- it is the only option.
+* ★ Arithmetic: flat/flat 72,826 OVER by 7,546; (b) 59,386 FITS with 5,894 spare.
+*
+* ★★★★ AND (b) PRESERVES THE INNER LOOP FOR 70.3% OF CALLS, WHICH IS THE WHOLE POINT.
+* fc_pbase selects the TEST plane ONCE PER SPAN: FB_BASE for FC_VISUAL (70.3%), PRI_BASE for
+* FC_PRIORITY (6.4%), and FC_NEVER (the rest) reads no plane at all. **Under (b) the visual
+* plane is still flat, so the FC_VISUAL byte-pointer walk is untouched byte for byte.** Only
+* the 6.4% priority walk becomes a nibble walk, and it gets its own loop below.
+*
+* ★★★ WHY A SEPARATE LOOP AND NOT A BRANCH IN THE SHARED ONE. A per-pixel `lda fc_case / cmpa
+* / bne` on the shared path is ~10 cycles x 1,188,430 written pixels = 11.9M cycles = **6.6 s**,
+* which is worse than the entire pre-P3.3 render. The branch is taken ONCE PER SPAN instead.
+* ★★ The duplicated loop costs ~250 bytes of code and, at 6.4% of 3,666,862 tests ACROSS ALL 45
+* PICTURES, about 0.5% of render time. **Per-picture and total are different units and mixing
+* them is how this nearly became a redesign** -- 235k extra tests is 0.66 s across the whole
+* corpus, not per room.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 
 * ★ Offset from a VISUAL-plane pointer to the same pixel's PRIORITY byte. Constant, so the
@@ -214,6 +231,45 @@ fc_notvis:      cmpa    #FC_PRIORITY
                 lda     fc_y
                 cmpa    #PIC_H
                 bhs     fc_no
+* ★★★★ THE EIGHTH SITE, AND IT IS THE SEED TEST -- REACHED BEFORE ANY SPAN WALK.
+* fill_check is called once per popped seed, from ff_pop_lp, BEFORE the row base is formed and
+* before ffp_entry sets the nibble selectors. So it cannot use fc_mask/fc_match: it computes
+* its own address and must select its own nibble.
+* ★★★ T-P0-033 enumerated six sites, then found a seventh (pri_clear) by the shape of its
+* failure. **This is the eighth**, and it is the one a span-walk-focused reading misses because
+* it is not in the walk at all -- it is the gate that decides whether a walk happens.
+                ifdef   PRI_PACKED
+* ★★ THE FULL 16 BITS OF THE MUL ARE NEEDED: y*80 reaches 13,360 at y=167, so saving only B
+* loses the high byte. `pshs d` / `addd ,s++`, not `pshs b` / `addb ,s+`.
+                ldb     #PIC_W/2
+                mul                             ; D = y * 80
+                pshs    d
+                lda     fc_x
+                lsra
+                tfr     a,b
+                clra                            ; D = x >> 1  (UNSIGNED, L-40)
+                addd    ,s++                    ; D = y*80 + (x>>1)
+                addd    #PRI_BASE
+                tfr     d,x
+                ifndef  PIC_NOCOUNT
+                inc     PATH_P+1
+                bne     fc_pp
+                inc     PATH_P
+fc_pp:          endc
+                lda     ,x
+                ldb     fc_x
+                bitb    #1
+                bne     fc_pk_lo
+                lsra
+                lsra
+                lsra
+                lsra                            ; even x -> high nibble
+                bra     fc_pk_got
+fc_pk_lo:       anda    #$0F
+fc_pk_got:
+                cmpa    #4
+                beq     fc_yes
+                else
                 ldb     #PIC_W
                 mul
                 addb    fc_x
@@ -228,6 +284,7 @@ fc_pp:          endc
                 lda     ,x
                 cmpa    #4
                 beq     fc_yes
+                endc
 fc_no:          andcc   #$FB                    ; Z clear = do not fill
                 rts
 fc_yes:         orcc    #$04                    ; Z set = fill
@@ -361,6 +418,13 @@ ffr_setdn:      sta     ff_dnok
 * --- scan LEFT to the border ------------------------------------
 * ★ The row is invariant here too, so the left walk is a pointer decrement rather than a MUL
 * per step. The pixel at fc_x is already known fillable (the pop test passed).
+* ★★★★ THE ONLY COST THE VISUAL PATH PAYS FOR PACKING: three instructions, ONCE PER SPAN.
+* Everything below this branch is byte-identical to the unpacked build.
+                ifdef   PRI_PACKED
+                lda     fc_case
+                cmpa    #FC_PRIORITY
+                lbeq    ffp_entry
+                endc
                 ldx     ff_row
                 ldb     fc_x
                 abx                             ; X = &row[fc_x]
@@ -476,6 +540,192 @@ ff_advance:
                 cmpa    #PIC_W
                 lblo    ff_right
                 lbra    ff_flush
+
+                ifdef   PRI_PACKED
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★ THE PACKED-PRIORITY SPAN WALK -- FC_PRIORITY ONLY, 6.4% OF CALLS.
+*
+* ★★★ IT IS STILL A BYTE-POINTER WALK. The three pointers stay, the three LEAs stay, and the
+* three-instruction test `lda ,x / anda fc_mask / cmpa fc_match` is UNCHANGED. Two things
+* differ, and only two:
+*   1. the pointers advance every OTHER pixel  -- conditional on the parity of fc_x
+*   2. fc_mask / fc_match select the NIBBLE    -- toggled on each advance
+*
+* ★★★★ THE MASK/MATCH MECHANISM IS WHY THIS IS CHEAP AND IT WAS ALREADY IN THE TREE. fc_mask
+* exists because the VISUAL plane's nibbles are equal by construction ($0F) while priority was
+* $FF. Packing just makes the pair parity-dependent:
+*       EVEN x -> HIGH nibble -> mask $F0, match (v<<4)
+*       ODD  x -> LOW  nibble -> mask $0F, match v
+* ★★ Both toggle by XOR: mask ^ $FF, match ^ (v*17). `fc_mtog` holds v*17, computed once per
+* fill. **So the per-pixel test costs exactly what it always did.**
+*
+* ★★★ THE PARITY RULES, DERIVED ONCE (this is where an off-by-one meets a `bmi` -- L-40, and
+* every quantity here is UNSIGNED):
+*   going LEFT  x -> x-1 : byte DECREMENTS iff the OLD x was EVEN
+*   going RIGHT x -> x+1 : byte INCREMENTS iff the OLD x was ODD
+* ★ Both follow from byte = x>>1, and they are NOT symmetric -- reading one off the other is
+* the mistake this comment exists to prevent.
+*
+* ★★ ff_runp is NOT maintained here. The unpacked flush writes through it; the packed flush
+* calls ff_store_pri, which recomputes from (ff_runx, fc_y, ff_runn) because PRI_DELTA cannot
+* exist between planes of different geometry. ff_runx is still the span's starting x.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+ffp_entry:
+* ── set the nibble selectors for the CURRENT parity, and the toggle constant ──
+                lda     #4                      ; FC_PRIORITY's match value: priority == 4
+                sta     fc_mtog
+                asla
+                asla
+                asla
+                asla
+                ora     fc_mtog
+                sta     fc_mtog                 ; v*17 = $44
+                jsr     ffp_setsel
+* ── X = &row[fc_x >> 1], byte pointer ──
+                lda     fc_x
+                lsra
+                tfr     a,b
+                clra
+                addd    ff_row
+                tfr     d,x
+
+ffp_left:       lda     fc_x
+                beq     ffp_span                ; x == 0, cannot go further
+* ★ decrement the byte pointer BEFORE the parity flips, using the OLD x's parity
+                bita    #1
+                bne     ffp_l_same              ; old x odd -> x-1 is even, SAME byte
+                leax    -1,x
+ffp_l_same:     dec     fc_x
+                jsr     ffp_toggle
+                ifndef  PIC_NOCOUNT
+                jsr     fc_count
+                endc
+                lda     ,x
+                anda    fc_mask
+                cmpa    fc_match
+                beq     ffp_left
+* ── overshot by one: step back right, mirroring the rule above ──
+                lda     fc_x
+                bita    #1
+                beq     ffp_l_back              ; old x even -> x+1 is odd, SAME byte
+                leax    1,x
+ffp_l_back:     inc     fc_x
+                jsr     ffp_toggle
+
+ffp_span:
+                lda     #1
+                sta     ff_up
+                sta     ff_down
+                stx     ff_runp                 ; ★ unused by the packed flush; kept for parity
+                lda     fc_x
+                sta     ff_runx
+* ★ the row above and below, in PACKED stride
+                leau    -PIC_W/2,x
+                tfr     x,d
+                addd    #PIC_W/2
+                tfr     d,y
+
+ffp_right:
+                ifndef  PIC_NOCOUNT
+                jsr     fc_count
+                endc
+                lda     ,x
+                anda    fc_mask
+                cmpa    fc_match
+                lbne    ff_flush                ; span finished -- the SHARED flush
+
+* --- the row ABOVE ---
+                lda     ff_upok
+                beq     ffp_down_test
+                ifndef  PIC_NOCOUNT
+                jsr     fc_count
+                endc
+                lda     ,u
+                anda    fc_mask
+                cmpa    fc_match
+                bne     ffp_up_reset
+                lda     ff_up
+                beq     ffp_down_test
+                lda     fc_x
+                ldb     fc_y
+                decb
+                pshs    x,u,y
+                jsr     ff_push
+                puls    x,u,y
+                clr     ff_up
+                bra     ffp_down_test
+ffp_up_reset:   lda     #1
+                sta     ff_up
+
+* --- the row BELOW ---
+ffp_down_test:
+                lda     ff_dnok
+                beq     ffp_advance
+                ifndef  PIC_NOCOUNT
+                jsr     fc_count
+                endc
+                lda     ,y
+                anda    fc_mask
+                cmpa    fc_match
+                bne     ffp_down_reset
+                lda     ff_down
+                beq     ffp_advance
+                lda     fc_x
+                ldb     fc_y
+                incb
+                pshs    x,u,y
+                jsr     ff_push
+                puls    x,u,y
+                clr     ff_down
+                bra     ffp_advance
+ffp_down_reset: lda     #1
+                sta     ff_down
+
+ffp_advance:
+* ★ advance the byte pointers only when leaving an ODD pixel
+                lda     fc_x
+                bita    #1
+                beq     ffp_a_same
+                leax    1,x
+                leau    1,u
+                leay    1,y
+ffp_a_same:     inc     fc_x
+                jsr     ffp_toggle
+                lda     fc_x
+                cmpa    #PIC_W
+                lblo    ffp_right
+                lbra    ff_flush
+
+* ── ffp_setsel — set fc_mask / fc_match from fc_x's parity, absolutely ──────────
+* ★ Used at span entry. The steady state uses ffp_toggle, which is cheaper; this exists so the
+* entry does not have to know which state it is toggling FROM.
+ffp_setsel:
+                lda     fc_x
+                bita    #1
+                bne     ffp_ss_lo
+                lda     #$F0
+                sta     fc_mask
+                lda     #4*16
+                sta     fc_match
+                rts
+ffp_ss_lo:      lda     #$0F
+                sta     fc_mask
+                lda     #4
+                sta     fc_match
+                rts
+
+* ── ffp_toggle — flip both selectors to the other nibble ────────────────────────
+ffp_toggle:
+                lda     fc_mask
+                eora    #$FF
+                sta     fc_mask
+                lda     fc_match
+                eora    fc_mtog
+                sta     fc_match
+                rts
+
+fc_mtog         fcb     0               ; match toggle = matchvalue * 17
+                endc
 
 * ── ff_flush — write the span's run, now that it is complete ──────
 * ★ run length = fc_x - ff_runx. Correct at BOTH exits: the test-failed exit leaves fc_x on the
