@@ -69,9 +69,19 @@ MAP_CODE        equ     $2000
 * **but it is a reservation AC-3 required, and shrinking one is exactly the kind of change that
 * should never happen inside another task's diff without being said out loud.**
 * ★ Both slots stay in slot 2; the PHASE total is unchanged, so AC-2's fit figure does not move.
-MAP_CODE_END    equ     $5100           ; 12,544 B; packed P3b measures 12,299
-MAP_RESERVED    equ     $5100
-MAP_RESERVED_END equ    $6000           ; 3,840 B, parser + sound
+* ★★★★ SECOND REDUCTION IN THREE TASKS, AND THE TREND IS THE FINDING RATHER THAN THIS BYTE COUNT.
+*     P6.1      reserved 4,096 for parser + sound
+*     T-P0-034  packed span walk      -> $5100, reservation 3,840   (-256)
+*     T-P0-036  LOGIC cache, +352 B   -> $5200, reservation 3,584   (-256)
+* ★★★ Each step was individually small, individually justified, and made by a task that was not
+* about the parser. **Nothing in the map objects to this happening again**, and the reservation
+* has now lost 12.5% without the parser existing to argue for itself.
+* ★★ P6.1 §7.4 called the 4 KB "a residual, not a requirement... to be CHECKED against the parser
+* and sound when they exist" -- which sanctions the spending and is exactly why the trend needs
+* a reader, not just a changelog line.
+MAP_CODE_END    equ     $5200           ; 12,800 B; packed P3b measures 12,651
+MAP_RESERVED    equ     $5200
+MAP_RESERVED_END equ    $6000           ; 3,584 B, parser + sound
 
 * ── slots 3-4: the residency arena's WINDOW ──────────────────────────────────────
 * ★★★★ SIXTEEN KB, AND THE SIZE IS FORCED BY A MEASUREMENT, NOT CHOSEN. The largest single

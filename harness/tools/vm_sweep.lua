@@ -208,6 +208,16 @@ _G._n = emu.add_machine_frame_notifier(function()
         if prog:read_u8(GO) ~= 0 then return end     -- still free-running
         local dt = m.time:as_double() - timed_t0
         local cycles = TIMED + 1                     -- the released paced cycle counts too
+        -- ★★ THE LOGIC CACHE'S OWN COUNTERS, read from the run that was just timed. A timing
+        -- improvement is not evidence that the cache is what improved it; the hit rate is.
+        -- ★ Absent from the symbol file on a pre-cache build, so this stays silent there.
+        if SYM.res_chits and SYM.res_cmiss then
+            local function rd16(a) return prog:read_u8(a) * 256 + prog:read_u8(a + 1) end
+            local h, ms = rd16(SYM.res_chits), rd16(SYM.res_cmiss)
+            local tot = h + ms
+            w("    cache: hits %d  misses %d  hit-rate %.1f%%", h, ms,
+              tot > 0 and (100.0 * h / tot) or 0)
+        end
         w("AC-7 free-run: %d cycles in %.6f emulated s", cycles, dt)
         w("    %.3f ms/cycle   %.0f CPU cycles/VM cycle @ 1.7898 MHz   %.1f VM cycles/s",
           1000 * dt / cycles, 1789772.0 * dt / cycles, cycles / dt)

@@ -352,6 +352,14 @@ vm_cv_out:      rts
 * ═══════════════════════════════════════════════════════════════════════════════════
 vm_new_room:
                 sta     vm_roomnr
+* ★★★ THE CACHE'S ONLY INVALIDATION POINT. The reference never invalidates `_logic_cache` --
+* new_room clears the `loaded_*` residency SETS, which are a different thing. We clear here to
+* keep the cache inside a 24 KB arena, and AD-88 measured that choice as behaviourally free:
+* reference clearing-on-new_room vs never-clearing is byte-identical over 300 cycles on three
+* titles. ★ Placed FIRST so nothing below can allocate before the reset.
+                pshs    a
+                jsr     res_cache_reset
+                puls    a
                 ldx     #VM_OBJ
                 ldb     #VM_OBJ_MAX
 vm_nr_lp:       pshs    b

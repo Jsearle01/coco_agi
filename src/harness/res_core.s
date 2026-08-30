@@ -111,6 +111,57 @@ abn_lens        fcb     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     ; res_len per depth
                 endc
 res_ceil        fdb     RES_ARENA_END   ; the byte res_fetch must not write at or past
 
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★ THE LOGIC CACHE. The reference has always had one; the port did not, and paid per
+* INVOCATION what the reference pays per GAME [L-66].
+*
+* ★★★ MEASURED [AD-87]: 3.01 LOGIC invocations per cycle on KQ1, 13,715 bytes copied per cycle,
+* **3 distinct LOGICs totalling 13,669 B -- 99.7% of the copying was the same bytes again**,
+* uniform across six titles.
+*
+* ★★★★ KEYED ON THE LOGIC INDEX, NOT ON ARENA DEPTH, AND THAT IS A MEASUREMENT.
+* AD-86's ablation was depth-keyed -- "is the resource at THIS depth already the one I want?" --
+* because the arena is already a stack indexed by depth and it was nearly free. Simulating both
+* keyings against the corpus:
+*       KQ1  depth-keyed 33.0% hit   index-keyed 99.7%      (misses 605 vs 3)
+*       KQ3  depth-keyed 99.0%       index-keyed 99.3%      (misses   6 vs 4)
+*       SQ1  depth-keyed 98.7%       index-keyed 99.3%      (misses   8 vs 4)
+* ★★ KQ1 alternates two logics at one depth, so depth-keying collapses there. **The ablation's
+* 37.5% was therefore a FLOOR measured on the worst case for its own keying**, not the copy's
+* full share. Index keying is what the reference does and what the corpus wants.
+*
+* ★★★★ THE INVALIDATION POLICY, MEASURED NOT ARGUED.
+* cycle.py fills `_logic_cache` on miss and there is NO del, pop or clear anywhere in agivm --
+* the reference NEVER invalidates. Not even on new_room, which clears the `loaded_*` residency
+* SETS: a different concept, being AGI's declared residency and queryable by the game.
+* ★★★ But "never" is an OPTIMUM, not a requirement. Two experiments, both entirely in the
+* reference with no assembly in either [L-58]:
+*       re-load every call vs cached        -> byte-identical, 300 cycles, six titles
+*       clear on new_room  vs never-clear   -> byte-identical, 300 cycles, three titles
+* **So invalidation is a MEMORY/TIME choice and cannot be a correctness one.**
+* ★★ The port clears on new.room, which the reference does not. Safe for the measured reason
+* above, and necessary for a bounded arena: the reference's cache is an unbounded Python dict,
+* ours is 24 KB, and T-P0-031 measured KQ1's 40-room working set at 85,852 B. One room's set is
+* 13,669 B and captures the whole 99.7%, because the redundancy is the same few logics
+* recurring WITHIN a room.
+*
+* ★★★ HOW IT LIVES IN THE EXISTING ALLOCATOR, WITHOUT A SECOND ONE.
+* res_marks[depth] records the res_top to restore on close. A cached frame simply records the
+* res_top it wants to KEEP:
+*       HIT  -> nothing is fetched; mark = res_top unchanged, so the pop is a no-op
+*       MISS -> fetch at res_top as usual, advance res_top, then mark = the NEW res_top
+* **So res_close is untouched and there is no second allocator.** The only change is which value
+* the mark records for a LOGIC frame.
+RES_CACHE_MAX   equ     8               ; measured distinct LOGICs in use is 3-4
+res_cn          fcb     0               ; entries live
+res_ckey        rmb     RES_CACHE_MAX           ; LOGIC index
+res_caddr       rmb     2*RES_CACHE_MAX         ; where its bytes are
+res_clen        rmb     2*RES_CACHE_MAX         ; how many
+res_ccur        fdb     RES_ARENA_END   ; cache allocation pointer, grows DOWN
+res_chits       fdb     0               ; ★ AC-5 evidence the cache is actually hitting
+res_cmiss       fdb     0
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+
 RES_E_EMPTY     equ     1               ; the DIR slot is FF FF FF
 RES_E_SIG       equ     2               ; the record's signature was not 0x1234
 RES_E_RANGE     equ     3               ; the resource is outside the staged slice
@@ -151,16 +202,95 @@ res_open:
                 sta     res_err
                 rts
 ro_room:
+* ★★★ CACHE LOOKUP -- LOGIC only. See the policy block above res_cn.
+                lda     ,s                      ; type, without disturbing the saved pair
+                cmpa    #RES_LOGIC
+                bne     ro_fetch
+                ldb     1,s                     ; index
+                jsr     res_cache_find
+                bne     ro_fetch                ; miss -> the ordinary fetch path
+* ── HIT: X = slot. Publish its address and length; nothing is fetched, nothing copied ──
+                pshs    x
+                tfr     x,d
+                lslb
+                ldx     #res_caddr
+                abx
+                ldd     ,x
+                std     res_base
+                std     res_dest
+                puls    x
+                tfr     x,d
+                lslb
+                ldx     #res_clen
+                abx
+                ldd     ,x
+                std     res_len
+                ldd     res_chits
+                addd    #1
+                std     res_chits
+                leas    2,s                     ; drop the saved a,b
+* ★ mark = res_top UNCHANGED, so res_close's pop restores the same value: a no-op frame.
+                ldb     res_depth
+                lslb
+                ldx     #res_marks
+                abx
+                ldd     res_top
+                std     ,x
+                inc     res_depth
+                clr     res_err
+                rts
+
+ro_fetch:
                 ldd     res_top
                 std     res_dest
                 std     res_base
-                ldd     #RES_ARENA_END
+* ★★ THE STACK'S CEILING IS THE CACHE'S FLOOR, not the arena's end. The two allocators grow
+* toward each other and this is the line that keeps them apart -- without it the stack would
+* fetch straight over cached bytes and the failure would look like a state divergence.
+                ldd     res_ccur
                 std     res_ceil
                 puls    a,b
+                pshs    a,b                     ; ★ kept: a LOGIC miss records the index below
                 jsr     res_fetch               ; refuses if it will not fit above res_top
                 lda     res_err
-                bne     ro_fail                 ; ★ no push on failure: depth is unchanged
+                bne     ro_fail_pop             ; ★ no push on failure: depth is unchanged
 
+* ★★★★ A LOGIC MISS RELOCATES ITS BYTES INTO THE CACHE REGION, AND THE FIRST DESIGN DID NOT.
+*
+* The first attempt kept the fetch where it landed and advanced res_top permanently, recording
+* the NEW top as the mark so res_close would not reclaim it. **That is wrong whenever a
+* TRANSIENT frame is open below it.** A VIEW opens at res_top; a LOGIC miss inside it allocates
+* above the VIEW and pins res_top there; the VIEW then closes and pops res_top back BELOW the
+* cached logic -- whose memory is now above the stack pointer and is overwritten by the next
+* transient allocation.
+* ★★★ THE SYMPTOM NAMED THE CAUSE. KQ1 and PoliceQuest1 passed; KQ2, KQ3, SQ1, SQ2, larry1 and
+* the rest failed -- and the passing pair copy **24 and 394 VIEW bytes per cycle** against the
+* failing set's **4,273-7,510** [AD-87's table]. The split was exactly VIEW traffic.
+*
+* ★★ SO THE TWO ALLOCATORS ARE SEPARATED: the stack grows UP from RES_ARENA, the cache grows
+* DOWN from RES_ARENA_END, and they cannot interleave. res_ceil keeps the stack below res_ccur.
+* ★ The fetch still lands on the stack (that is where the length is discovered) and is then
+* relocated down. **One extra copy per MISS** -- 3-4 per room, against the 3 per CYCLE this
+* whole change removes.
+                lda     ,s
+                cmpa    #RES_LOGIC
+                bne     ro_push_transient
+                ldb     1,s
+                leas    2,s
+                jsr     res_cache_stash         ; relocate + record; leaves res_base pointing at it
+ro_push_after_stash:
+                ldb     res_depth
+                lslb
+                ldx     #res_marks
+                abx
+                ldd     res_top                 ; ★ the OLD top: the fetch's scratch is reclaimed
+                std     ,x
+                inc     res_depth
+                clr     res_err
+                rts
+
+ro_push_transient:
+                leas    2,s
 * push the mark: res_marks[depth] = old res_top, then bump
                 ldb     res_depth
                 lslb
@@ -175,6 +305,9 @@ ro_room:
                 clr     res_err
                 rts
 
+ro_fail_pop:    leas    2,s
+                bra     ro_fail
+
 * ★ RES_E_BIG at depth 0 means the resource does not fit the arena AT ALL; above depth 0 it
 * means the levels already held left too little. They are different facts and AC-5 wants both.
 ro_fail:        cmpa    #RES_E_BIG
@@ -187,6 +320,127 @@ ro_out:         rts
 
 * ★ close is the whole eviction policy: drop the level, and the bytes above it are free. No
 * scan, no timestamps, no victim choice.
+* ── res_cache_find — B = LOGIC index. Z SET and X = slot on a hit, Z clear on a miss ──
+* ★ Linear over at most RES_CACHE_MAX entries; the measured live set is 3-4, so the whole scan
+* is shorter than one iteration of the copy loop it replaces.
+res_cache_find:
+                pshs    a,b
+                lda     res_cn
+                beq     rcf_miss
+                ldx     #res_ckey
+                clrb
+rcf_lp:         lda     ,x+
+                cmpa    1,s                     ; the saved index
+                beq     rcf_hit
+                incb
+                cmpb    res_cn
+                blo     rcf_lp
+rcf_miss:       puls    a,b
+                andcc   #$FB                    ; Z clear = miss
+                rts
+rcf_hit:        clra
+                tfr     d,x                     ; X = slot number
+                puls    a,b
+                orcc    #$04                    ; Z set = hit
+                rts
+
+* ── res_cache_stash — B = LOGIC index. Relocate the just-fetched bytes into the cache ──
+* ★★ Fetched bytes are at res_base (on the stack) with res_len bytes. Move them DOWN to
+* res_ccur - res_len, record the entry, and repoint res_base. ★ If they will not fit, or the
+* table is full, this is a NO-OP: the resource is already correctly fetched and simply stays
+* uncached, so the next invocation re-copies. **A cache that fails closed degrades to the old
+* behaviour**, which is exactly what re-fetch being neutral [AD-87] buys.
+res_cache_stash:
+                pshs    a,b,x,y,u
+                lda     res_cn
+                cmpa    #RES_CACHE_MAX
+                bhs     rcs_out                 ; table full -- leave it uncached
+                ldd     res_ccur
+                subd    res_len
+                cmpd    res_top
+                blo     rcs_out                 ; ★ would collide with the stack -- UNSIGNED
+                std     res_ccur                ; commit the downward allocation
+                tfr     d,y                     ; Y = destination
+                ldu     res_base                ; U = source, on the stack
+                ldx     res_len
+                beq     rcs_done
+rcs_lp:         lda     ,u+
+                sta     ,y+
+                leax    -1,x
+                bne     rcs_lp
+rcs_done:
+                ldd     res_ccur
+                std     res_base                ; ★ callers now see the CACHED copy
+* ── record: key, address, length ──
+                ldx     #res_ckey
+                lda     res_cn
+                tfr     a,b
+                clra
+                leax    d,x
+                ldb     1,s                     ; ★ saved B: pshs a,b,x,y,u leaves S->A, S+1->B
+                stb     ,x
+                lda     res_cn
+                tfr     a,b
+                clra
+                lslb
+                ldx     #res_caddr
+                leax    d,x
+                ldd     res_ccur
+                std     ,x
+                lda     res_cn
+                tfr     a,b
+                clra
+                lslb
+                ldx     #res_clen
+                leax    d,x
+                ldd     res_len
+                std     ,x
+                inc     res_cn
+rcs_out:
+                ldd     res_cmiss
+                addd    #1
+                std     res_cmiss
+                puls    a,b,x,y,u
+                rts
+
+* ── res_cache_reset / res_cache_flush — DEFERRED, and the deferral is the whole point ──
+*
+* ★★★★ THE FIRST VERSION RESET THE ARENA IMMEDIATELY AND HALTED ALL NINE TITLES AT CYCLE 0.
+* `new.room` is a COMMAND: it is executed BY a logic, so at least one frame is open and the
+* running logic's bytes are in the arena. Resetting res_top to RES_ARENA there let the next
+* fetch allocate straight over the logic that was still executing -- the VM then read opcode
+* $F5 out of its own corrupted bytecode, and `reserr=5` (RES_E_FULL) followed as the wreckage
+* spread.
+*
+* ★★★★ AND THE REFERENCE EXPERIMENT COULD NOT HAVE CAUGHT IT. AD-88 cleared `_logic_cache` on
+* new_room in the reference and measured byte-identical state -- correctly, because clearing a
+* Python dict does NOT disturb the `lg` object the running interpreter already holds. **In the
+* port the bytes ARE the storage.** A policy that is free in the reference is not automatically
+* free in a port whose cache and whose working memory are the same memory.
+* ★★★ So the experiment validated the POLICY and said nothing about the MECHANISM, and I read it
+* as covering both [L-58's limit, stated].
+*
+* ★★ The fix is to defer: `new.room` only raises a flag, and the flush happens at the top of the
+* next interpret_cycle, where res_depth is 0 and nothing is executing out of the arena.
+res_cache_pend  fcb     0               ; 1 = flush before the next cycle's first bind
+
+res_cache_reset:
+                lda     #1
+                sta     res_cache_pend
+                rts
+
+* ★ Called from vm_interpret_cycle, outside every frame. Safe to move res_top here and only here.
+res_cache_flush:
+                lda     res_cache_pend
+                beq     rcx_out
+                clr     res_cache_pend
+                clr     res_cn
+                ldd     #RES_ARENA
+                std     res_top
+                ldd     #RES_ARENA_END          ; ★ reclaim the cache region too
+                std     res_ccur
+rcx_out:        rts
+
 res_close:
                 lda     res_depth
                 beq     rc_out                  ; closing at depth 0 is a no-op, not an error

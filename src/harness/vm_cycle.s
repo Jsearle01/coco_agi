@@ -147,6 +147,11 @@ vm_rc_lp:       clr     ,x+
 * same thing on both sides. The probe's GO gate is the sampling point.
 * ═══════════════════════════════════════════════════════════════════════════════════
 vm_interpret_cycle:
+* ★★★ THE LOGIC CACHE'S FLUSH POINT, AND IT MUST BE HERE RATHER THAN IN new.room. res_depth is 0
+* at the top of a cycle, so nothing is executing out of the arena and res_top can move. Doing it
+* inside new.room -- which runs INSIDE a logic -- overwrote the running logic and halted all nine
+* titles at cycle 0. See res_cache_reset's block in res_core.s.
+                jsr     res_cache_flush
                 ldd     vm_cycle
                 addd    #1
                 std     vm_cycle

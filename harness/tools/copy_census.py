@@ -40,6 +40,31 @@ def build(game_dir, version, platform, seed):
     return Vm(game, version, platform=platform, seed=seed), game
 
 
+def wrap_newroom(vm, mode):
+    """Clear the byte cache at every new_room, to test an INVALIDATION POLICY.
+
+    ★★★★ THIS IS THE EXPERIMENT AC-3 TURNS ON. The dispatch's worry is that an invalidation the
+    reference does not perform is a latent divergence. **That worry is answerable rather than
+    arguable**: the reference never invalidates `_logic_cache` -- there is no del, pop or clear
+    anywhere in agivm -- so making it invalidate on new_room and diffing against the untouched
+    reference measures exactly what such a policy costs behaviourally.
+    ★★★ If it costs nothing, then re-fetching being neutral (T-P0-035 AC-3) means EVERY
+    invalidation policy is behaviourally safe, and the reference's "never" is an optimum rather
+    than a requirement. The port's policy then becomes a memory/time tradeoff, not a correctness
+    one -- which is a materially different claim from the one the dispatch assumes.
+    """
+    if mode != "newroom":
+        return
+    real = vm.new_room
+
+    def hooked(*a, **k):
+        vm._logic_cache.clear()
+        vm._view_cache.clear()
+        return real(*a, **k)
+
+    vm.new_room = hooked
+
+
 def instrument(vm, game, no_cache=False):
     """Hook load_logic/load_view to count invocations, and optionally defeat the cache.
 
@@ -60,12 +85,40 @@ def instrument(vm, game, no_cache=False):
                 stats["sizes"][k] = 0
         return stats["sizes"][k]
 
+    # ★★★★ TWO CACHE KEYINGS, SIMULATED SIDE BY SIDE, BECAUSE THE PORT CAN CHEAPLY BUILD EITHER
+    # AND THEY ARE NOT THE SAME THING.
+    #   depth-keyed  -- "is the resource at THIS arena depth already the one I want?" This is
+    #                   what AD-86's ablation measured at 37.5%, and it is nearly free because
+    #                   the arena is already a stack indexed by depth.
+    #   index-keyed  -- the REFERENCE's scheme: keyed on the LOGIC number, any depth.
+    # ★★★ A depth-keyed memo MISSES whenever two different logics alternate at the same depth,
+    # which an index-keyed cache would hit. **Whether that happens is a property of the corpus,
+    # not of the design**, so it is measured here rather than reasoned about.
+    stats["depth_hit"] = 0
+    stats["depth_miss"] = 0
+    stats["index_hit"] = 0
+    stats["index_miss"] = 0
+    stats["depth_memo"] = {}
+    stats["index_set"] = set()
+    stats["depth"] = -1
+
     def hooked_logic(nr):
         if no_cache:
             vm._logic_cache.pop(nr, None)
         stats["logic_calls"] += 1
         stats["logic_bytes"] += size("LOGIC", nr)
         stats["logic_hist"][nr] += 1
+        d = stats["depth"]
+        if stats["depth_memo"].get(d) == nr:
+            stats["depth_hit"] += 1
+        else:
+            stats["depth_miss"] += 1
+            stats["depth_memo"][d] = nr
+        if nr in stats["index_set"]:
+            stats["index_hit"] += 1
+        else:
+            stats["index_miss"] += 1
+            stats["index_set"].add(nr)
         return real_logic(nr)
 
     def hooked_view(nr):
@@ -75,6 +128,22 @@ def instrument(vm, game, no_cache=False):
         stats["view_bytes"] += size("VIEW", nr)
         return real_view(nr)
 
+    # ★★★★ DEPTH COMES FROM run_logic, NOT load_logic, AND GETTING THAT WRONG INVERTED THE
+    # ANSWER. load_logic does not nest -- it loads and returns -- so incrementing a counter
+    # around it measures "was the PREVIOUS load the same resource", which is not depth-keying at
+    # all. It reported 0.0% hits for the depth scheme and would have contradicted AD-86's
+    # measured 37.5% saving. **run_logic is the routine that nests**, and it is the port's
+    # res_open/res_close pair, so the depth it maintains is the arena depth the memo is keyed on.
+    real_run = vm.run_logic
+
+    def hooked_run(nr):
+        stats["depth"] += 1
+        try:
+            return real_run(nr)
+        finally:
+            stats["depth"] -= 1
+
+    vm.run_logic = hooked_run
     vm.load_logic, vm.load_view = hooked_logic, hooked_view
     return stats
 
@@ -88,9 +157,10 @@ def state_digest(vm):
     return bytes(st.flags) + bytes(st.vars)
 
 
-def run(game_dir, version, platform, seed, cycles, no_cache):
+def run(game_dir, version, platform, seed, cycles, no_cache, inval=""):
     vm, game = build(game_dir, version, platform, seed)
     stats = instrument(vm, game, no_cache=no_cache)
+    wrap_newroom(vm, inval)
     vm.start()
     digests = []
     h = hashlib.sha256()
@@ -140,6 +210,11 @@ def main():
     print("  most-invoked        : " + "  ".join(
         f"logic{k}x{c} ({s['sizes'][('LOGIC',k)]:,}B)" for k, c in top))
 
+    tot = s["logic_calls"] or 1
+    print(f"★ cache keying, simulated: depth-keyed {100*s['depth_hit']/tot:5.1f}% hit"
+          f"   index-keyed {100*s['index_hit']/tot:5.1f}% hit"
+          f"   (misses {s['depth_miss']} vs {s['index_miss']})")
+
     # ── AC-3: does re-loading change anything? Both arms are the REFERENCE ──
     s2, dig_b, hash_b = run(args.game_dir, v, args.platform, args.seed, args.cycles, True)
     print()
@@ -153,9 +228,28 @@ def main():
     if not bad:
         print(f"  ★★★★ IDENTICAL on all {len(dig_a)} cycles, 288 bytes each."
               f"  Re-copying is behaviourally NEUTRAL.")
-        return 0
-    print(f"  ★★★ {len(bad)} divergent cycle(s); first at {bad[0]}")
-    return 1
+    else:
+        print(f"  ★★★ {len(bad)} divergent cycle(s); first at {bad[0]}")
+        return 1
+
+    # ── AC-3b: an INVALIDATION POLICY the reference does not have ──
+    _s3, dig_c, hash_c = run(args.game_dir, v, args.platform, args.seed, args.cycles,
+                             False, inval="newroom")
+    print()
+    print("★★ AC-3b -- reference NEVER-INVALIDATES vs reference CLEARS-ON-new_room:")
+    print(f"  never-invalidate  {len(dig_a)} cycles  sha256 {hash_a[:16]}")
+    print(f"  clear on new_room {len(dig_c)} cycles  sha256 {hash_c[:16]}")
+    if len(dig_a) != len(dig_c):
+        print(f"  ★★★ CYCLE COUNTS DIFFER ({len(dig_a)} vs {len(dig_c)}) -- divergent")
+        return 1
+    bad3 = [i for i, (x, y) in enumerate(zip(dig_a, dig_c)) if x != y]
+    if bad3:
+        print(f"  ★★★ {len(bad3)} divergent cycle(s); first at {bad3[0]}"
+              f"  -- an invalidation policy IS observable")
+        return 1
+    print(f"  ★★★★ IDENTICAL. Invalidation is a MEMORY/TIME choice, not a correctness one --"
+          f" the reference's 'never' is an optimum, not a requirement.")
+    return 0
 
 
 if __name__ == "__main__":
