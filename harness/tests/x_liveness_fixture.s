@@ -31,3 +31,14 @@ vm_st_ozero:    lda     #VAR_KEY
                 ldd     #0
                 std     vm_cycle
                 rts
+
+* --- REAL: D held across a call that returns in A (cp_do_free, pre-fix) ---------
+cp_do_free:     ldd     CP_N
+                beq     cp_loop
+                jsr     cp_setup
+cp_free_lp:     pshs    d
+                jsr     cp_composite
+                puls    d
+                subd    #1
+                bne     cp_free_lp
+                rts

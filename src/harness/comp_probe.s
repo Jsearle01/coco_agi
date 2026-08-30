@@ -99,10 +99,34 @@ cp_do_zero:
 * ★★ THE HANDSHAKE COSTS A WHOLE EMULATED FRAME per composite, so timing through the gate
 * measures MAME's frame period. N back-to-back composites and the emulated clock either side
 * gives the real per-composite figure [the T-P0-027 free-run, same reasoning].
+* ═══════════════════════════════════════════════════════════════════════════════════
+* ★★★★ THE ORDER OF THESE TWO LINES WAS THE 2,049x DEFECT.
+*
+* It read `ldd CP_N` and THEN `jsr cp_setup`. cp_setup's last two instructions are
+* `lda CP_KEY / sta vc_key`, so it returns with **A holding the cel's clear key** -- and D is
+* A:B. The loop counter therefore became (clearKey << 8) | lowByte(CP_N):
+*
+*     clear key 8 -> D = $0801 = 2,049 repeats     (measured: 696,660 tested for a 340 px cel)
+*     clear key 3 -> D = $0301 =   769 repeats     (measured: 295,296 tested for a 384 px cel)
+*     clear key 0 -> D = $0001 =     1 repeat      (measured: 192 for a 192 px cel -- correct)
+*
+* ★★★ AND THE PREDICTOR IS `clearKey != 0`, NOT THE CONTROL BRANCH. T-P0-029 reported this as
+* "misbehaves only when the control branch fires" -- a CORRELATION. Attract-mode cels happen to
+* carry key 0 and happen never to reach a control line; gameplay cels carry keys 8 and 3 and do
+* both. Two properties moved together across the whole sample and I named the wrong one.
+*
+* ★★ FOURTH INSTANCE OF ONE CLASS, IN A THIRD REGISTER. T-P0-027 found this in X (four
+* handlers) and in B (vm_obj); harness/tools/x_liveness.py was written to enumerate it and
+* models exactly those two. **It cannot see A**, which is why the checker was green while this
+* sat in the tree. Extended this task.
+*
+* ★ The fix is the ordering, not a pshs/puls: with cp_setup called first, nothing between the
+* load and the use can touch D.
+* ═══════════════════════════════════════════════════════════════════════════════════
 cp_do_free:
+                jsr     cp_setup                ; ★ FIRST: it returns with A = the clear key
                 ldd     CP_N
                 beq     cp_loop
-                jsr     cp_setup
 cp_free_lp:     pshs    d
                 jsr     cp_composite
                 puls    d

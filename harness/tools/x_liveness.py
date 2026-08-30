@@ -60,7 +60,48 @@ B_WRITE = re.compile(r"\b(ldb|clrb|comb|negb|incb|decb|lslb|aslb|lsrb|asrb|rolb|
 B_READ = re.compile(r"\b(stb|cmpb|bitb|tstb|abx|tfr\s+b\s*,|std|pshs[^;]*\bb\b)", re.I)
 # ★ Routines that preserve B. vm_arg brackets its body with `pshs b ... puls b,pc`, and every
 # operand accessor reaches B through it. Verified by reading, not assumed from the name.
-B_SAFE = {"vm_arg", "vm_p0", "vm_p1", "vm_p2", "vm_p3", "vm_p4", "vmtr_rec"}
+B_SAFE = {"vm_arg", "vm_p0", "vm_p1", "vm_p2", "vm_p3", "vm_p4", "vmtr_rec",
+          # ★ vm_v0/v1/v2 are `jsr vm_pN / jmp vm_getvar`. vm_pN reaches vm_arg (above) and
+          # vm_getvar brackets its body `pshs b ... puls b,pc` [vm_state.s:182-189], so the pair
+          # is B-preserving. Read, not inferred -- and note vm_obj0 is the SAME SHAPE and is
+          # deliberately absent, because vm_obj's first act is `tfr a,b`.
+          "vm_v0", "vm_v1", "vm_v2"}
+
+# ★★★★ THE A/D PASS EXISTS BECAUSE THIS TOOL WAS GREEN WHILE THE DEFECT IT WAS BUILT FOR SAT IN
+# THE TREE, IN A THIRD REGISTER. T-P0-030: `ldd CP_N / jsr cp_setup` -- and cp_setup ends
+# `lda CP_KEY / sta vc_key`, so it returns with A holding the cel's clear key. D is A:B, so a
+# loop counter of 1 became (key << 8) | 1: **2,049 repeats for key 8, 769 for key 3, 1 for key
+# 0**. The free-run harness did 2,049x the work and the cost figure was unusable.
+# ★★ The class was already named twice -- X (four handlers) and B (vm_obj) -- and this checker
+# was written to enumerate it. It models exactly those two registers, so it could not see A.
+# **"A value held in a register across a call" was the sentence; "X" and "B" were the code.**
+# ★★★ THE PASS IS ON **D**, NOT ON A, AND THE NARROWING IS DELIBERATE. A is both a clobbered
+# register and this codebase's standard RETURN register: `jsr vm_getvar / tfr a,b` is correct
+# code, not a defect, and an A pass reports every one of them. A checker that cries wolf gets
+# ignored -- which is the lesson the X pass already learned when its first version reported 17
+# sites of which 4 were real.
+# ★★ A 16-BIT quantity is the discriminator: a call that returns a byte in A cannot be supplying
+# D, so `ldd ... / jsr ... / std` is unambiguous. That is exactly cp_do_free's shape
+# (`ldd CP_N / jsr cp_setup / pshs d`) and it is caught without touching the return-value idiom.
+# ★ The cost is real and stated: a defect that parks a value in A ALONE still slips through.
+#
+# ★★★ THE WRITE AND READ SETS ARE DELIBERATELY ASYMMETRIC, AND NARROWING BOTH WAS A MISTAKE THAT
+# COST THREE FALSE POSITIVES ON THE REAL TREE. They are not two halves of one list:
+#   * WRITE is a LIVENESS KILL. Broad is SAFE -- every mnemonic added can only retire a stale
+#     value earlier and REMOVE reports. D is A:B, so anything writing EITHER half kills it.
+#     vm_passed is the worked example: `jsr vm_timer_update / lda / jsr vm_getvar / tfr a,b /
+#     clra / cmpd #0` rebuilds D entirely, and a narrow set that could not see `tfr a,b` or
+#     `clra` reported the cmpd as a use of the pre-call value.
+#   * READ is the ACCUSATION. Narrow is safe: 16-bit reads only, because a callee returning a
+#     byte in A cannot be supplying D, whereas `tfr a,b` after a call is this codebase's ordinary
+#     return-value idiom and must never be flagged.
+A_WRITE = re.compile(r"\b(lda|ldb|clra|clrb|coma|comb|nega|negb|inca|incb|deca|decb"
+                     r"|lsla|aslb|asla|lslb|lsra|lsrb|asra|asrb|rola|rolb|rora|rorb|mul"
+                     r"|adda|addb|adca|adcb|suba|subb|sbca|sbcb|anda|andb|ora|orb|eora|eorb"
+                     r"|tfr\s+\w+\s*,\s*[abd]|exg\b|sex"
+                     r"|ldd|addd|subd|adcd|sbcd)\b", re.I)
+A_READ = re.compile(r"\b(std|cmpd|subd|addd|tfr\s+d\s*,|pshs[^;]*\bd\b)\b", re.I)
+A_SAFE = {"vmtr_rec"}
 
 OBJ_FETCH = re.compile(r"\bl?jsr\s+(vm_obj0?)\b", re.I)
 JSR = re.compile(r"\bl?jsr\s+([A-Za-z_]\w*)", re.I)
@@ -71,7 +112,16 @@ REDEF_X = re.compile(r"\b(ldx|leax|tfr\s+\w+\s*,\s*x)\b", re.I)
 PSHS_X = re.compile(r"\bpshs\s+([a-z,\s]+)", re.I)
 PULS_X = re.compile(r"\bpuls\s+([a-z,\s]+)", re.I)
 LABEL = re.compile(r"^([A-Za-z_]\w*):?\s")
-RTS = re.compile(r"\b(rts)\b|\bpuls\b[^;]*\bpc\b|\bl?jmp\s+\S+", re.I)
+# ★★ AN UNCONDITIONAL BRANCH ENDS A LINEAR BLOCK EXACTLY AS `rts` DOES, and omitting `bra`/`lbra`
+# produced a false positive on the real tree. pic_draw.s's vertical loop ends `bra dl_vlp`, so
+# control CANNOT fall through into the `dl_nvert:` label below it -- yet the scanner carried the
+# loop's `jsr put_pixel` across the label and accused the horizontal branch of using a register
+# the vertical branch had dirtied.
+# ★★★ NOTE WHAT IS **NOT** DONE HERE: state is not reset at every label. A label reached BY FALL-
+# THROUGH is a real continuation, and resetting there would discard the cp_do_free finding, whose
+# use site IS a loop-head label (`cp_free_lp: pshs d`). The discriminator is the PRECEDING line,
+# not the label -- which is why this lives in the block-terminator set and not in the label rule.
+RTS = re.compile(r"\b(rts|bra|lbra)\b|\bpuls\b[^;]*\bpc\b|\bl?jmp\s+\S+", re.I)
 
 
 def strip(line):
@@ -143,16 +193,24 @@ def scan(path):
                 "use_line": i + 1, "use": c.strip(),
             })
             x_live, dirty = False, None
-    return findings + scan_b(path, lines)
+    return findings + scan_reg(lines, "B", B_WRITE, B_READ, B_SAFE) \
+                    + scan_reg(lines, "D", A_WRITE, A_READ, A_SAFE)
 
 
-def scan_b(path, lines):
-    """The same state machine over B: value written, call made, value read."""
+def scan_reg(lines, regname, WRITE, READ, SAFE):
+    """The same state machine over one register: value written, call made, value read.
+
+    ★★ PARAMETERISED BY REGISTER, which is the whole correction. The first version hard-coded X;
+    the second added a copy for B; T-P0-030 then lost a session to the identical defect in A.
+    **The class is "a value held in a register across a call" and the register is not part of
+    it** -- so it is an argument now, and adding U or Y is three lines rather than a new pass.
+    """
     findings = []
     cur_label = "?"
     b_live = False
     dirty = None
     saved = 0
+    tag = regname.lower()[0]
 
     for i, raw in enumerate(lines):
         c = strip(raw)
@@ -166,33 +224,47 @@ def scan_b(path, lines):
             b_live, dirty, saved = False, None, 0
             continue
 
+        keep = re.compile(r"\b%s\b|\bd\b" % tag, re.I)
         m = PSHS_X.search(c)
-        if m and re.search(r"\bb\b|\bd\b", m.group(1), re.I):
+        if m and keep.search(m.group(1)):
+            # ★★★ ORDER MATTERS AND IT MISSED cp_do_free THE FIRST TIME. `pshs` was matched as a
+            # SAVE before it could be seen as a USE, and the matching `puls` then cleared `dirty`
+            # -- so `ldd CP_N / jsr cp_setup / pshs d / ... / puls d / subd #1` reported nothing.
+            # ★★ A save PROTECTS a value across a following call; it cannot un-corrupt one the
+            # PRECEDING call already destroyed. When `dirty` is set, the pshs IS the first read of
+            # the corrupt value, and it is the last point at which the tool can still see it.
+            if b_live and dirty:
+                findings.append({
+                    "routine": cur_label, "call_line": dirty[0], "callee": dirty[1],
+                    "use_line": i + 1, "use": c.strip(), "reg": regname,
+                })
+                b_live, dirty = False, None
+                continue
             saved += 1
             continue
         m = PULS_X.search(c)
-        if m and re.search(r"\bb\b|\bd\b", m.group(1), re.I):
+        if m and keep.search(m.group(1)):
             saved = max(0, saved - 1)
             dirty = None
             continue
 
         call = JSR.search(c)
         if call:
-            if call.group(1).lower() not in {s.lower() for s in B_SAFE}:
+            if call.group(1).lower() not in {s.lower() for s in SAFE}:
                 if b_live and saved == 0 and dirty is None:
                     dirty = (i + 1, call.group(1))
             continue
 
         # ★ a READ before a WRITE, because `stb` reads and `ldb` writes; checking writes first
         # would mark `ldb ,x` as a use of the old value.
-        if b_live and dirty and B_READ.search(c) and not B_WRITE.search(c):
+        if b_live and dirty and READ.search(c) and not WRITE.search(c):
             findings.append({
                 "routine": cur_label, "call_line": dirty[0], "callee": dirty[1],
-                "use_line": i + 1, "use": c.strip(), "reg": "B",
+                "use_line": i + 1, "use": c.strip(), "reg": regname,
             })
             b_live, dirty = False, None
             continue
-        if B_WRITE.search(c):
+        if WRITE.search(c):
             b_live, dirty = True, None
     return findings
 
