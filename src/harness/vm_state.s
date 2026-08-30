@@ -56,11 +56,18 @@
 * rather than by a binary that grows every task.
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 
+* ★★★ GUARDED SO THE RECONCILED MAP CAN DRIVE THEM (T-P0-032). res_core.s already did this for
+* RES_DIRS/RES_ARENA and it is what let vm_probe.s relocate the arena; the VM's own state block
+* was the one subsystem still nailed to an address, which meant the five could not share a map.
+* ★★ THE DEFAULTS ARE UNCHANGED AND THAT IS THE POINT: every existing probe assembles to the
+* same bytes, verified byte-for-byte against the pre-change binaries rather than assumed.
+                ifndef  VM_VARS
 VM_VARS         equ     $4000           ; 256 bytes -- HALF THE DIFF
 VM_FLAGS        equ     $4100           ; 32 bytes, packed LSB-first -- THE OTHER HALF
 VM_CTRL         equ     $4120           ; 32 bytes, packed: controller_occurred
 VM_OBJROOMS     equ     $4140           ; 256 bytes: the OBJECT file's object -> room table
 VM_OBJ          equ     $4240           ; 255 entries x 32 bytes
+                endc
 VM_OBJ_MAX      equ     255
 VM_OBJ_END      equ     VM_OBJ+VM_OBJ_MAX*32            ; $6220 -- 255 x 32 from $4240
 
