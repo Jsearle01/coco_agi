@@ -79,6 +79,15 @@ run() {   # run <name> <script> <seconds> <src> <out> [flags...]
 M=-DHAL_GFX_MODE_SERVICE
 F=-DHAL_SYS_FAST_CLOCK
 
+# ★★★★★ L-72: A RUNNER THAT EXITS 0 ON A PARTIAL RUN ASSERTS MORE THAN IT TESTED. This script
+# ended in a bare `exit 0` and every gate's verdict was thrown away -- picgate.py's exit code,
+# res_aggregate.py's, celgate.py's. **A gate whose adjudicator reports FAIL and whose runner
+# exits 0 is worse than no runner**, because a CI step or a `&&` chain reads it as a pass.
+# ★★ FAILED accumulates the names; the exit code is the count. A build that could not assemble
+# counts too -- "skipped" is not "passed".
+FAILED=""
+note_fail() { FAILED="$FAILED $1"; }
+
 # ★★★ pic's SWEEP is whole -- PIC_LIST/order.txt names all 45 pictures, so one launch covers the
 # set -- but the sweep only WRITES framebuffers. picgate.py is what compares them and prints
 # 45/45, and this script never called it. **The renderer gate's headline number had no producer
@@ -86,8 +95,11 @@ F=-DHAL_SYS_FAST_CLOCK
 # was recorded and the ADJUDICATION was not. ★★ A sweep that exits 0 having written 90 .bin files
 # looks exactly like a gate that passed.
 if [ "$WHICH" = "pic" ] || [ "$WHICH" = "all" ]; then
-    run "renderer (45 pictures)" harness/tools/pic_sweep.lua 900 src/harness/pic_probe.s build/pic_probe.bin $M
-    python harness/tools/picgate.py build/sweep build/picset/picset.json
+    if run "renderer (45 pictures)" harness/tools/pic_sweep.lua 900 src/harness/pic_probe.s build/pic_probe.bin $M; then
+        python harness/tools/picgate.py build/sweep build/picset/picset.json || note_fail pic
+    else
+        note_fail pic
+    fi
     echo
 fi
 
@@ -96,14 +108,14 @@ fi
 if [ "$WHICH" = "res" ] || [ "$WHICH" = "all" ]; then
     echo "═══ resources (1,264 fetches, 10 volumes) ═══"
     powershell -NoProfile -ExecutionPolicy Bypass -File harness/tools/res_run.ps1 >/dev/null 2>&1
-    python harness/tools/res_aggregate.py
+    python harness/tools/res_aggregate.py || note_fail res
     echo
 fi
 
 # ★★ cel: six staged titles. cel_run.sh did not exist until T-P0-039; 9,193 came from a hand
 # loop nobody wrote down.
 if [ "$WHICH" = "cel" ] || [ "$WHICH" = "all" ]; then
-    sh harness/tools/cel_run.sh
+    sh harness/tools/cel_run.sh || note_fail cel
     echo
 fi
 
@@ -115,6 +127,14 @@ if [ "$WHICH" = "comp" ] || [ "$WHICH" = "all" ]; then
     echo "★ run explicitly, e.g.:"
     echo "    sh harness/tools/run_comp_sweep.sh build/comp_stage/SpaceQuest-1 oracle/dumps/frames-SpaceQuest-1"
     echo "  (the default stage is NOT the gate -- see this file's header)"
+    # ★★ NOT a failure: comp is deliberately not driven from here. But `all` must not claim to
+    # have covered it, so it is named in the summary rather than silently absent.
     echo
 fi
+
+if [ -n "$FAILED" ]; then
+    echo "★★★ GATES FAILED:$FAILED"
+    exit 1
+fi
+echo "★ gates run:$([ "$WHICH" = "all" ] && echo " pic res cel (comp NOT covered -- run it explicitly)" || echo " $WHICH")  -- all green"
 exit 0

@@ -336,6 +336,21 @@ ro_fetched:     lda     res_err
                 lda     ,s
                 cmpa    #RES_LOGIC
                 bne     ro_push_transient
+* ★★★★★ -DABL_NOCACHE MUST DIVERT HERE, NOT INSIDE res_cache_stash, AND THE FIRST VERSION DID NOT.
+* Suppressing only find/stash left this branch intact, so a LOGIC still took ro_push_after_stash,
+* whose mark is the OLD res_top -- correct when the bytes have been relocated into the cache, and
+* WRONG when they are still sitting in the scratch, because res_top never advances past them and
+* the next fetch lands on the logic that is executing.
+* ★★★★ It was invisible in res_probe (mode 0 is open-then-CLOSE, one resource live at a time) and
+* fatal in the VM, where logics nest: the AC-7 arm ran at opcount 37 against a baseline of 184 and
+* reported a meaningless 115.8 cyc/s. **The timing looked like a spectacular win and the build was
+* not doing the work** [P3b.5's shape exactly -- caught by opcount, never by the clock].
+* ★★★ So the correct "no cache" is the PRE-CACHE PATH: a LOGIC is a transient like any other and
+* res_top advances over it.
+* ★ No `leas 2,s` here: ro_push_transient does its own, exactly as the `bne` above relies on.
+                ifdef   ABL_NOCACHE
+                bra     ro_push_transient
+                endc
                 ldb     1,s
                 leas    2,s
                 jsr     res_cache_stash         ; relocate + record; leaves res_base pointing at it

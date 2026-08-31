@@ -24,7 +24,10 @@ os.execute('mkdir "' .. OUT:gsub("/", "\\") .. '" 2>nul')
 local LOAD      = 0x0700
 local RES_DIRS  = 0x2000
 local DIR_STRIDE= 0x0400
+-- ★★ RES_SLOT is now used ONLY by the RES_STALE_READ fault arm. The live gate reads the address
+-- the guest publishes at PBASE; see the readback below for why the literal stopped being true.
 local RES_SLOT  = 0x3000
+local STALE_READ = os.getenv("RES_STALE_READ") ~= nil
 local WINDOW    = 0xC000
 local MMU_SLOT  = 0xFFA6
 local REQ_TYPE, REQ_INDEX, GO = 0x0080, 0x0081, 0x0082
@@ -259,8 +262,33 @@ _G._n = emu.add_machine_frame_notifier(function()
                                     (cal and secs[n]) and math.floor(secs[n] * cal + 0.5) or 0))
         end
         if not CENSUS and not STACK and st == 0 and len > 0 then
+            -- ★★★★★ READ WHERE THE GUEST SAYS THE BYTES ARE, NOT WHERE THEY USED TO LAND.
+            -- This line read RES_SLOT (0x3000) as a literal, and that was correct until the
+            -- LOGIC cache landed in T-P0-036. Before it, every fetch went to RES_ARENA and
+            -- res_probe.s:70 could say "the byte gate reads one fixed address". After it, a
+            -- cached LOGIC is relocated to res_ccur - len and 0x3000 holds the SCRATCH, whose
+            -- upper part the relocation copy overwrote.
+            -- ★★★★ That produced exactly guest[D+k] == oracle[k] with D = dest - src: the
+            -- first D bytes of scratch are untouched and correct, and from D on you are reading
+            -- the copy's own output, which is the same logic starting from byte 0. Measured
+            -- D = 3289/3350/1860 against lengths 8999/8938/10428 -- each equal to the first
+            -- difference, and the shifted tail matches the oracle for its whole length.
+            -- ★★★ SO THE CACHE WAS NEVER RETURNING WRONG BYTES. The gate was reading the wrong
+            -- address, and "cache off gives 1,264/1,264" was green only because ablation forces
+            -- res_base back to RES_ARENA and makes the stale literal accidentally right.
+            -- ★★ res_probe.s ALREADY PUBLISHES the answer at RP_BASE and this file already
+            -- reads it into `base` twenty lines above for modes 2 and 5. The correct pattern
+            -- was adjacent the whole time [§2M.1's lesson, on the host side], and the payload
+            -- address had two homes -- res_core.s's RES_SLOT and this literal -- so the cache
+            -- moved one of them and nothing told the other [§2F].
+            -- ★★★ RES_STALE_READ=1 RESTORES THE DEFECT, ON PURPOSE [L-62]. AC-5 wants the gate
+            -- shown to FAIL on the old behaviour, and the old behaviour is a host-side literal
+            -- rather than a guest-side define -- so the fault switch has to live here. Expected:
+            -- 28 LOGIC mismatches at the same indices, each with the shift signature.
+            local pbase = STALE_READ and RES_SLOT
+                          or (prog:read_u8(PBASE) * 256 + prog:read_u8(PBASE + 1))
             local buf = {}
-            for i = 0, len - 1 do buf[#buf + 1] = string.char(prog:read_u8(RES_SLOT + i)) end
+            for i = 0, len - 1 do buf[#buf + 1] = string.char(prog:read_u8(pbase + i)) end
             out:write(table.concat(buf))
         end
     end

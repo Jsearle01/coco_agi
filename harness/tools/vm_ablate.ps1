@@ -30,8 +30,15 @@ $ErrorActionPreference = "Stop"
 Set-Location C:\Projects\coco_agi
 
 $TITLE  = if ($env:ABL_TITLE)  { $env:ABL_TITLE }  else { "Kingquest1" }
+$GAMES  = if ($env:VM_GAMES_ROOT) { $env:VM_GAMES_ROOT } else { "C:\Projects\agi-games\pc" }
 $TIMED  = if ($env:ABL_TIMED)  { $env:ABL_TIMED }  else { "200" }
-$VARIANTS = @("baseline", "VM_NOCOUNT", "VM_PACEONLY", "ABL_NOCOPY", "ABL_NOFETCH")
+# ★★★ ABL_NOCACHE added for AC-7. AD-87 quoted "baseline 288,575 cy" against "cached 126,307",
+# where BASELINE meant the tree BEFORE the cache existed -- a comparison that can no longer be
+# re-run, because the cache is now in the code. ★★ ABL_NOCACHE is the re-runnable stand-in: it
+# is the same source with every find missing and every stash a no-op, so the pair is measured
+# from ONE tree instead of across a commit boundary. ★ $env:ABL_VARIANTS narrows the set.
+$VARIANTS = if ($env:ABL_VARIANTS) { $env:ABL_VARIANTS -split "," } else {
+    @("baseline", "ABL_NOCACHE", "VM_NOCOUNT", "VM_PACEONLY", "ABL_NOCOPY", "ABL_NOFETCH") }
 
 $WANT = @("res_volbase","res_slicebase","res_curblk","vm_icguard","res_depth","res_top",
           "vm_code","vm_codelen","vm_ip","vm_curlogic")
@@ -52,6 +59,20 @@ foreach ($v in $VARIANTS) {
     if ($LASTEXITCODE -ne 0) { throw "symbols missing for $v" }
 
     "=== $v  ($((Get-Item $bin).Length) bytes) ==="
+    # ★★★★★ $ABL_TITLE WAS INERT AND EVERY MEASUREMENT THIS SCRIPT EVER MADE WAS Kingquest1.
+    # It set VM_TITLES, which vm_sweep.lua does not read; the lua stages from VM_STAGE, whose
+    # default is the literal "build/vm_stage/Kingquest1". So asking for Kingquest3 assembled the
+    # right variants, launched the right binary, and measured the WRONG GAME -- silently, because
+    # a run against KQ1 is a perfectly successful run.
+    # ★★★★ It was caught by the numbers being IDENTICAL to the previous title's, digit for digit
+    # (14.184930 emulated s, opcount 184). ★★ A parameter that is accepted and ignored is worse
+    # than one that errors: the operator gets a plausible answer to a question they did not ask.
+    # ★★★ Fifth instance of T-P0-039's disease -- the scope of a measurement living somewhere the
+    # runner does not set [L-72's neighbourhood].
+    $stage = "build/vm_stage/$TITLE"
+    python harness\tools\vm_stage.py (Join-Path $GAMES $TITLE) --out $stage --cycles $TIMED | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "staging failed for $TITLE" }
+    $env:VM_STAGE  = $stage
     $env:VM_TITLES = $TITLE
     $env:VM_TIMED  = $TIMED
     $env:VM_PROG   = $bin
