@@ -377,6 +377,20 @@ res_cache_stash:
 * binding constraint was a property of the configuration, not the routine].
 * ★ The destination is always ABOVE the source here (the cache is above the stack), so copying
 * from the high end downward is always safe and needs no overlap test.
+* ★★★★ -DABL_FWDCOPY RESTORES THE DEFECT, ON PURPOSE. AC-7 asks for a test that fails on the OLD
+* code, and the existing gates could not see this bug at all -- so the only way to show the new
+* test has teeth is to put the old behaviour back behind a flag and watch it fail.
+* ★★ A fix whose regression test has never failed is an assertion, not a test [L-62's principle].
+                ifdef   ABL_FWDCOPY
+                tfr     d,y                     ; ★ THE DEFECT: forward, dest above src
+                ldu     res_base
+                ldx     res_len
+                beq     rcs_done
+rcs_lp:         lda     ,u+
+                sta     ,y+
+                leax    -1,x
+                bne     rcs_lp
+                else
                 addd    res_len
                 tfr     d,y                     ; Y = one past the destination's last byte
                 ldd     res_base
@@ -388,6 +402,7 @@ rcs_lp:         lda     ,-u
                 sta     ,-y
                 leax    -1,x
                 bne     rcs_lp
+                endc
 rcs_done:
 * ═══════════════════════════════════════════════════════════════════════════════════════════
                 ldd     res_ccur

@@ -12,6 +12,20 @@
 $ErrorActionPreference = "Stop"
 Set-Location C:\Projects\coco_agi
 
+# ★★★★ ASSEMBLE THE PROBE. THIS GATE RAN A STALE BINARY FOR THREE TASKS.
+# res_run.ps1 only ever pointed RES_PROG at build\res_probe.bin and never built it, so the
+# 1,264-resource gate tested whatever happened to be on disk. The LOGIC cache landed in
+# T-P0-036 and the gate reported "1,264 clean" in that task and the next -- **from a binary
+# assembled before the cache existed.** It was not testing the code it was gating.
+# ★★★ AD-89's forward overlapping copy DOES fail this gate: rebuilt with the defect restored
+# (-DABL_FWDCOPY) it reports mismatched=2 and 62 guest-reported failures. So the bug was a
+# correctness defect in a GATED path all along, and the gate could not see it because the gate
+# was stale rather than because the sample was wrong.
+# ★★ A gate that does not build its own artifact is testing history [L-70].
+& C:\WIN_LWTools\lwasm.exe --raw -I. -DHAL_GFX_MODE_SERVICE --output=build\res_probe.bin src\harness\res_probe.s
+if ($LASTEXITCODE -ne 0) { throw "res_probe assemble failed" }
+"res_probe: $((Get-Item build\res_probe.bin).Length) bytes (assembled by this script)"
+
 $GAMES  = if ($env:RES_GAMES_ROOT) { $env:RES_GAMES_ROOT } else { "C:\Projects\agi-games\pc" }
 $CFG    = if ($env:RES_MAME_CFG)   { $env:RES_MAME_CFG }   else { "harness\mame-cfg" }
 $TITLES = @("Kingquest1", "Kingquest2", "Kingquest3")
