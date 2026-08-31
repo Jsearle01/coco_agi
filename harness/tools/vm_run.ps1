@@ -8,7 +8,23 @@ Set-Location C:\Projects\coco_agi
 
 $GAMES  = if ($env:VM_GAMES_ROOT) { $env:VM_GAMES_ROOT } else { "C:\Projects\agi-games\pc" }
 $CFG    = if ($env:VM_MAME_CFG)   { $env:VM_MAME_CFG }   else { "harness\mame-cfg" }
-$TITLES = if ($env:VM_TITLES) { $env:VM_TITLES -split "," } else { @("Kingquest1","Kingquest2","Kingquest3") }
+# ★★★★ THE DEFAULT WAS THREE TITLES AND THE GATE IS NINE. "the VM gate, nine titles" is cited by
+# that name across reports, and the nine were supplied through $env:VM_TITLES from a command line
+# that exists in no file -- so running the recorded script reproduced a THIRD of the gate and
+# printed "=== AC-2 SUMMARY === 3 PASS", which reads exactly like a pass.
+# ★★★ Fourth instance of one disease in this audit (res 74-vs-1,264, cel 1-title-vs-6, pic sweep
+# without picgate, this). **The scope of a gate is part of its definition and it kept living in
+# an environment variable.** Now it is the default, and VM_TITLES narrows it for a spot-check
+# rather than being required to widen it to the real thing.
+# ★★ THE NINE, RECOVERED BY STAGING EVERY TITLE IN THE GAME DIR AND KEEPING THE ONES THAT ARE v2.
+# Kingquest4, GoldRush and ManhunterNewYork all fail staging with "detected unknown; v2 only this
+# phase" (design §11.1) -- they are v3 and are NOT gate titles. MixedUpMotherGoose is v2 and is
+# the ninth. ★ This is a §2Q binding ("the game set is pinned, not a preference") that was living
+# in an environment variable; it is evidence now, not memory.
+$VM_GATE_TITLES = @("Kingquest1","Kingquest2","Kingquest3",
+                    "SpaceQuest-1","SpaceQuest-2","PoliceQuest1",
+                    "larry1","BlackCauldron","MixedUpMotherGoose")
+$TITLES = if ($env:VM_TITLES) { $env:VM_TITLES -split "," } else { $VM_GATE_TITLES }
 $CYCLES = if ($env:VM_CYCLES) { $env:VM_CYCLES } else { "600" }
 
 $ASMARGS = @("--format=raw","--output=build/vm_probe.bin","--list=build/vm_probe.lst",
@@ -21,6 +37,10 @@ if ($env:VM_PACEONLY) { $ASMARGS += "-DVM_PACEONLY"; "PACE-ONLY build (AC-7 spli
 & C:\WIN_LWTools\lwasm.exe @ASMARGS src/harness/vm_probe.s
 if ($LASTEXITCODE -ne 0) { throw "assemble failed" }
 "vm_probe: $((Get-Item build\vm_probe.bin).Length) bytes"
+# ★★ AC-3's stamp -- see res_run.ps1. vm_load.ps1 deliberately does NOT build (concurrent MAME
+# instances would race on this file), so it checks staleness instead; this is the producer whose
+# identity that check is against.
+"  [source-tree $(& python harness\tools\gate_audit.py --hash src/harness/vm_probe.s)]"
 
 New-Item -ItemType Directory -Force build\vm_stage | Out-Null
 # ★★★ SYMBOLS COME FROM lwasm's --map, NEVER from the listing. The listing scrape matched an

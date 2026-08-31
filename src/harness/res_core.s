@@ -158,6 +158,10 @@ res_ckey        rmb     RES_CACHE_MAX           ; LOGIC index
 res_caddr       rmb     2*RES_CACHE_MAX         ; where its bytes are
 res_clen        rmb     2*RES_CACHE_MAX         ; how many
 res_ccur        fdb     RES_ARENA_END   ; cache allocation pointer, grows DOWN
+res_evicted     fcb     0               ; ★ per-open latch: at most one evict-and-retry
+res_cevict      fdb     0               ; ★ how many times starvation forced an eviction --
+                                        ;   reported, because a HIGH count means the arena is
+                                        ;   genuinely too small and the cache is only masking it
 res_chits       fdb     0               ; ★ AC-5 evidence the cache is actually hitting
 res_cmiss       fdb     0
 * ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -241,6 +245,8 @@ ro_room:
                 rts
 
 ro_fetch:
+                clr     res_evicted             ; ★ at most one eviction per open
+ro_fetch_retry:
                 ldd     res_top
                 std     res_dest
                 std     res_base
@@ -253,6 +259,61 @@ ro_fetch:
                 pshs    a,b                     ; ★ kept: a LOGIC miss records the index below
                 jsr     res_fetch               ; refuses if it will not fit above res_top
                 lda     res_err
+                beq     ro_fetched
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ EVICT AND RETRY -- THE CACHE MUST BOUND ITSELF, BECAUSE res_core HAS CALLERS WITH NO VM.
+*
+* ★★★★ THE DEFECT THIS CLOSES. res_ccur grows DOWN and NOTHING EVER MOVED IT BACK except
+* res_cache_flush, which is called from vm_interpret_cycle. So the cache's correctness depended
+* on a VM running rooms. res_probe has no VM and no rooms: res_ccur walked down until the space
+* left above res_top could not hold the next payload, and the gate reported RES_E_BIG at 805 of
+* 1,264. **The cache was not full and the arena was not too small -- the cache had eaten the
+* arena and had no way to give it back.**
+*
+* ★★★★ A CACHE THAT CAN CAUSE AN ERROR IS NOT A CACHE, IT IS AN ALLOCATOR WITH A LEAK. That is
+* the finding, and it is a LAYERING fact rather than a sizing one: the cache lives in res_core,
+* its lifecycle lived in vm_run/vm_cycle, and res_core has three callers with three arena sizes
+* (12,288 res_probe / 16,384 p3b / 21,760 vm_probe). Two of them have a VM and the defect was
+* invisible in both. **Sizing the arena up would have hidden it again**, at whatever the new
+* arena's threshold turned out to be.
+*
+* ★★★ DEPTH 0 IS THE WHOLE SAFETY ARGUMENT, and it is the SAME argument res_cache_flush already
+* makes. Above depth 0 a cached LOGIC's bytes may be the bytes currently executing -- evicting
+* there is precisely the fault that halted all nine titles at cycle 0 when the first version
+* reset the arena inside `new.room`. So: evict only at depth 0, where no frame is open and
+* nothing is running out of the arena. **The unsafe case is not handled more cleverly here; it
+* is declined**, and RES_E_FULL is still reported above depth 0 exactly as before.
+*
+* ★★ vm_new_room's reset is now a POLICY HINT, not a correctness requirement. It still flushes
+* at a room change, which is the right moment to drop a working set; but a caller that never
+* calls it can no longer starve. ★ Retry is capped at one: after an eviction the arena is at its
+* maximum, so a second failure is a genuine RES_E_BIG and must be reported as one.
+* ★★★ -DABL_NOEVICT KEEPS THE CACHE AND REMOVES ONLY THE RETRY, which is the arm that separates
+* "the cache is wrong" from "eviction is wrong". -DABL_NOCACHE proved the cache is implicated
+* (1,264/1,264 clean with it off, 28 LOGIC mismatches with it on) but CANNOT say which half,
+* because eviction only ever runs when the cache is on. ★★ With this the sweep halts at
+* RES_E_BIG again as it did in T-P0-037, and any volume that COMPLETES before starving reports
+* whether its LOGICs are byte-correct without eviction ever having fired.
+                ifdef   ABL_NOEVICT
+                bra     ro_fail_pop
+                endc
+                tst     res_evicted
+                bne     ro_fail_pop             ; already evicted -- this is a real RES_E_BIG
+                tst     res_depth
+                bne     ro_fail_pop             ; ★ depth>0: cached bytes may be executing
+                lda     res_cn
+                beq     ro_fail_pop             ; nothing cached -- eviction would free nothing
+                jsr     res_cache_evict
+                inc     res_evicted
+                ldd     res_cevict
+                addd    #1
+                std     res_cevict
+                clr     res_err
+                bra     ro_fetch_retry
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+
+ro_fetched:     lda     res_err
                 bne     ro_fail_pop             ; ★ no push on failure: depth is unchanged
 
 * ★★★★ A LOGIC MISS RELOCATES ITS BYTES INTO THE CACHE REGION, AND THE FIRST DESIGN DID NOT.
@@ -325,6 +386,15 @@ ro_out:         rts
 * is shorter than one iteration of the copy loop it replaces.
 res_cache_find:
                 pshs    a,b
+* ★★★★ -DABL_NOCACHE TURNS THE CACHE OFF ENTIRELY: every find misses, every stash is a no-op, so
+* res_core degrades to the pre-T-P0-036 fetch-every-time path. ★★★ This exists because the gate
+* went from RES_E_BIG to LOGIC MISMATCHES when eviction landed, and "the cache caused it" and
+* "the cache revealed it" are different claims that a LOGIC-only failure pattern cannot separate
+* on its own -- LOGIC is both the cached class AND the class the eviction path touches.
+* ★★ An ablation answers it in one run and a reading of the copy loop does not [L-58].
+                ifdef   ABL_NOCACHE
+                bra     rcf_miss
+                endc
                 lda     res_cn
                 beq     rcf_miss
                 ldx     #res_ckey
@@ -352,6 +422,9 @@ rcf_hit:        clra
 * behaviour**, which is exactly what re-fetch being neutral [AD-87] buys.
 res_cache_stash:
                 pshs    a,b,x,y,u
+                ifdef   ABL_NOCACHE
+                bra     rcs_out                 ; ★ nothing is ever cached; see res_cache_find
+                endc
                 lda     res_cn
                 cmpa    #RES_CACHE_MAX
                 bhs     rcs_out                 ; table full -- leave it uncached
@@ -465,16 +538,26 @@ res_cache_reset:
                 sta     res_cache_pend
                 rts
 
+* ── res_cache_evict — drop the whole cache NOW. Caller must guarantee res_depth = 0 ──
+* ★★★ The one home for "give the arena back" (2F). res_cache_flush is the DEFERRED entry, called
+* from vm_interpret_cycle; ro_fetch's starvation retry is the IMMEDIATE entry, called at depth 0.
+* Both do the same two stores, and having them written twice is how the two paths would drift.
+* ★★ No victim choice, no timestamps: the working set is 3-4 entries and a starving fetch needs
+* the whole region, not a slot.
+res_cache_evict:
+                clr     res_cn
+                ldd     #RES_ARENA_END
+                std     res_ccur
+                rts
+
 * ★ Called from vm_interpret_cycle, outside every frame. Safe to move res_top here and only here.
 res_cache_flush:
                 lda     res_cache_pend
                 beq     rcx_out
                 clr     res_cache_pend
-                clr     res_cn
                 ldd     #RES_ARENA
                 std     res_top
-                ldd     #RES_ARENA_END          ; ★ reclaim the cache region too
-                std     res_ccur
+                jsr     res_cache_evict         ; ★ one home: clears res_cn, res_ccur = ARENA_END
 rcx_out:        rts
 
 res_close:

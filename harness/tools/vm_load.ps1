@@ -20,7 +20,17 @@ $TAG    = if ($env:VM_TAG)    { $env:VM_TAG }    else { "load" }
 $CFG    = if ($env:VM_MAME_CFG) { $env:VM_MAME_CFG } else { "harness\mame-cfg" }
 
 if (-not (Test-Path build\vm_probe.bin)) { throw "build/vm_probe.bin missing -- run vm_run.ps1 first" }
+
+# ★★★★ IT STILL MUST NOT BUILD (see the header) -- but "does not build" and "does not check" are
+# different things, and this script conflated them. The audit found build/vm_probe.bin 44 minutes
+# stale, so a determinism result from it would have been a determinism result about the WRONG
+# BINARY, reproducibly. ★★★ A harness that cannot build what it tests can still REFUSE to test
+# the wrong thing, and that is the whole fix available here [L-70].
+$stale = & python harness\tools\gate_audit.py --check build/vm_probe.bin
+$stale
+if ($LASTEXITCODE -ne 0) { throw "build/vm_probe.bin is stale -- run vm_run.ps1 to rebuild, then re-launch" }
 "using build\vm_probe.bin ($((Get-Item build\vm_probe.bin).Length) bytes), NOT rebuilding"
+"  [source-tree $(& python harness\tools\gate_audit.py --hash src/harness/vm_probe.s)]"
 
 $jobs = @()
 foreach ($t in $TITLES) {

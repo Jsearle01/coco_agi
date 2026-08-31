@@ -159,6 +159,25 @@ cp_decode:
                 lda     CP_CEL_NR
                 sta     vc_cel
                 jsr     vc_decode_cel
+* ★★★★ -DCEL_FAULT INJECTS ONE WRONG PIXEL, ON PURPOSE. AC-9 asks every re-run gate to prove it
+* can still SEE a fault, and the cel gate had no fault mode at all -- so "9,193/9,193 match" was
+* a number with no demonstrated sensitivity. **A gate that has never been shown to fail is not
+* known to be a gate**, and this one runs 9,193 comparisons whose only observed outcome is
+* success.
+* ★★★ One byte, in the decoded output, after the decode: it does not disturb the decoder's own
+* state, so what it tests is exactly the comparison path -- readback, manifest, and celgate.py's
+* byte diff.
+* ★★ MEASURED: 814 of 814 mismatch, not one. CP_CEL is the single destination buffer EVERY cel
+* decodes through, so a fault placed here fires once per cel by construction. The prediction
+* written here first ("a single mismatched cel") was wrong about its own blast radius, and the
+* run said so. ★ It is still a valid detectability proof -- 0/814 match, celgate exits 1 -- but
+* it proves the comparison path is live, not that the gate LOCALISES a fault. A localising fault
+* would have to key on a specific (view, loop, cel) before writing.
+                ifdef   CEL_FAULT
+                lda     CP_CEL
+                coma
+                sta     CP_CEL
+                endc
                 lda     vc_err
                 sta     CP_ERR
                 lda     vc_w

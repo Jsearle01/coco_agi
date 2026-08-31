@@ -1,0 +1,23 @@
+# harness/tools/gates.manifest -- ONE HOME for how each gate artifact is built (CLAUDE.md 2F).
+#
+# ★★★★ WHY THIS FILE EXISTS. The four gate probes were built with four DIFFERENT flag sets, and
+# that fact lived in four different places (res_run.ps1, vm_run.ps1, build_comp.sh, and for pic
+# and cel: NOWHERE AT ALL). Recovering pic's and cel's flags took a brute-force size-match against
+# the shipped artifact, because no file in the tree recorded them. **A build line that exists only
+# in a shell history is the L-45 defect applied to the assemble step** -- run_gates.sh already
+# fixed it for the LAUNCH step and left the BUILD step exactly as it was.
+#
+# ★★★ It is also what lets gate_audit.py PROVE staleness instead of inferring it. An mtime says
+# "the source tree moved"; it does not say the artifact is wrong. pic_probe.bin was a full day
+# stale by mtime and byte-identical to a fresh build -- the renderer gate's 45/45 was never
+# invalidated. With the flags recorded here the audit can rebuild and COMPARE BYTES, which is
+# the question that actually matters.
+#
+# format:  name <TAB> source <TAB> artifact <TAB> flags (space-separated, may be empty)
+# ★ Flags are load-bearing: comp built with -DHAL_GFX_MODE_SERVICE is 1,373 bytes, not 967, and
+# is a different program from the one the compositing numbers were established against.
+pic	src/harness/pic_probe.s	build/pic_probe.bin	-DHAL_GFX_MODE_SERVICE
+res	src/harness/res_probe.s	build/res_probe.bin	-DHAL_GFX_MODE_SERVICE
+cel	src/harness/cel_probe.s	build/cel_probe.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK
+comp	src/harness/comp_probe.s	build/comp_probe.bin
+vm	src/harness/vm_probe.s	build/vm_probe.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK

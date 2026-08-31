@@ -22,9 +22,27 @@ Set-Location C:\Projects\coco_agi
 # correctness defect in a GATED path all along, and the gate could not see it because the gate
 # was stale rather than because the sample was wrong.
 # ★★ A gate that does not build its own artifact is testing history [L-70].
-& C:\WIN_LWTools\lwasm.exe --raw -I. -DHAL_GFX_MODE_SERVICE --output=build\res_probe.bin src\harness\res_probe.s
+# ★★ $env:RES_ASMFLAGS appends ablation defines (-DABL_NOCACHE, -DABL_FWDCOPY, -DABL_NOCOPY) so an
+# arm of an experiment is a DIFFERENT INVOCATION OF THIS SCRIPT rather than a hand-edited copy of
+# its assemble line. ★ An arm assembled by hand is an arm nobody can re-run [L-45].
+# ★★★★ AN ABLATION ARM LEAVES ITS BINARY IN THE ARTIFACT'S NORMAL PATH, WHICH IS THE ORIGINAL
+# DEFECT REINTRODUCED BY THE EXPERIMENT. After the -DABL_NOEVICT arm, build\res_probe.bin held
+# the ablated program (2,021 bytes vs 2,019 clean); any later run that did not rebuild would have
+# gated the ablation and reported it as the gate. `gate_audit.py --verify` caught it, which is
+# the whole argument for a content check over an mtime -- both files were freshly written.
+# ★★ So an ablated build announces itself in the filename and never occupies the clean path.
+$RESOUT = "build\res_probe.bin"
+if ($env:RES_ASMFLAGS) { $RESOUT = "build\res_probe_abl.bin" }
+$RESASM = @("--raw","-I.","-DHAL_GFX_MODE_SERVICE","--output=$RESOUT")
+if ($env:RES_ASMFLAGS) { $RESASM += $env:RES_ASMFLAGS.Split(" ") ; "ABLATION: $env:RES_ASMFLAGS -> $RESOUT" }
+& C:\WIN_LWTools\lwasm.exe @RESASM src\harness\res_probe.s
 if ($LASTEXITCODE -ne 0) { throw "res_probe assemble failed" }
-"res_probe: $((Get-Item build\res_probe.bin).Length) bytes (assembled by this script)"
+"res_probe: $((Get-Item $RESOUT).Length) bytes (assembled by this script) -> $RESOUT"
+# ★★★ AC-3's STAMP. A size is a weak identity -- two different programs assemble to the same
+# length routinely. The hash covers the source's whole transitive include set, so a result
+# carries the identity of the CODE that produced it and a future staleness announces itself in
+# the gate's own output instead of being found by an audit two tasks later [L-70].
+"  [source-tree $(& python harness\tools\gate_audit.py --hash src/harness/res_probe.s)]"
 
 $GAMES  = if ($env:RES_GAMES_ROOT) { $env:RES_GAMES_ROOT } else { "C:\Projects\agi-games\pc" }
 $CFG    = if ($env:RES_MAME_CFG)   { $env:RES_MAME_CFG }   else { "harness\mame-cfg" }
@@ -48,7 +66,10 @@ foreach ($t in $TITLES) {
     python harness\tools\res_stage.py (Join-Path $GAMES $t) --out $stage `
         --volume $v --blocks $BLOCKS --volbase $VOLBASE | Out-Null
 
-    $env:RES_OUT = $out; $env:RES_STAGE = $stage; $env:RES_PROG = "build\res_probe.bin"
+    # ★★ $RESOUT, not the literal: an ablation arm must RUN the ablated binary it just built.
+    # Hardcoding the clean path here would have assembled the ablation and then gated the clean
+    # program -- an experiment that silently tests the control in both arms.
+    $env:RES_OUT = $out; $env:RES_STAGE = $stage; $env:RES_PROG = $RESOUT
     # ★ -video none: this loop launches MAME ten times unattended and a window per launch
     # takes over the desktop. Nothing here is a 25.3 gate -- the gate runs windowed, by Jay.
     C:\mame\mame.exe coco3 -video none -seconds_to_run 3000 -skip_gameinfo -nothrottle `

@@ -13,6 +13,15 @@
 # not wall clock [idioms]. execution_state is left to the script; a headless -debug run HANGS
 # without it, which is the gotcha this wrapper exists to keep from being rediscovered.
 set -e
+# ★★★★ BUILD WHAT WE TEST. This script consumed build/comp_probe.bin and never assembled it; the
+# audit found that artifact 24 minutes stale against composite.s. ★★ The caller may still pass a
+# variant as $3 (packed, faulted, no-count) -- those are built by build_comp.sh, which does
+# assemble -- but the DEFAULT path must not depend on someone having remembered [L-70].
+LWASM=${LWASM:-/c/WIN_LWTools/lwasm.exe}
+if [ -z "${3:-}" ]; then
+    "$LWASM" --raw -I. -o build/comp_probe.bin src/harness/comp_probe.s
+    echo "  built build/comp_probe.bin  [source-tree $(python harness/tools/gate_audit.py --hash src/harness/comp_probe.s)]"
+fi
 STAGE=${1:?stage dir, e.g. build/comp_stage/SpaceQuest-1}
 FRAMES=${2:?frames dir, e.g. oracle/dumps/frames-SpaceQuest-1}
 PROG=${3:-build/comp_probe.bin}
