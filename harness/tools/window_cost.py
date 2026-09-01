@@ -130,6 +130,26 @@ def main():
         print("   ★★★ TOO CLOSE TO CALL on this model alone.")
     else:
         print("   ★★★ A clear enough margin to choose on.")
+
+    # ★★★★★ SENSITIVITY -- WHICH ASSUMPTION WOULD HAVE TO BE WRONG, AND BY HOW MUCH.
+    # "1.45x is under the threshold" is not an answer, it is a refusal to give one. The useful
+    # question is what it would take to FLIP the ranking: each assumed per-occurrence cost is
+    # multiplied by a MEASURED count, so the break-even value of each is arithmetic. An
+    # assumption that has to double before it matters is not worth re-deriving; one that only
+    # has to move 20% is the measurement to go and take.
+    gap = b_cy - a_h_cy
+    print()
+    print("★★★★ SENSITIVITY of A' vs B -- break-even value of each ASSUMED cost:")
+    print(f"    (A' must gain {gap:+,} cy for B to win)")
+    for label, cur, count in (
+            ("A' row compare, per flush", A_ROW_COMPARE, flushes),
+            ("A' slice computation, per row transition", A_PER_SPAN, rowtrans),
+            ("A' straddle penalty, per straddling pixel", A_PER_STRADDLE_PIXEL, strpix)):
+        need = cur + gap / count if count else float("inf")
+        print(f"    {label:<42} {cur:>3} -> {need:>6.1f} cy  "
+              f"({need/cur:.1f}x its assumed value)")
+    print("★★ The smallest multiple is the one to distrust: if any is plausible, the ranking is")
+    print("   not safe and the design should be chosen on structure rather than on this model.")
     return 0
 
 
