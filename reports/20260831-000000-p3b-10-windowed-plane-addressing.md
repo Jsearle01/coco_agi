@@ -413,4 +413,4 @@ text and assembler output.
 
 ### 11 — Commit
 
-<filled at commit>
+`292b1cc` (pushed to origin/wip before this report; the hash is recorded in its successor and pushed with it).
