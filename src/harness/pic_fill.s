@@ -750,6 +750,81 @@ ff_flush:
 ffl_nocnt:
                 endc
 
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ -DPIC_STRADDLE — THE CENSUS THAT PRICES BOTH WINDOWING DESIGNS.
+*
+* Windowing the fill has two candidate shapes and the choice between them is an arithmetic
+* question, not a preference:
+*
+*   A  single-slice + fallback   map the slice holding this row's 3-row neighbourhood and run
+*                                P3.3's walk unchanged; for rows where the neighbourhood crosses
+*                                a boundary, a slower per-access path.
+*   B  dual-slot 16 KB window    map fb slices n and n+1 into slots 5 and 6 so $A000-$DFFF is
+*                                contiguous and NO neighbourhood can straddle -- but slot 5 is
+*                                the priority plane, so every span flush that writes the second
+*                                plane must remap it and put it back.
+*
+* ★★★★ A's cost is (straddling spans x fallback penalty). B's is (flushes with a secondary write
+* x 2 remaps). **Both multipliers are content properties -- which rows the fills actually touch
+* and how often a span writes two planes -- so they are MEASURABLE, and measuring them is
+* cheaper and safer than building both.** The per-occurrence costs come from the ISA.
+*
+* ★★★ The straddle set is a property of the GEOMETRY, not of this probe's map: rows whose
+* [(y-1)*160, (y+1)*160+159] span crosses a multiple of 8,192. That is {50,51,52, 101,102,103,
+* 152,153,154} for the visual plane -- 9 of 168 -- and it is the same set whatever base address
+* the plane sits at, which is why this counts correctly in pic_probe's FLAT map [L-73: name what
+* the toggle moves -- this one moves nothing but a counter].
+*
+* ★★ Guarded, and OFF in every timing build, per the separate-builds rule that P3.3 established
+* and P3b.3's 2.832 s depends on.
+                ifdef   PIC_STRADDLE
+                pshs    a,b
+                ldd     CNT_FLUSH               ; ★ the denominator: runs flushed, not seeds
+                addd    #1
+                std     CNT_FLUSH
+                lda     fc_y
+                beq     fst_lo                  ; row 0: the neighbourhood starts at row 0
+                deca
+fst_lo:         ldb     #PIC_W
+                mul                             ; D = lo row * 160
+                lsra
+                lsra
+                lsra
+                lsra
+                lsra                            ; A = lo slice (offset >> 13)
+                pshs    a
+                lda     fc_y
+                cmpa    #PIC_H-1
+                beq     fst_hi                  ; last row: the neighbourhood ends at it
+                inca
+fst_hi:         ldb     #PIC_W
+                mul
+                addd    #PIC_W-1                ; D = hi row * 160 + 159, the last byte touched
+                lsra
+                lsra
+                lsra
+                lsra
+                lsra                            ; A = hi slice
+                cmpa    ,s+
+                beq     fst_done                ; one slice: P3.3's walk runs untouched
+                ldd     CNT_STRSPAN
+                addd    #1
+                std     CNT_STRSPAN
+                clra
+                ldb     ff_runn
+                addd    CNT_STRPIX
+                std     CNT_STRPIX
+fst_done:       puls    a,b
+* ★ B's multiplier: flushes that write a SECOND plane, each needing slot 5 away from priority
+* and back. ff_sec is the flag the flush itself tests twenty lines below.
+                lda     ff_sec
+                beq     fst_nosec
+                ldd     CNT_SECFLUSH
+                addd    #1
+                std     CNT_SECFLUSH
+fst_nosec:
+                endc
+
 * ★★★ THE PRIMARY WRITE IS THE PRIORITY PLANE WHENEVER fc_case IS FC_PRIORITY, so packing has
 * to be handled on BOTH write paths, not only the secondary one. Missing this leaves
 * priority-only pictures (9 of the gated 45) writing byte-per-pixel into a packed plane.

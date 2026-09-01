@@ -59,7 +59,7 @@ os.execute('mkdir "' .. OUTDIR:gsub("/", "\\") .. '" 2>nul')
 local f0 = io.open(OUTDIR .. "/run.log", "w"); if f0 then f0:close() end
 local csv = io.open(OUTDIR .. "/timing.csv", "w")
 csv:write("name,render_s,calib_s,vert,horiz,diag,pixels,fills,spans,sp_peak_bytes,bad_op," ..
-          "checks,path_v,path_p,path_g\n")
+          "checks,path_v,path_p,path_g,str_span,str_pix,sec_flush,flushes\n")
 
 local cpu  = manager.machine.devices[":maincpu"]
 local prog = cpu.spaces["program"]
@@ -144,9 +144,14 @@ local function finish()
     -- AC-2: which of draw_FillCheck's three cases did each call take?
     local pv, pp, pg = rd16(0x0098), rd16(0x009A), rd16(0x009C)
 
-    csv:write(string.format("%s,%.9f,%.9f,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
+    -- ★★ The three windowing-design multipliers. Zero unless the guest is a -DPIC_STRADDLE
+    -- build; reading them from a build without the census yields 0, which is honest rather than
+    -- misleading -- the columns exist, and an all-zero column says "not measured here".
+    local ss, sp, sf, fl = rd16(0x009E), rd16(0x00A0), rd16(0x00A2), rd16(0x00A4)
+
+    csv:write(string.format("%s,%.9f,%.9f,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
         cur, render, calib, rd16(0x0082), rd16(0x0084), rd16(0x0086),
-        pixels, fills, spans, peak, bad, checks, pv, pp, pg))
+        pixels, fills, spans, peak, bad, checks, pv, pp, pg, ss, sp, sf, fl))
     csv:flush()
     logf("%-18s render %8.4f s  fills %4d  spans %6d  peak %4d B  px %6d  bad=$%02X",
          cur, render, fills, spans, peak, pixels, bad)

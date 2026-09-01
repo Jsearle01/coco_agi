@@ -104,6 +104,16 @@ CNT_CHK         equ     $0094           ; AC-7: fill_check calls, 32-bit (4/px o
 PATH_V          equ     $0098           ; AC-2: fill_check took the visual-only case
 PATH_P          equ     $009A           ; AC-2: ... the priority-only case
 PATH_G          equ     $009C           ; AC-2: ... the general (both planes on) case
+* ★★ -DPIC_STRADDLE only. The three multipliers that price windowing designs A and B; see the
+* census block in pic_fill.s for what each one is for.
+CNT_STRSPAN     equ     $009E           ; spans on a row whose 3-row neighbourhood straddles
+CNT_STRPIX      equ     $00A0           ; pixels written by those spans
+CNT_SECFLUSH    equ     $00A2           ; flushes that write a SECOND plane (design B's cost)
+* ★★★★ THE DENOMINATOR, AND IT IS NOT CNT_SPAN. CNT_SPAN counts SEED POINTS PUSHED onto the fill
+* stack; a flush happens once per completed RUN, and the two differ by a large factor. Pricing
+* either design against CNT_SPAN would have divided by the wrong number -- CLAUDE.md 2H's worked
+* example, verify what a figure COUNTS rather than what its name suggests.
+CNT_FLUSH       equ     $00A4           ; runs actually flushed -- the real per-span multiplier
 
                 org     $0700
 * ═══════════════════════════════════════════════════════════════════
@@ -128,6 +138,20 @@ probe_entry:
                 std     PATH_V
                 std     PATH_P
                 std     PATH_G
+* ★★★★ THE CENSUS COUNTERS MUST BE ZEROED HERE TOO, AND THE FIRST RUN PROVED IT.
+* Every counter above is cleared per render because this probe renders many pictures in one
+* session. Adding three at $009E-$00A3 and not adding them here left them holding whatever the
+* RAM held: the first sweep reported str_span 18,978 against str_pix 1,355 for a picture with
+* 357 seeds -- **a span counted without its pixels is arithmetically impossible**, which is what
+* made the omission visible rather than merely wrong.
+* ★★ The failure is quiet in the other direction: had the garbage been small, the numbers would
+* have looked plausible and priced a design decision.
+                ifdef   PIC_STRADDLE
+                std     CNT_STRSPAN
+                std     CNT_STRPIX
+                std     CNT_SECFLUSH
+                std     CNT_FLUSH
+                endc
 * ★★★ PICTURE STATE RESET — EVERY RENDER, NOT JUST THE FIRST LOAD.
 * [ref: picture.cpp:385-388 @ 9d9b9e9] drawPicture() opens with
 *     _priOn = false;  _scrOn = false;  _scrColor = 15;  _priColor = 4;
