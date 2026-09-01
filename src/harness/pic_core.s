@@ -28,11 +28,25 @@ pix_addr:
                 addb    cur_x
                 adca    #0                      ; D = y*160 + x
                 std     pix_off
+* ★★★ THE FLAT FORM IS LEFT INLINE AND UNTOUCHED, DELIBERATELY. Routing both builds through a
+* common `jsr` would add 12 cycles to the flat path and make AC-5's before/after a comparison of
+* two changed things [L-54]. **The flat build must stay byte-identical so the baseline it
+* provides is still the baseline that was measured.**
+* ★ Priority FIRST, then visual: both helpers return X, and doing visual last leaves X correct
+* with no temporary. The two planes live in DIFFERENT windows ($A000 and $C000), each with its
+* own cached slice, so holding a pointer into each at once is legal.
+                ifdef   PLANE_WINDOWED
+                jsr     plane_pri
+                tfr     x,y                     ; Y = priority address
+                ldd     pix_off
+                jsr     plane_vis               ; X = visual address
+                else
                 addd    #FB_BASE
                 tfr     d,x
                 ldd     pix_off
                 addd    #PRI_BASE
                 tfr     d,y
+                endc
                 rts
 
 * ═══════════════════════════════════════════════════════════════════
@@ -83,8 +97,12 @@ put_pixel:
                 lda     scr_on
                 beq     pp_pri
                 ldd     pix_off
+                ifdef   PLANE_WINDOWED
+                jsr     plane_vis
+                else
                 addd    #FB_BASE
                 tfr     d,x
+                endc
                 lda     scr_dbl                 ; the doubled byte, precomputed
                 sta     ,x
                 ifndef  PIC_NOCOUNT
@@ -104,8 +122,12 @@ pp_pri:         lda     pri_on
                 ifdef   PRI_PACKED
                 lsra
                 rorb
+                ifdef   PLANE_WINDOWED
+                jsr     plane_pri
+                else
                 addd    #PRI_BASE
                 tfr     d,x
+                endc
 * ★★ ORDER IS LOAD-BEARING: `lda ,x` sets N/Z from the byte it loads, so the parity test must
 * come AFTER it, on B. Writing `bitb #1 / lda ,x / bne` tests the loaded byte instead of the
 * parity -- caught here before assembly, and it is the flag-clobber shape x_liveness.py was
@@ -127,8 +149,12 @@ pp_pri_lo:      anda    #$F0                    ; odd x: keep the EVEN pixel
                 ora     pri_color
 pp_pri_put:     sta     ,x
                 else
+                ifdef   PLANE_WINDOWED
+                jsr     plane_pri
+                else
                 addd    #PRI_BASE
                 tfr     d,x
+                endc
                 lda     pri_color
                 sta     ,x
                 endc

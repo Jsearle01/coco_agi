@@ -505,6 +505,13 @@ pc_lp:          std     ,x++
 * in this file, which meant the gated "renderer" could not be built into any other image.
 * ★★ A PURE MOVE: same content, same order, same position. pic_probe.bin is byte-identical
 * across the change and that is verified, not assumed.
+* ★★★ plane_win.s BEFORE pic_core.s: pic_core's windowed sites `jsr plane_vis`, and lwasm needs
+* the label defined for a direct addressing decision on a forward reference. Under the flat build
+* the module still assembles but nothing calls it -- verified by pic_probe.bin remaining
+* byte-identical at 2,642.
+                ifdef   PLANE_WINDOWED
+                include "src/harness/plane_win.s"
+                endc
                 include "src/harness/pic_core.s"
 
 * ═══════════════════════════════════════════════════════════════════

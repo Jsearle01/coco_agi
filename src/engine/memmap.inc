@@ -212,5 +212,35 @@ MAP_ARENA_BYTES equ     24576           ; ★ 3 blocks, CHOSEN FROM THE EVICTION
                 error   "priority plane exceeds design 3.2's 2-block budget"
                 endc
 * ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ AC-2: REACHING, NOT FITTING [L-69]. Every assertion above is about SPACE -- do the
+* regions overlap, does the plane fit the block budget. **None of them asks whether the plane
+* can be ADDRESSED**, and that is the defect this task exists to close:
+*
+*     visual    26,880 B into an 8,192 B window: $C000 + 26,879 = $128FF, wrapping to $28FF,
+*               inside the code region $2000-$5300 -- the renderer overwrites its own code
+*     priority  13,440 B into an 8,192 B slice: $A000 + 13,439 = $D47F, running THROUGH $C000,
+*               which is the framebuffer slice
+*
+* ★★★★ The visual overrun is in the dispatch. **The priority one is not, and it is quieter**:
+* it does not wrap into code, it writes priority bytes over the framebuffer, so it presents as a
+* wrong picture rather than a crash.
+*
+* ★★★ THE ASSERTION IS THE DELIVERABLE, NOT THE ARITHMETIC. A build that addresses a plane
+* FLAT must have a plane that fits its window, or it does not assemble. A build that defines
+* PLANE_WINDOWED reaches every byte through plane_vis / plane_pri, which mask the offset to
+* PLANE_SLICE_MSK -- so being inside the window is STRUCTURAL there, guaranteed by the mask
+* rather than checked by a sum. **That is why this asserts on the flat case only: the windowed
+* case cannot violate it.**
+* ★★ Precedent AD-78: an overlap claim checked by a human reading a table is the state these
+* assertions exist to end -- four probes each had a coherent table and two of them overlapped.
+                ifndef  PLANE_WINDOWED
+                ifgt    MAP_VIS_BYTES-(MAP_PHASE_WIN_E-MAP_PHASE_WIN)
+                error   "visual plane cannot be REACHED flat: it exceeds MAP_PHASE_WIN. Define PLANE_WINDOWED."
+                endc
+                ifgt    MAP_PRI_BYTES-(MAP_PRI_SLICE_E-MAP_PRI_SLICE)
+                error   "priority plane cannot be REACHED flat: it exceeds MAP_PRI_SLICE. Define PLANE_WINDOWED."
+                endc
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 
                 endc
