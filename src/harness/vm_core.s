@@ -266,6 +266,23 @@ vm_tic_loop:
                 inc     ,x
                 puls    a
                 endc
+* ★★★★★ THE RANGE CHECK THAT REPLACES 472 BYTES OF TABLE PADDING.
+* VMTEST_TAB used to hold 256 entries so this could index with a raw opcode byte and never test
+* the range -- entries 20-255 were every one of them vm_test_unimpl. The generator now sizes the
+* table to the v2 test space (VMTEST_MAX = 20) and this does the job those 236 dead entries did.
+* ★★★★ BEHAVIOUR IS IDENTICAL, and that is the point rather than a hope: an opcode >= 20 reached
+* vm_test_unimpl through the padding before and reaches the SAME handler through this branch now.
+* The VM gate is byte-identical per cycle across nine titles, which is what checks it.
+* ★★ `bhs` is the UNSIGNED branch: vm_op is a byte and opcodes above $7F must compare as large,
+* not negative [L-40, the signed-index lesson this file already carries twice].
+* ★ It loads X and FALLS INTO the same `jsr ,x` rather than branching past it: everything
+* downstream -- vm_exitall, vm_skip_instruction, the NOT/OR handling -- must run identically for
+* an unimplemented test, and jumping around the dispatch would have quietly skipped it.
+                cmpa    #VMTEST_MAX
+                blo     vmt_inrange
+                ldx     #vm_test_unimpl
+                bra     vmt_dispatch
+vmt_inrange:
                 ldx     #VMTEST_TAB
                 tfr     a,b
                 clra
@@ -273,6 +290,7 @@ vm_tic_loop:
                 rola
                 leax    d,x
                 ldx     ,x
+vmt_dispatch:
                 jsr     ,x                      ; sets vm_testres
                 lda     vm_exitall
                 bne     vm_tic_true

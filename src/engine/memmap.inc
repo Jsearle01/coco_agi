@@ -93,7 +93,14 @@ MAP_CODE        equ     $2000
 * ★★★ Recorded because the useful part is that the floor worked: it turned a slide into a
 * decision, and the decision was reversible because it had been made explicitly rather than
 * absorbed. The reservation stands at 3,328 with 256 bytes above the floor.
-MAP_CODE_END    equ     $5300           ; 13,056 B; the P3b glue measures 13,041
+* ★★★ 13,056 B. The P3b glue measured 12,782 at T-P0-042 (windowed, PRI_PACKED), leaving 274.
+* ★★★★ THE COMMENT HERE SAID "13,041" AND WAS STALE BY 61 BYTES [AD-95] -- p3b_probe.s had not
+* assembled for some time and the figure it quoted was from a build nobody could reproduce. **A
+* number in a comment has no producer**, which is the same defect class as the cel gate's 6,782
+* and gates.manifest's flag set. ★★ It is kept here only as orientation; **the check that matters
+* is p3b_probe.s's own `ifgt P3_CODE_END-MAP_CODE_END`, which fires at assembly time** and is
+* what caught the overrun [AD-78's precedent: an assertion, not a table a human reads].
+MAP_CODE_END    equ     $5300
 MAP_RESERVED    equ     $5300
 MAP_RESERVED_END equ    $6000           ; 3,328 B, parser + sound (floor 3,072)
 * ★★★★ THE FLOOR IS DELIBERATELY ARBITRARY AND THAT IS ITS VALUE. Nobody has estimated the

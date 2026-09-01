@@ -433,6 +433,12 @@ phase_draw_enter:
 * ★ pic_core.s includes pic_draw.s and pic_fill.s itself -- those two includes sat inside the
 * extracted range, so the renderer arrives as one unit. Listing them again here is a
 * multiply-defined error, which is the assembler enforcing §2F rather than a nuisance.
+* ★★★ plane_win.s before pic_core.s: pic_core's windowed sites `jsr plane_vis`, and the module
+* must be defined first. Guarded, so a flat build of this probe is unaffected -- though a flat
+* build is exactly what memmap.inc's reachability assertion now refuses (§AC-2, T-P0-041).
+                ifdef   PLANE_WINDOWED
+                include "src/harness/plane_win.s"
+                endc
                 include "src/harness/pic_core.s"
                 include "src/harness/view_cel.s"
                 include "src/harness/composite.s"

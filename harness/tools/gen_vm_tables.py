@@ -187,9 +187,23 @@ def build(implemented, status):
 
     # ── test handler table ─────────────────────────────────────────────────────────────
     out.append("\n* ── VMTEST_TAB: handler per test opcode ───────────────────────────")
+    # ★★★★★ SIZED TO THE OPCODE SPACE, NOT TO 256, AND THAT IS WHERE P3b's 189 BYTES CAME FROM.
+    # The v2 test space is 20 opcodes. This table used to emit 256 entries so the dispatch could
+    # index with a raw opcode byte and never range-check -- entries 20-255 were all
+    # vm_test_unimpl, which is 472 bytes of padding whose only job was to make an out-of-range
+    # opcode land somewhere safe.
+    # ★★★★ vm_core.s now does that job with `cmpa #VMTEST_MAX / bhs vm_test_unimpl`. **The
+    # behaviour is identical**: an opcode >= 20 reached vm_test_unimpl through the table before
+    # and reaches it through the check now, same handler, same halt, same reported opcode.
+    # ★★★ It is also more honest about the opcode space -- a 256-entry table asserts that 256
+    # test opcodes exist, and 20 do [CLAUDE.md 2H: verify what a number COUNTS].
+    # ★★ VMOP_ARGS, VMTEST_ARGS and VMOP_TAB are deliberately LEFT AT 256 for now: one change,
+    # measured on its own [L-54]. VMOP_TAB's space is 183 of 256 so the padding is small; the
+    # two ARGS tables are byte-wide and would save 73 and 236, and each needs its own check.
+    out.append("VMTEST_MAX      equ     %d" % len(tests))
     out.append("VMTEST_TAB:")
     miss_test = []
-    for i in range(256):
+    for i in range(len(tests)):
         if 1 <= i < len(tests):
             name, params, handler = tests[i]
             base = label_for(handler)

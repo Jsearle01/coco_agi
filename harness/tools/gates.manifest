@@ -16,7 +16,22 @@
 # format:  name <TAB> source <TAB> artifact <TAB> flags (space-separated, may be empty)
 # ★ Flags are load-bearing: comp built with -DHAL_GFX_MODE_SERVICE is 1,373 bytes, not 967, and
 # is a different program from the one the compositing numbers were established against.
-pic	src/harness/pic_probe.s	build/pic_probe.bin	-DHAL_GFX_MODE_SERVICE
+# ★★★★★ AD-96: THE pic GATE HAS FOUR CONFIGURATIONS AND THIS FILE RECORDED ONE.
+# The `pic` row builds the artifact the 45/45 CORRECTNESS gate runs -- unpacked, counters in,
+# 2,642 B, median 5.9349 s. **Every published room-render TIMING figure comes from a different
+# program**: 2.746 s is -DPIC_NOCOUNT unpacked (2,512 B) and 2.832 s is -DPIC_NOCOUNT -DPRI_PACKED
+# (2,971 B). Both were reproduced to the millisecond at T-P0-041, so neither figure is wrong --
+# **they simply describe binaries this manifest did not build.**
+# ★★★★ WHICH FIGURE IS CURRENT FOR THE ROOM RENDER: **2.832 s**, the packed nocount build.
+# Packing is load-bearing (P3b.3: without it the draw phase does not integrate), so the packed
+# configuration is the one the design plans against; the unpacked 2.746 s is its control, and the
+# counted 5.9349 s is the correctness gate and is NOT a performance figure -- counters cost 2.16x.
+# ★★★ The timing rows are marked `timing` in column 5 so a reader cannot take a median from a row
+# built for correctness, which is exactly the substitution AD-96 records.
+pic	src/harness/pic_probe.s	build/pic_probe.bin	-DHAL_GFX_MODE_SERVICE	correctness 45/45, median 5.9349 s (counters in -- not a perf figure)
+pic_nc	src/harness/pic_probe.s	build/pic_nc_unpacked.bin	-DHAL_GFX_MODE_SERVICE -DPIC_NOCOUNT	timing 2.7456 s median (unpacked control)
+pic_nc_pk	src/harness/pic_probe.s	build/pic_nc_packed.bin	-DHAL_GFX_MODE_SERVICE -DPIC_NOCOUNT -DPRI_PACKED	timing 2.8319 s median -- ★ THE CURRENT ROOM-RENDER FIGURE
+pic_win	src/harness/pic_probe.s	build/pic_v_windowed_nocount.bin	-DHAL_GFX_MODE_SERVICE -DPLANE_WINDOWED -DPIC_NOCOUNT	timing 2.9204 s median (+6.4%, windowed per-pixel class)
 res	src/harness/res_probe.s	build/res_probe.bin	-DHAL_GFX_MODE_SERVICE
 cel	src/harness/cel_probe.s	build/cel_probe.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK
 comp	src/harness/comp_probe.s	build/comp_probe.bin
