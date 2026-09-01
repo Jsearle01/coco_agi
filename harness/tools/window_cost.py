@@ -89,24 +89,47 @@ def main():
     print()
     spans = flushes
 
+    rowtrans = s("rowtrans")
+    print(f"  row transitions             {rowtrans:>10,}  "
+          f"({100.0*rowtrans/flushes if flushes else 0:.2f}% of flushes)")
+    print()
+
     a_cy = spans * A_PER_SPAN + strpix * A_PER_STRADDLE_PIXEL
+    # ★★★★★ A-HOISTED IS THE DESIGN THAT SHOULD BE COMPARED, and the first model omitted it.
+    # A's per-span term was its dominant cost, and the row does not change within a span -- so
+    # that work belongs once per ROW, not once per flush. **Ranking the unhoisted A against B
+    # would have chosen a design on the strength of where the code happened to sit**, which is
+    # an implementation artifact, not a property of the design. A cheap per-flush row compare
+    # (~8 cy) replaces the ~62 cy slice computation on all but the transitions.
+    A_ROW_COMPARE = 8
+    a_h_cy = flushes * A_ROW_COMPARE + rowtrans * A_PER_SPAN + strpix * A_PER_STRADDLE_PIXEL
     b_cy = spans * B_PER_SPAN + secflush * B_PER_SEC_FLUSH
     base_cy = a.baseline_total * CLOCK
 
     print("COMPUTED (per-occurrence costs are ASSUMED; see the header):")
     for name, cy, detail in (
-            ("A  single-slice + fallback", a_cy,
+            ("A  per-span (unhoisted)", a_cy,
              f"{spans:,} x {A_PER_SPAN} + {strpix:,} x {A_PER_STRADDLE_PIXEL}"),
+            ("A' per-row (hoisted)", a_h_cy,
+             f"{flushes:,} x {A_ROW_COMPARE} + {rowtrans:,} x {A_PER_SPAN} + "
+             f"{strpix:,} x {A_PER_STRADDLE_PIXEL}"),
             ("B  dual-slot 16 KB window", b_cy,
              f"{spans:,} x {B_PER_SPAN} + {secflush:,} x {B_PER_SEC_FLUSH}")):
         print(f"  {name:<28} {cy:>12,.0f} cy  = {cy/CLOCK:>7.3f} s over 45 pictures"
               f"  = {100.0*cy/base_cy:>5.2f}% of the {a.baseline_total:.2f} s baseline")
         print(f"  {'':<28} {detail}")
     print()
-    win = "A" if a_cy < b_cy else "B"
-    print(f"★ cheaper by this model: {win}  (ratio {max(a_cy,b_cy)/min(a_cy,b_cy):.2f}x)")
-    print("★★ The per-occurrence costs are the soft half. The counts are not, and if the two")
-    print("   designs land within ~2x of each other the model does not settle it -- build both.")
+    cands = {"A": a_cy, "A'": a_h_cy, "B": b_cy}
+    win = min(cands, key=cands.get)
+    runner = sorted(cands.values())[1]
+    ratio = runner / cands[win]
+    print(f"★ cheapest by this model: {win}  (next is {ratio:.2f}x)")
+    print("★★ The per-occurrence costs are the soft half. The counts are not, and if the top two")
+    print(f"   land within ~2x the model does not settle it -- build both. Here: {ratio:.2f}x.")
+    if ratio < 2.0:
+        print("   ★★★ TOO CLOSE TO CALL on this model alone.")
+    else:
+        print("   ★★★ A clear enough margin to choose on.")
     return 0
 
 

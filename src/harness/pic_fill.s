@@ -782,6 +782,17 @@ ffl_nocnt:
                 ldd     CNT_FLUSH               ; ★ the denominator: runs flushed, not seeds
                 addd    #1
                 std     CNT_FLUSH
+* ★★★ ROW TRANSITIONS -- how often a HOISTED design A would recompute the slice. The fill walks
+* a row per span, so consecutive flushes usually share fc_y; the slice computation is only
+* needed when it changes. This counts those changes and nothing else.
+                lda     fc_y
+                cmpa    ff_lastrow
+                beq     fst_samerow
+                sta     ff_lastrow
+                ldd     CNT_ROWTRANS
+                addd    #1
+                std     CNT_ROWTRANS
+fst_samerow:
                 lda     fc_y
                 beq     fst_lo                  ; row 0: the neighbourhood starts at row 0
                 deca
@@ -1019,3 +1030,9 @@ ff_dnok         fcb     0               ; the row below exists
 ff_runp         fdb     0               ; where the current run starts, in the test plane
 ff_runx         fcb     0               ; the x it started at
 ff_runn         fcb     0               ; its length in bytes
+* ★ -DPIC_STRADDLE only: the previous flush's row, for the row-transition count. $FF so the
+* first flush of a picture always counts as a transition -- row 0 is a legal row and a
+* zero-initialised sentinel would miss it.
+                ifdef   PIC_STRADDLE
+ff_lastrow      fcb     $FF
+                endc

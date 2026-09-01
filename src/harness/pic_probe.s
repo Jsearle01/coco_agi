@@ -114,6 +114,14 @@ CNT_SECFLUSH    equ     $00A2           ; flushes that write a SECOND plane (des
 * either design against CNT_SPAN would have divided by the wrong number -- CLAUDE.md 2H's worked
 * example, verify what a figure COUNTS rather than what its name suggests.
 CNT_FLUSH       equ     $00A4           ; runs actually flushed -- the real per-span multiplier
+* ★★★★ THE COUNTER THAT DECIDES BETWEEN THE TWO DESIGNS, AND THE FIRST MODEL DID NOT HAVE IT.
+* Design A's cost came out dominated not by its straddle fallback but by recomputing the
+* neighbourhood's slice ONCE PER SPAN -- two `mul`s, ~62 cycles, on all 172,087 flushes. **The
+* row does not change within a span**, so that work is hoistable to once per ROW, and whether A
+* or B wins turns entirely on how many row transitions there actually are. Modelling A at its
+* unhoisted cost and declaring B the winner would have been picking a design on the strength of
+* where I happened to put the code [L-54: attribute each change -- including one's own].
+CNT_ROWTRANS    equ     $00B0           ; flushes whose row differs from the previous flush's
 
                 org     $0700
 * ═══════════════════════════════════════════════════════════════════
@@ -151,6 +159,13 @@ probe_entry:
                 std     CNT_STRPIX
                 std     CNT_SECFLUSH
                 std     CNT_FLUSH
+                std     CNT_ROWTRANS
+* ★ ff_lastrow resets to $FF, not 0: row 0 is legal, so a 0 sentinel would swallow the first
+* transition of every picture. Same shape as the pl_vis_cur = $FF slice cache in plane_win.s.
+                pshs    a
+                lda     #$FF
+                sta     ff_lastrow
+                puls    a
                 endc
 * ★★★ PICTURE STATE RESET — EVERY RENDER, NOT JUST THE FIRST LOAD.
 * [ref: picture.cpp:385-388 @ 9d9b9e9] drawPicture() opens with

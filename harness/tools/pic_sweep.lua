@@ -59,7 +59,7 @@ os.execute('mkdir "' .. OUTDIR:gsub("/", "\\") .. '" 2>nul')
 local f0 = io.open(OUTDIR .. "/run.log", "w"); if f0 then f0:close() end
 local csv = io.open(OUTDIR .. "/timing.csv", "w")
 csv:write("name,render_s,calib_s,vert,horiz,diag,pixels,fills,spans,sp_peak_bytes,bad_op," ..
-          "checks,path_v,path_p,path_g,str_span,str_pix,sec_flush,flushes\n")
+          "checks,path_v,path_p,path_g,str_span,str_pix,sec_flush,flushes,rowtrans\n")
 
 local cpu  = manager.machine.devices[":maincpu"]
 local prog = cpu.spaces["program"]
@@ -148,10 +148,11 @@ local function finish()
     -- build; reading them from a build without the census yields 0, which is honest rather than
     -- misleading -- the columns exist, and an all-zero column says "not measured here".
     local ss, sp, sf, fl = rd16(0x009E), rd16(0x00A0), rd16(0x00A2), rd16(0x00A4)
+    local rt = rd16(0x00B0)
 
-    csv:write(string.format("%s,%.9f,%.9f,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
+    csv:write(string.format("%s,%.9f,%.9f,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
         cur, render, calib, rd16(0x0082), rd16(0x0084), rd16(0x0086),
-        pixels, fills, spans, peak, bad, checks, pv, pp, pg, ss, sp, sf, fl))
+        pixels, fills, spans, peak, bad, checks, pv, pp, pg, ss, sp, sf, fl, rt))
     csv:flush()
     logf("%-18s render %8.4f s  fills %4d  spans %6d  peak %4d B  px %6d  bad=$%02X",
          cur, render, fills, spans, peak, pixels, bad)
