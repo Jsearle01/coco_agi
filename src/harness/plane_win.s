@@ -156,14 +156,17 @@ pl_map_vis:
                 std     pl_remaps
                 puls    d
                 ifdef   PLANE_WIN_MMU
-* ★★★ THE REAL PATH. The framebuffer's physical blocks are consecutive from PLANE_VIS_BLK0, so
-* slice n is block PLANE_VIS_BLK0+n in the MMU slot that covers MAP_PHASE_WIN.
-* ★★ This is a register write and §2N says the HAL owns $FF90-$FF9F and $FFB0-$FFBF -- the MMU
-* task slots at $FFA0-$FFAF are in the scan window and owned by nobody, which is where the
-* siblings' real contention lives. res_core.s already declares $FFA6 as its own for exactly
-* this reason; this declares $FFA7, the slot covering $C000-$DFFF.
-                adda    #PLANE_VIS_BLK0
-                sta     PLANE_VIS_MMU
+* ★★★★ THE REAL PATH, AND IT DOES NOT TOUCH A REGISTER. The framebuffer's physical blocks are
+* consecutive from ph_blk_fb, so slice n is block ph_blk_fb+n -- which is exactly what
+* mmu_phase.s's phase_draw_fb does. **Calling it keeps mmu_phase.s the single sanctioned owner
+* of $FFA5/$FFA6** (§2N); writing $FFA6 here would have made a second owner in a file the
+* register census does not even scan (`src/engine` only), so the new owner would have been
+* invisible to the instrument built to catch exactly that.
+* ★★ An earlier draft of this block claimed it was declaring "$FFA7, the slot covering
+* $C000-$DFFF". **That was wrong twice**: $FFA7 covers $E000-$FFFF, and $C000-$DFFF is slot 6 at
+* $FFA6, which mmu_phase.s already owns. The comment is corrected rather than deleted because it
+* was the reasoning that nearly added the second owner.
+                jsr     phase_draw_fb
                 ldd     #MAP_PHASE_WIN
                 std     pl_vis_base
                 else
@@ -191,8 +194,8 @@ pl_map_pri:
                 std     pl_remaps
                 puls    d
                 ifdef   PLANE_WIN_MMU
-                adda    #PLANE_PRI_BLK0
-                sta     PLANE_PRI_MMU
+* ★ Same argument as pl_map_vis: phase_draw_pri already maps ph_blk_pri+A into slot 5.
+                jsr     phase_draw_pri
                 ldd     #MAP_PRI_SLICE
                 std     pl_pri_base
                 else

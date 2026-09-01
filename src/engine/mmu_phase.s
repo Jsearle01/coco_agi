@@ -66,6 +66,21 @@ phase_draw_pri:
                 sta     MMU_SLOT5
                 puls    a,pc
 
+* ── phase_draw_fb — A = framebuffer SLICE index. Map it into slot 6. ──
+* ★★★★ THE COUNTERPART TO phase_draw_pri, AND IT EXISTS SO plane_win.s DOES NOT WRITE $FFA6.
+* phase_draw remaps BOTH slots and is the phase-entry call; a windowed walk crossing a slice
+* boundary needs to move the framebuffer alone, hundreds of times per picture, and must not
+* disturb the priority slice while doing it.
+* ★★★ §2N: this file is the ONE sanctioned owner of $FFA5/$FFA6 -- reg_discipline reports 5
+* accesses in 1 file over 2 registers, and that is the property being preserved. plane_win.s
+* calling here keeps the owner count at one; plane_win.s writing the register itself would have
+* made it two, silently, in a file the census would then have had to grow to cover.
+phase_draw_fb:
+                pshs    a
+                adda    ph_blk_fb
+                sta     MMU_SLOT6
+                puls    a,pc
+
 * ── phase_vol -- point the volume window at a block, VM phase only ───────────────
 * ★★ ASSERTS NOTHING AT RUNTIME AND THAT IS DELIBERATE. Calling this during a draw phase would
 * silently unmap the framebuffer slice. The guarantee is structural -- a fetch never happens

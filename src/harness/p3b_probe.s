@@ -53,6 +53,16 @@ VM_OBJ          equ     MAP_PRI_SLICE
 
 FB_BASE         equ     MAP_PHASE_WIN           ; framebuffer slice, draw phase
 PRI_BASE        equ     MAP_PRI_SLICE           ; priority slice, draw phase
+
+* ★★★★★ THIS PROBE'S WINDOW IS REAL, SO THE MAP ACTION MUST BE THE MMU ONE.
+* plane_win.s has two map actions: a flat-backed one that computes BASE + slice*8192 and touches
+* no register, and the MMU one that calls mmu_phase.s. **The flat-backed action is correct ONLY
+* where the plane is genuinely contiguous**, which is pic_probe's map ($8000 + 26,880 fits) and
+* is emphatically not this one: $C000 + slice*8192 gives $C000, $E000, then $10000 -> $0000 and
+* $12000 -> $2000, which is the code region. **Building this probe windowed but without
+* PLANE_WIN_MMU reintroduces the exact wrap the windowing exists to remove**, and it was built
+* that way once -- 12,782 bytes that assembled cleanly and could not be run.
+PLANE_WIN_MMU   equ     1
 PIC_W           equ     160
 PIC_H           equ     168
 STACK_BASE      equ     MAP_SEEDSTACK
@@ -414,6 +424,18 @@ p3_spr          rmb     P3_SPR_MAX*P3_SPR_SIZE
 phase_draw_enter:
                 lda     #0
                 jsr     phase_draw
+* ★★★★★ INVALIDATE THE WINDOW CACHES HERE, AND THIS IS A CORRECTNESS REQUIREMENT NOT HYGIENE.
+* plane_win.s caches which slice each plane has mapped so a per-pixel access can skip the remap.
+* phase_draw has just written BOTH slots directly, so those caches now describe the previous
+* phase. Slot 6 is shared with the VM phase's volume window (MAP_VOL_WINDOW equ MAP_PHASE_WIN),
+* so after any VM phase the register holds a VOL block and the cache would happily skip mapping
+* the framebuffer over it.
+* ★★★ This is the same class as the res_curblk invalidation twenty lines up, which this probe
+* already learned the hard way: **a cache of a register's contents is wrong the moment anyone
+* else writes that register**, and the phase pair is exactly that moment [§2R.1].
+                ifdef   PLANE_WINDOWED
+                jsr     plane_reset
+                endc
                 ldd     P3_REMAPS
                 addd    #2
                 std     P3_REMAPS
