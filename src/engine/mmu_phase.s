@@ -81,6 +81,27 @@ phase_draw_fb:
                 sta     MMU_SLOT6
                 puls    a,pc
 
+* ── the CROSS-SLOT pair: a plane's slice into the OTHER plane's slot ──
+* ★★★★ THESE EXIST FOR THE FILL'S STRADDLE BORROW AND FOR NOTHING ELSE. When a fill's 3-row
+* neighbourhood crosses a slice boundary (0.67% of flushes, measured), one 8 KB window cannot
+* hold it, so the low slice goes into slot 5 and the high into slot 6 -- $A000-$DFFF contiguous
+* -- and P3.3's walk runs unmodified over the pair.
+* ★★★ The plane whose slot is borrowed is NOT read during the walk; the flush writes it and
+* re-maps for itself. **The borrow lasts one span.**
+* ★★ Still the single owner: every MMU write in the tree is in this file, so reg_discipline
+* stays at one file over two registers no matter how many entry points it grows.
+phase_draw_fb_slot5:
+                pshs    a
+                adda    ph_blk_fb
+                sta     MMU_SLOT5
+                puls    a,pc
+
+phase_draw_pri_slot6:
+                pshs    a
+                adda    ph_blk_pri
+                sta     MMU_SLOT6
+                puls    a,pc
+
 * ── phase_vol -- point the volume window at a block, VM phase only ───────────────
 * ★★ ASSERTS NOTHING AT RUNTIME AND THAT IS DELIBERATE. Calling this during a draw phase would
 * silently unmap the framebuffer slice. The guarantee is structural -- a fetch never happens

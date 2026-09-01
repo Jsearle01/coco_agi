@@ -392,14 +392,37 @@ ff_pop_lp:
                 cmpb    #FC_PRIORITY
                 bne     ffr_vis160
                 ldb     #PIC_W/2
+                ifdef   PLANE_WIN_MMU
+                stb     ff_stride               ; ★ the windowing needs the row pitch
+                endc
                 mul                             ; D = y * 80
                 bra     ffr_rowbase
 ffr_vis160:
                 endc
                 ldb     #PIC_W
+                ifdef   PLANE_WIN_MMU
+                stb     ff_stride
+                endc
                 mul                             ; D = y * 160
 ffr_rowbase:
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE ONE SEAM THAT WINDOWS THE FILL. D is the row's FLAT offset within its plane; this
+* turns it into a window address and guarantees the row's whole 3-row neighbourhood is mapped.
+* **Everything downstream then works untouched** -- X, U and Y derive from ff_row, ff_runp is X
+* at span start, and ff_store writes through it, so all four become window pointers for free.
+* That is why the fill needs ONE seam and not four.
+* ★★★★ Design A' [priced in T-P0-042]: the slice is recomputed once per ROW, not once per span.
+* Row transitions are 12.80% of flushes, so hoisting here removes ~87% of the cost that made the
+* per-span variant 12.74% of the render against this one's 4.00%.
+* ★★★ P3.3's 11-cycle inner loop is not touched on any path.
+* ★★ Guarded on PLANE_WIN_MMU, not PLANE_WINDOWED: in pic_probe's FLAT map the plane is
+* contiguous and this reduces to `addd fc_pbase`, so there is nothing to gain and a real risk of
+* diverging the gate's own build from the one it gates.
+                ifdef   PLANE_WIN_MMU
+                jsr     ff_win_row
+                else
                 addd    fc_pbase
+                endc
                 std     ff_row                  ; row base in the TEST plane
                 lda     fc_y
                 beq     ffr_noup
@@ -872,6 +895,124 @@ ffs_lp:         sta     ,x+
                 bne     ffs_lp
                 rts
 
+                ifdef   PLANE_WIN_MMU
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ── ff_win_row — D = the row's FLAT offset in the test plane. Returns D = window address, ──
+*                with the row's whole 3-row neighbourhood mapped.
+*
+* ★★★ PLACED AFTER ff_store DELIBERATELY. Inserting it before pushed ff_store out of `bsr`
+* range (-128..+127) and the build failed; promoting both `bsr ff_store` to `jsr` would have
+* taxed the FLAT build a cycle on all 425,179 flushes for a windowed build's benefit. **Position
+* is load-bearing in 6809 source and this block's position is part of its correctness.**
+*
+* ★★★★★ THE STRADDLE FALLBACK IS A BORROWED SLOT, NOT A SECOND INNER LOOP.
+* The fill holds THREE row pointers at once (y-1, y, y+1); one 8 KB window cannot serve them
+* when a slice boundary falls between. The obvious fallback -- a per-access path for those rows
+* -- means duplicating P3.3's walk, which is both the most tuned code in the project and ~200
+* bytes we do not have.
+* ★★★★ Instead: when the neighbourhood straddles, map the LOW slice into slot 5 and the HIGH
+* into slot 6, giving a contiguous $A000-$DFFF, and **the same walk runs unmodified**. This is
+* design B's mechanism applied to the 0.67% of flushes that need it rather than to all of them
+* -- 2,855 of 425,179 measured, against B's 205,994. **The expensive part of B was its
+* frequency, not its trick.**
+* ★★★ The plane whose slot is borrowed is not READ during the walk; the flush writes it and
+* re-maps for itself. The borrow lasts one span.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+ff_win_row:
+                pshs    x,y,u
+                std     ff_wrow                 ; the flat row offset, kept
+                tfr     d,x
+* lo = offset of row y-1 (or of row y, on row 0)
+                lda     fc_y
+                beq     fwr_lo0
+                ldb     ff_stride
+                clra
+                pshs    d
+                tfr     x,d
+                subd    ,s++
+                bra     fwr_lohave
+fwr_lo0:        tfr     x,d
+fwr_lohave:     std     ff_wlo
+* hi = the last byte row y+1 touches (or row y's, on the last row)
+                lda     fc_y
+                cmpa    #PIC_H-1
+                beq     fwr_hi1
+                ldb     ff_stride
+                clra
+                aslb
+                rola                            ; D = 2*stride
+                bra     fwr_hihave
+fwr_hi1:        ldb     ff_stride
+                clra
+fwr_hihave:     addd    ff_wrow
+                subd    #1
+                std     ff_whi
+* slice = offset >> 13 = high byte >> 5
+                lda     ff_wlo
+                lsra
+                lsra
+                lsra
+                lsra
+                lsra
+                sta     ff_wslice
+                lda     ff_whi
+                lsra
+                lsra
+                lsra
+                lsra
+                lsra
+                cmpa    ff_wslice
+                bne     fwr_straddle
+                lda     ff_wslice               ; common case: one slice into slot 6
+                bsr     ff_win_map
+                ldd     #MAP_PHASE_WIN
+                std     ff_wbase
+                bra     fwr_done
+fwr_straddle:   lda     ff_wslice               ; 0.67%: borrow slot 5 for the low slice
+                bsr     ff_win_map_lo
+                lda     ff_wslice
+                inca
+                bsr     ff_win_map              ; high slice into slot 6
+                ldd     #MAP_PRI_SLICE
+                std     ff_wbase
+fwr_done:
+                lda     ff_wslice
+                asla
+                asla
+                asla
+                asla
+                asla                            ; A = slice*32 = high byte of slice*8192
+                clrb
+                pshs    d
+                ldd     ff_wrow
+                subd    ,s++                    ; offset within the mapped region
+                addd    ff_wbase
+                puls    x,y,u
+                rts
+
+* ── ff_win_map / ff_win_map_lo — A = slice. Map THIS FILL'S plane into slot 6 / slot 5. ──
+* ★★ Which physical plane a slice belongs to depends on fc_case; mmu_phase.s owns the registers
+* and this only chooses among its entry points, so §2N's single-owner property is preserved.
+ff_win_map:
+                pshs    b
+                ldb     fc_case
+                cmpb    #FC_PRIORITY
+                beq     fwm_pri
+                jsr     phase_draw_fb
+                puls    b,pc
+fwm_pri:        jsr     phase_draw_pri_slot6
+                puls    b,pc
+ff_win_map_lo:
+                pshs    b
+                ldb     fc_case
+                cmpb    #FC_PRIORITY
+                beq     fwml_pri
+                jsr     phase_draw_fb_slot5
+                puls    b,pc
+fwml_pri:       jsr     phase_draw_pri
+                puls    b,pc
+                endc
+
                 ifdef   PRI_PACKED
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★ ff_store_pri -- the packed run store, and the reason packing is not free HERE.
@@ -1035,4 +1176,14 @@ ff_runn         fcb     0               ; its length in bytes
 * zero-initialised sentinel would miss it.
                 ifdef   PIC_STRADDLE
 ff_lastrow      fcb     $FF
+                endc
+* ★ Design A' working state: the plane's row pitch, the neighbourhood bounds, the mapped slice
+* and the base it is mapped at ($C000 normally, $A000 while a straddle borrows slot 5).
+                ifdef   PLANE_WIN_MMU
+ff_stride       fcb     0
+ff_wrow         fdb     0
+ff_wlo          fdb     0
+ff_whi          fdb     0
+ff_wbase        fdb     0
+ff_wslice       fcb     0
                 endc
