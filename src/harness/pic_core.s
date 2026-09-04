@@ -36,8 +36,15 @@ pix_addr:
 * with no temporary. The two planes live in DIFFERENT windows ($A000 and $C000), each with its
 * own cached slice, so holding a pointer into each at once is legal.
                 ifdef   PLANE_WINDOWED
+* ★ Priority first, then visual: both helpers return X, so doing visual last leaves X correct
+* with no temporary. Priority takes the flat form where that plane is not windowed.
+                ifdef   PLANE_PRI_WIN
                 jsr     plane_pri
                 tfr     x,y                     ; Y = priority address
+                else
+                addd    #PRI_BASE
+                tfr     d,y
+                endc
                 ldd     pix_off
                 jsr     plane_vis               ; X = visual address
                 else
@@ -122,7 +129,9 @@ pp_pri:         lda     pri_on
                 ifdef   PRI_PACKED
                 lsra
                 rorb
-                ifdef   PLANE_WINDOWED
+* ★★ PLANE_PRI_WIN, not PLANE_WINDOWED: a build may window the visual plane and leave priority
+* flat (pic_probe's gate map does exactly that). See plane_win.s.
+                ifdef   PLANE_PRI_WIN
                 jsr     plane_pri
                 else
                 addd    #PRI_BASE
@@ -149,7 +158,7 @@ pp_pri_lo:      anda    #$F0                    ; odd x: keep the EVEN pixel
                 ora     pri_color
 pp_pri_put:     sta     ,x
                 else
-                ifdef   PLANE_WINDOWED
+                ifdef   PLANE_PRI_WIN
                 jsr     plane_pri
                 else
                 addd    #PRI_BASE

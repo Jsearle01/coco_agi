@@ -41,6 +41,11 @@
 * place for a transform error to hide (AC-7).
 
                 include "src/hal.inc"
+* ★ The windowed build needs the map's window constants and mmu_phase.s's block registers; the
+* flat build must not see them, so the include is guarded rather than unconditional.
+                ifdef   PLANE_WIN_MMU
+                include "src/engine/memmap.inc"
+                endc
 
 PIC_W           equ     160
 PIC_H           equ     168
@@ -60,7 +65,34 @@ HW_STACK        equ     $0700           ; 6809 S, grows DOWN into $0400..$06FF
 * overflow path still HALTS rather than wrapping.
 * ★★★ Margin is now 237 bytes and it is ASSERTED at assembly time below, not assumed.
 PRI_BASE        equ     $1700           ; 160*168 = $6900 -> ends at $8000
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ -DPLANE_WIN_MMU HERE MAKES THE RENDERER GATE ACTUALLY TEST WINDOWING.
+*
+* The flat build addresses the visual plane at $8000, where HAL_gfx_set_mode has mapped buffer
+* A's FOUR blocks ($10-$13) across $8000-$FFFF. The plane is contiguous, so a "windowed" build
+* in this map reduced to `addd fc_pbase` and **the 45-picture gate could not exercise one line
+* of the windowing** -- the code that ships in p3b was ungated.
+*
+* ★★★★ IT COSTS ALMOST NOTHING TO FIX, because the blocks are already there. Window through slot
+* 6 ($C000) during the render, one 8 KB slice at a time, exactly as p3b does -- then RESTORE the
+* normal four-block mapping before the readback handshake, so the MAME side still reads
+* $8000..$E900 flat and picgate.py compares against the same oracle, unchanged.
+* ★★★ So the gate gains the windowed code path and loses nothing: same pictures, same oracle,
+* same 45/45 claim. **Byte-identical output from a build that took a different route to every
+* pixel is the evidence that the route is correct.**
+* ★★ The straddle borrow takes slot 5 ($A000), which normally holds buffer block $11; the
+* restore puts it back. Rows 50-52, 101-103 and 152-154 exercise it -- measured at 0.67% of
+* flushes, and now actually run.
+* ★ PLANE_PRI_FLAT: only the VISUAL plane lives in blocks here. The priority plane stays at
+* $1700 in the low map, so a FC_PRIORITY fill takes the flat path -- 70.3% of fills are
+* FC_VISUAL and it is those that this gates. Stated rather than glossed: the priority walk's
+* windowing is still exercised only by p3b.
+                ifdef   PLANE_WIN_MMU
+PLANE_PRI_FLAT  equ     1
+FB_BASE         equ     MAP_PHASE_WIN   ; the 8 KB window, not the 32 KB flat view
+                else
 FB_BASE         equ     $8000           ; GFX_DB_WINDOW
+                endc
 
 * Where the driver leaves the picture resource, and where the probe reports.
 *
@@ -199,6 +231,24 @@ probe_entry:
                 jsr     HAL_gfx_swap
 ps_hold:        bra     ps_hold
                 endc
+* ★★★★★ ph_blk_fb MUST BE SET BEFORE vis_clear, NOT BEFORE pic_render.
+* The windowed vis_clear maps slices through phase_draw_fb, which adds ph_blk_fb. Setting that
+* later -- just before pic_render, where it reads naturally -- left it at its `fcb 0` initial
+* value on the FIRST render only, so vis_clear whitened physical blocks 0-3 instead of $10-$13.
+* ★★★★ THE SIGNATURE NAMED IT: picture 1 wrong, pictures 2-31 byte-identical. On every later
+* render ph_blk_fb still held $10 from the previous pass, so the bug could only ever show once
+* per session -- and the sweep renders 45 pictures in ONE session, so it presented as a single
+* bad picture rather than as an initialisation fault.
+* ★★★ A first-iteration-only failure in a loop that runs 45 times is worth more attention than
+* its 1-in-45 rate suggests: it is almost always ordering, and ordering bugs do not stay 1-in-45
+* when the loop becomes a real program that starts once.
+                ifdef   PLANE_WIN_MMU
+                lda     #GFX_DB_A_BLOCK
+                sta     ph_blk_fb
+                clra
+                jsr     phase_draw_fb
+                jsr     plane_reset
+                endc
                 jsr     vis_clear               ; visual plane = 15 (white)
                 jsr     pri_clear               ; priority plane = 4 (red)
 
@@ -305,7 +355,17 @@ fcb_lp:
                 ifndef  FC_BENCH
                 lda     #1
                 sta     PHASE
+* ★ ph_blk_fb and the initial mapping are set before vis_clear now (see there); vis_clear ends
+* with its own plane_reset, so nothing is needed here.
                 jsr     pic_render              ; interpret the picture
+                ifdef   PLANE_WIN_MMU
+* ★★★★ RESTORE THE FLAT FOUR-BLOCK VIEW BEFORE THE HANDSHAKE. The render has left slot 6 (and
+* possibly slot 5) pointing at whichever slice it last touched. The MAME side reads the plane
+* as 26,880 contiguous bytes from $8000, so without this it would read whatever the last span
+* happened to map -- a gate reporting on a mapping rather than on a picture.
+                lda     #GFX_DB_A_BLOCK
+                jsr     gfx_map_blocks
+                endc
                 lda     #2
                 sta     PHASE
                 endc
@@ -466,6 +526,44 @@ agi_pal16:
 * black there -- two buffers matching for different reasons. A gate that only checked row 0
 * would have passed.
 * ═══════════════════════════════════════════════════════════════════
+* ★★★★★ THE CLEAR IS A FLAT PLANE WALK AND IT WAS ON MY OWN CENSUS.
+* T-P0-041's plane_walk_census.py listed pic_probe.s with EIGHT flat plane sites. I windowed
+* put_pixel and the fill and left this one, and it is the one that matters most: the fill spreads
+* into pixels whose visual value is 15, so if the plane never gets its initial white **no fill
+* writes anything**. The first windowed gate run came back 508 non-zero bytes against 26,228 --
+* not a subtly wrong picture, an empty one.
+* ★★★★ Flat, it walked $C000..$128FF and wrapped past $FFFF: the exact defect windowing exists
+* to remove, in the setup code for the gate that tests the removal.
+* ★★★ Windowed it clears the buffer a slice at a time. Four slices covers 32,768 B against the
+* plane's 26,880 -- the tail is inside buffer A and nothing reads it, and clearing whole slices
+* is simpler than carrying a remainder.
+                ifdef   PLANE_WIN_MMU
+* ★★★ THE SLICE COUNTER LIVES IN MEMORY BECAUSE `ldd #$FFFF` DESTROYS B.
+* The first version kept the counter in B and the clear loop's `ldd #$FFFF` overwrote it, so
+* `incb` always produced 0, `cmpb #4` always branched, and this mapped and cleared slice 0
+* forever. **The plane came back with exactly 8,192 non-zero bytes -- one slice -- which is what
+* named the bug**: a round number equal to the window size is not a picture, it is a loop that
+* only ever saw one slice.
+* ★★ Third register-clobber of this session (pl_map_vis destroyed B, ff_win_map needed A). On
+* the 6809 the accumulator IS the working set, and a loop counter that shares it with a store
+* value has a bug waiting for whoever writes the next line.
+vc_slice_n      fcb     0
+vis_clear:
+                clr     vc_slice_n
+vc_slice:       lda     vc_slice_n
+                jsr     phase_draw_fb           ; map that slice into the window
+                ldx     #MAP_PHASE_WIN
+                ldd     #$FFFF
+vc_lp:          std     ,x++
+                cmpx    #MAP_PHASE_WIN+8192
+                blo     vc_lp
+                inc     vc_slice_n
+                lda     vc_slice_n
+                cmpa    #4
+                blo     vc_slice
+                jsr     plane_reset             ; the caches no longer describe the register
+                rts
+                else
 vis_clear:
                 ldx     #FB_BASE
                 ldd     #$FFFF                  ; 15 in both nibbles = white, doubled
@@ -473,6 +571,7 @@ vc_lp:          std     ,x++
                 cmpx    #FB_BASE+(PIC_W*PIC_H)
                 blo     vc_lp
                 rts
+                endc
 
 * ═══════════════════════════════════════════════════════════════════
 * pal_swatch — AC-12: sixteen bands, one per palette index, in index order
@@ -550,6 +649,12 @@ pc_lp:          std     ,x++
 * byte-identical at 2,642.
                 ifdef   PLANE_WINDOWED
                 include "src/harness/plane_win.s"
+                endc
+* ★ mmu_phase.s owns $FFA5/$FFA6 and supplies ph_blk_fb plus the map entry points the windowed
+* fill calls. Only the windowed build needs it, and only the windowed build may have it -- the
+* flat build must stay byte-identical.
+                ifdef   PLANE_WIN_MMU
+                include "src/engine/mmu_phase.s"
                 endc
                 include "src/harness/pic_core.s"
 

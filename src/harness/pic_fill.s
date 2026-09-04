@@ -206,8 +206,21 @@ fc_nocarry:     puls    d
                 ifdef   FC_STOP2
                 rts
                 endc
+* ★★★★★ fill_check IS THE PER-SEED TEST AND IT WAS STILL FLAT. ffr_rowbase windows the span
+* walk, but every seed POPPED off the stack is tested here first, and this formed $C000 + y*160
+* + x directly -- past the window for any row beyond the first slice, and correct within it only
+* by accident of which slice happened to be mapped.
+* ★★★★ THE SYMPTOM NAMED IT: a handful of columns per row left at $FF (the initial white) where
+* the reference had $77. Not a displaced picture -- a picture missing regions, because a seed
+* that tests false is silently dropped and its whole region never fills.
+* ★★★ Fourth site from T-P0-041's own census that I did not wire, after vis_clear. The
+* enumeration was right; acting on all of it is what I kept failing to do.
+                ifdef   PLANE_WIN_MMU
+                jsr     plane_vis
+                else
                 addd    #FB_BASE
                 tfr     d,x
+                endc
                 ifdef   FC_STOP3
                 rts
                 endc
@@ -919,6 +932,21 @@ ffs_lp:         sta     ,x+
 * re-maps for itself. The borrow lasts one span.
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 ff_win_row:
+* ★★★ -DPLANE_PRI_FLAT: in pic_probe's map only the VISUAL plane lives in blocks; the priority
+* plane sits flat at $1700. A FC_PRIORITY fill's test plane is therefore not windowed there, and
+* forcing it through the window would map framebuffer blocks under a priority walk.
+* ★★ p3b defines neither, so both planes window there. **This is the honest boundary of what the
+* renderer gate covers: the 70.3% FC_VISUAL path, not the priority walk.**
+                ifdef   PLANE_PRI_FLAT
+                pshs    a
+                lda     fc_case
+                cmpa    #FC_PRIORITY
+                puls    a
+                bne     ff_win_row_go
+                addd    fc_pbase                ; this plane is flat in this map
+                rts
+ff_win_row_go:
+                endc
                 pshs    x,y,u
                 std     ff_wrow                 ; the flat row offset, kept
                 tfr     d,x
@@ -993,8 +1021,22 @@ fwr_done:
 * ── ff_win_map / ff_win_map_lo — A = slice. Map THIS FILL'S plane into slot 6 / slot 5. ──
 * ★★ Which physical plane a slice belongs to depends on fc_case; mmu_phase.s owns the registers
 * and this only chooses among its entry points, so §2N's single-owner property is preserved.
+* ★★★★★ INVALIDATE plane_win.s's SLICE CACHE. THIS IS WHY THE FIRST WINDOWED GATE RUN WAS 0/45.
+* plane_vis (put_pixel, pix_addr) caches the mapped slice in pl_vis_cur so a per-pixel access can
+* skip the remap. The fill maps the SAME MMU slot here, independently. Two caches for one
+* register: the fill maps slice 2, put_pixel still believes slice 0 is mapped, and writes land
+* 16 KB from where they belong.
+* ★★★★ It is the identical hazard phase_draw_enter documents -- **a cache of a register's
+* contents is wrong the moment anyone else writes that register** -- and I introduced a second
+* instance of it while the first was still on the screen in front of me.
+* ★★★ Invalidating rather than updating: plane_vis then re-maps on its next call, which is
+* correct regardless of what the fill left mapped, and costs a remap only when the two actually
+* interleave. The fill re-derives its own mapping per row, so it needs nothing from the cache.
 ff_win_map:
                 pshs    b
+                ldb     #$FF
+                stb     pl_vis_cur
+                stb     pl_pri_cur
                 ldb     fc_case
                 cmpb    #FC_PRIORITY
                 beq     fwm_pri
@@ -1004,6 +1046,9 @@ fwm_pri:        jsr     phase_draw_pri_slot6
                 puls    b,pc
 ff_win_map_lo:
                 pshs    b
+                ldb     #$FF                    ; ★ same invalidation; the borrow moves slot 5
+                stb     pl_vis_cur
+                stb     pl_pri_cur
                 ldb     fc_case
                 cmpb    #FC_PRIORITY
                 beq     fwml_pri

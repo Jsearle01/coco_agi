@@ -67,6 +67,18 @@
 * asserted -- see the report's AC-5 and AC-10.
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 
+* ★★★★★ IS THE PRIORITY PLANE WINDOWED HERE? A build can window one plane and not the other.
+* pic_probe's gate map keeps priority FLAT at $1700 (only the visual plane lives in blocks there)
+* and declares PLANE_PRI_FLAT; p3b windows both. Routing priority through plane_pri regardless --
+* which is what a bare `ifdef PLANE_WINDOWED` does -- addresses a $1700 plane through an $A000
+* window and puts every priority pixel in the wrong place.
+* ★★★★ It cost a full sweep to find, and the split was diagnostic: **45 of 45 VISUAL planes
+* byte-identical, 43 of 45 PRIORITY planes wrong.** One plane perfect and the other uniformly
+* broken is a configuration fault, not an algorithm fault.
+                ifndef  PLANE_PRI_FLAT
+PLANE_PRI_WIN   equ     1
+                endc
+
 PLANE_SLICE_SZ  equ     8192
 PLANE_SLICE_MSK equ     PLANE_SLICE_SZ-1        ; $1FFF
 
