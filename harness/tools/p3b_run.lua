@@ -55,9 +55,18 @@ local prog = cpu.spaces["program"]
 -- ★★★ THE TAP MUST LIVE IN _G OR IT IS GARBAGE-COLLECTED AND SILENTLY STOPS FIRING, which reads
 -- as "every stage took no time" rather than as an error [idioms; the same trap pic_sweep.lua
 -- carries a warning about].
+-- ★★★★★ THE MEASURED CLOCK. Markers 11/12 bracket exactly 160,009 CPU cycles in the guest, so
+-- the elapsed emulated time between them GIVES the clock rather than assuming it. This file
+-- previously printed "@ 1.789390 MHz" as a constant while the machine ran at 0.894 MHz -- the
+-- string stated the one thing it was not checking, and every timing figure was 2.003x wrong.
+local CAL_CYCLES = 160009
+local cal_t0, CLOCK = nil, nil
+
 _G._ptap = prog:install_write_tap(PHASE, PHASE, "p3bphase", function(offset, data, mask)
     local v = data % 256
     local t = m.time:as_double()
+    if v == 11 then cal_t0 = t; return end
+    if v == 12 and cal_t0 then CLOCK = CAL_CYCLES / (t - cal_t0); cal_t0 = nil; return end
     if MARK[v] then
         stage_open = {v, t}
     elseif stage_open and v == stage_open[1] + 1 then
@@ -225,14 +234,28 @@ _G._n = emu.add_machine_frame_notifier(function()
             local med = per[math.floor(#per/2)+1] or 0
             w("")
             w("★ %d cycles in %.4f emulated s", NCYC, tot)
-            w("    median %.4f s/cycle = %.2f cycles/second @ 1.789390 MHz", med, 1.0/med)
+            -- ★★★★ REPORT THE MEASURED CLOCK, AND SAY SO WHEN IT IS NOT THE EXPECTED ONE. A
+            -- machine at 0.894 MHz is a missing -DHAL_SYS_FAST_CLOCK, not a slow interpreter,
+            -- and that distinction is the difference between a cycle-rate decision for Jay and
+            -- a one-line build fix.
+            if CLOCK then
+                w("    clock MEASURED %.6f MHz (%d cycles calibrated)", CLOCK/1e6, CAL_CYCLES)
+                if CLOCK < 1.3e6 then
+                    w("    ★★★ SLOW CLOCK -- expected 1.789390 MHz. The build is missing")
+                    w("        -DHAL_SYS_FAST_CLOCK; every figure below is ~2x too slow.")
+                end
+            else
+                w("    ★★★ clock NOT calibrated -- markers 11/12 never paired. Treat every")
+                w("        timing below as unverified [L-57].")
+            end
+            w("    median %.4f s/cycle = %.2f cycles/second", med, 1.0/med)
             w("    mean   %.4f s/cycle = %.2f cycles/second", tot/NCYC, NCYC/tot)
             w("    remaps total %d = %.2f per cycle", rd16(REMAPS), rd16(REMAPS)/NCYC)
             -- ★★★★ AC-5: the per-cycle breakdown, from the phase tap.
             local order = {"pace(wait)", "interpret", "sprites", "roomcheck", "composite"}
             local tot = 0
             for _, k in ipairs(order) do tot = tot + (stage_total[k] or 0) end
-            w("    ── per-stage, %d cycles, clock 1.789390 MHz ──", NCYC)
+            w("    ── per-stage, %d cycles ──", NCYC)
             for _, k in ipairs(order) do
                 local s, cnt = stage_total[k] or 0, stage_n[k] or 0
                 w("       %-10s %8.4f s total  %8.5f s/cycle  %5.1f%%  (%d entries)",

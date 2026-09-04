@@ -147,11 +147,17 @@ def build(implemented, status):
     out.append("* -- VMTEST_ARGS: operand bytes per TEST opcode --------------------")
     out.append("* * vm_skip_instruction steps ip by this after a test runs. Duplicating")
     out.append("* these lengths in the assembly would be a second place to drift.")
+    # ★★★★ SIZED TO THE OPCODE SPACE, like VMTEST_TAB before it [M-48's second 236 bytes].
+    # Entries 20-255 were every one of them $00, and vm_skip_instruction's `bhs vm_si_out` path
+    # -- which those opcodes now take -- is a bare `rts` that also leaves vm_ip alone. **The two
+    # paths were already identical; only the 236 bytes differed.**
+    # ★★★ The guard in vm_core.s moves from `cmpa #$FC` (markers only) to `cmpa #VMTEST_MAX`,
+    # which subsumes it: $FC-$FF are >= 20 and still reach vm_si_out.
     out.append("VMTEST_ARGS:")
-    targs = [0] * 256
+    targs = [0] * len(tests)
     for i, (name, params, _h) in enumerate(tests):
         targs[i] = len(params)
-    for row in range(0, 256, 16):
+    for row in range(0, len(targs), 16):
         out.append("                fcb     "
                    + ",".join("$%02X" % a for a in targs[row:row + 16])
                    + "        ; %02X-%02X" % (row, row + 15))

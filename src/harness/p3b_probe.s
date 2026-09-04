@@ -179,6 +179,28 @@ p3b_entry:
                 clr     ph_blk_pri
                 lda     #2
                 sta     ph_blk_fb
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ CLOCK CALIBRATION — A GUARD, NOT A DECORATION, AND ITS ABSENCE COST THIS TASK ITS
+* HEADLINE. p3b_run.lua printed "@ 1.789390 MHz" as a hardcoded string while the machine ran at
+* 0.894 MHz, because the flag set omitted -DHAL_SYS_FAST_CLOCK. **Every stage was wrong by
+* exactly 2.003x and the label said otherwise**, which would have reported a 33% shortfall
+* against the corpus's 10 cycles/second and handed Jay a cycle-rate decision that was really a
+* missing -D [L-57: state the clock -- and MEASURE the thing you state].
+* ★★★★ Exactly 20,000 iterations of an 8-cycle body: `leax -1,x` is 5 (indexed, 5-bit offset)
+* and `bne` is 3 = 160,000 cycles, plus ~9 for setup and the final untaken branch. The host
+* stamps both markers and divides, so the clock is DERIVED from the machine rather than asserted
+* about it. Same construction pic_probe has carried since T-P0-012.
+* ★★★ Once, at boot: the SAM speed bit does not change under us, and paying 160,000 cycles per
+* cycle would distort the very budget this exists to protect.
+* ★★ Markers 11/12 -- 1..10 are the per-stage brackets.
+                lda     #11
+                sta     P3_PHASE
+                ldx     #20000
+p3_cal:         leax    -1,x
+                bne     p3_cal
+                lda     #12
+                sta     P3_PHASE
 p3_loop:
                 clr     P3_GO
 p3_wait:        lda     P3_GO

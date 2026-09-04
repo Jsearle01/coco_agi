@@ -423,9 +423,16 @@ vm_su_out:      rts
 * `said`, so this is not an edge case -- it is the second most common test after `isset`.
 VM_SAID_OP      equ     $0E             ; = optable.SAID_TEST_OPCODE
 vm_skip_instruction:
+* ★★★★ VMTEST_MAX, NOT $FC, AND IT SUBSUMES THE MARKER CHECK. The old guard excluded only the
+* markers $FC-$FF, so opcodes $14-$FB indexed VMTEST_ARGS and the table had to carry 256 entries
+* -- of which 236 were $00. **Those opcodes now take vm_si_out, which is a bare `rts` and also
+* leaves vm_ip alone, so the behaviour is unchanged and the 236 bytes are recovered** [M-48].
+* ★★ Markers are >= 20 and still land here. VM_SAID_OP is $0E and is still reached below.
+* ★ Second withdrawal from the same account as AD-97's VMTEST_TAB, and taken for the same reason:
+* p3b needed room for a clock calibration and had two bytes.
                 lda     vm_op
-                cmpa    #$FC
-                bhs     vm_si_out               ; a marker carries no operands
+                cmpa    #VMTEST_MAX
+                bhs     vm_si_out               ; out of range, or a marker: no operands either way
                 cmpa    #VM_SAID_OP
                 beq     vm_si_said
                 ldx     #VMTEST_ARGS
