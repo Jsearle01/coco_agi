@@ -85,6 +85,20 @@ P3_T_COMP       equ     MAP_STATUS+16
 P3_T_FETCH      equ     MAP_STATUS+20
 P3_T_RENDER     equ     MAP_STATUS+24
 P3_REMAPS       equ     MAP_STATUS+28   ; 2 B: MMU writes this cycle -- AC-6
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ P3_PHASE — THE TIMING MARKER, AND AC-5 CANNOT BE ANSWERED WITHOUT IT.
+* P3_T_VM..P3_T_RENDER have existed since P3b.1 and are ZEROED EVERY CYCLE AND NEVER WRITTEN --
+* declared, cleared, dead. The host read nothing from them because there was nothing to read, so
+* "the per-cycle breakdown" had no producer at all.
+* ★★★★ Rather than count cycles on the 6809 -- which costs the very time it measures -- this
+* uses the mechanism pic_probe has proven since T-P0-012: the guest stores a phase number here,
+* MAME write-taps the address and stamps `manager.machine.time` at the instant of the store.
+* **Resolution is one instruction and emulated time is exact and deterministic**, so a stage's
+* cost is a subtraction on the host and the guest pays one `sta`.
+* ★★★ Odd = entering a stage, even = leaving it: 1/2 VM, 3/4 sprites, 5/6 room-check (fetch and
+* render), 7/8 composite. The host pairs them; an unpaired marker is a stage that did not
+* return, which is itself the finding.
+P3_PHASE        equ     MAP_STATUS+30
 
 * ── the subsystems' instrumentation, which is NOT optional ───────────────────────
 * ★★★ EVERY ONE OF THESE IS REQUIRED TO ASSEMBLE. pic_draw.s does `ldd CNT_VERT / addd #1 /
@@ -205,11 +219,27 @@ p3_do_cycle:
 * ★★ The two owners of $FFA6 have to agree, and the phase machinery is the one that moved it.
                 lda     #$FF
                 sta     res_curblk
+* ★★★ AC-5's brackets. One `sta` per boundary; the host tap does the arithmetic. Placed around
+* the calls rather than inside them so a stage's cost includes its own call overhead, which is
+* what a budget consumer cares about.
+* ★ p3_run_vm emits 1/2 (pace) and 3/4 (interpret) itself; the outer stages continue from 5.
                 jsr     p3_run_vm
+                lda     #5
+                sta     P3_PHASE
                 jsr     p3_stage_sprites        ; ★ BEFORE the remap -- slot 5 still holds VM_OBJ
+                lda     #6
+                sta     P3_PHASE
+                lda     #7
+                sta     P3_PHASE
                 jsr     p3_room_check           ; fetch in VM phase, render in draw phase
+                lda     #8
+                sta     P3_PHASE
                 jsr     phase_draw_enter        ; ★ AC-7: the pair, exactly two MMU writes
+                lda     #9
+                sta     P3_PHASE
                 jsr     p3_composite_all
+                lda     #10
+                sta     P3_PHASE
                 ldd     P3_CYCLE
                 addd    #1
                 std     P3_CYCLE
@@ -254,8 +284,22 @@ P3_SPR_SIZE     equ     6               ; x, y, prio, view, loop, cel
 * ★ pace, interpret, post. Splitting pace from the cycle body is what makes cycle number and
 * virtual time track each other [vm_cycle.s]; copying the sequence rather than inventing one
 * keeps this build's VM identical to the gated one.
+* ★★★★★ PACE AND INTERPRET ARE TIMED SEPARATELY, AND CONFLATING THEM INVERTED AC-5's ANSWER.
+* vm_pace is a BUSY-WAIT: it spins on vm_step_clock until vm_passed reaches vm_tdelay, so time
+* inside it is the interpreter deliberately hitting the rate the GAME asked for (var 10), not
+* work. Timed as one "vm" stage it read 0.156 s/cycle and 6.66 cycles/second -- which looks like
+* a capacity shortfall against the corpus's 10 and is nothing of the sort.
+* ★★★★ **A budget that cannot separate waiting from working cannot answer "is it fast enough."**
+* Split, the question becomes arithmetic: interpret is the capacity, pace is the gap between
+* capacity and the requested rate.
 p3_run_vm:
-                jsr     vm_pace
+                lda     #1
+                sta     P3_PHASE
+                jsr     vm_pace                 ; BUSY-WAIT to the game's requested rate
+                lda     #2
+                sta     P3_PHASE
+                lda     #3
+                sta     P3_PHASE
 * ★★ HALT DETECTION IS MISSING HERE AND vm_probe HAS IT (`lda vm_quit / bne vp_halted`). Adding
 * it pushed the image 7 bytes past the code region, and taking those 7 bytes destabilised the
 * run entirely -- so it is reported as a gap rather than carried. **A halted VM currently keeps
@@ -263,6 +307,8 @@ p3_run_vm:
 * shape as the uninitialised object table and should be closed before AC-5 is trusted.
                 jsr     vm_interpret_cycle
                 jsr     vm_post_cycle
+                lda     #4
+                sta     P3_PHASE
                 rts
 
 * ── p3_room_check — fetch and render the room's PICTURE when the room changes ────
