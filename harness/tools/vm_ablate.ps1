@@ -80,5 +80,6 @@ foreach ($v in $VARIANTS) {
     $env:VM_OUT    = "build/vm_abl_out_$v"
     & C:\mame\mame.exe coco3 -rompath C:/mame/roms -video none -sound none -window -nomaximize `
         -seconds_to_run 400 -autoboot_script harness/tools/vm_sweep.lua 2>&1 |
-        Select-String "free-run|ms/cycle|opcount|HALT|bad" | Select-Object -First 4
+        Select-String "free-run|ms/cycle|opcount|HALT|bad|clock MEASURED|SLOW CLOCK|cache:" |
+        Select-Object -First 6
 }

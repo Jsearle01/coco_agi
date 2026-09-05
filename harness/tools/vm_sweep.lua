@@ -27,6 +27,10 @@ local TIMED     = tonumber(os.getenv("VM_TIMED") or "")    -- AC-7: free-run thi
 local timed_t0                                              -- set on the first timed frame
 local CAL       = tonumber(os.getenv("VM_CAL") or "")      -- clock calibration: N x 160,000 cycles
 local cal_t0
+-- ★★★ The free-run's own clock measurement, run after the timing bracket closes. 4 blocks =
+-- 640,000 cycles ~ 0.36 emulated s, which is 2.5% of a 200-cycle run and buys L-78.
+local TIMED_CAL = tonumber(os.getenv("VM_TIMED_CAL") or "4")
+local timed_dt, timed_op, timed_h, timed_m, timed_cy
 local ROOM      = tonumber(os.getenv("VM_ROOM") or "")     -- P5.3 C1: host-side room jump
 local ROOM_AT   = tonumber(os.getenv("VM_ROOM_AT") or "40")
 local VMTR_BUF, VMTR_IDX
@@ -46,6 +50,31 @@ local CALADDR   = 0x0092                                     -- VP_CAL, the cali
 local m    = manager.machine
 local cpu  = m.devices[":maincpu"]
 local prog = cpu.spaces["program"]
+
+-- ═══════════════════════════════════════════════════════════════════════════════════
+-- ★★★★★ STAMP THE PARK AT THE GUEST'S INSTRUCTION, NOT AT THE HOST'S NEXT FRAME.
+-- The host notices a park only when its frame notifier next fires, so an interval closed by
+-- reading m.time in the notifier is long by up to one whole frame -- 16.7 ms, 29,880 CPU
+-- cycles. Over a 14-second free run that is 0.1% and invisible; over a 0.36-second clock
+-- calibration it is 2.6%, and it is exactly why the first run of this calibration reported
+-- 1.7432 MHz for a 1.789772 MHz machine.
+-- ★★★ A write tap on VP_GO stamps the guest's own `clr VP_GO` -- one-instruction resolution,
+-- deterministic, and the same instrument P3b.12 used for the phase brackets. ★ It must be held
+-- in _G or MAME collects it and the tap silently stops firing (idioms 31).
+local park_t, cal_open, cal_shut
+_G._gotap = prog:install_write_tap(GO, GO, "vmgo", function(offset, data, mask)
+    if data % 256 == 0 then park_t = m.time:as_double() end
+end)
+-- ★★★★ AND THE CALIBRATION BRACKET IS STAMPED BY THE GUEST TOO, for a reason the park tap does
+-- not cover: on release from the free-run park the guest runs ONE interpret cycle before it
+-- reaches the calibration blocks. On KQ1 that is ~120,000 CPU cycles inside a 640,000-cycle
+-- interval, and it reported 1.5379 MHz for a 1.789772 MHz machine -- 14% low, and low in the
+-- direction that would have read as a missing -DHAL_SYS_FAST_CLOCK if it had been worse.
+_G._mktap = prog:install_write_tap(0x0094, 0x0094, "vmmark", function(offset, data, mask)
+    local v = data % 256
+    if v == 1 then cal_open = m.time:as_double()
+    elseif v == 2 then cal_shut = m.time:as_double() end
+end)
 
 local logf = io.open(OUT .. "/run.log", "w")
 local function w(f, ...)
@@ -200,30 +229,75 @@ _G._n = emu.add_machine_frame_notifier(function()
     if TIMED then
         if timed_t0 == nil then
             timed_t0 = m.time:as_double()
+            park_t = nil
             prog:write_u8(FREE, math.floor(TIMED / 256))
             prog:write_u8(FREE + 1, TIMED % 256)
             prog:write_u8(GO, 1)            -- release the park; the free-run follows
             return
         end
-        if prog:read_u8(GO) ~= 0 then return end     -- still free-running
-        local dt = m.time:as_double() - timed_t0
+        if prog:read_u8(GO) ~= 0 then return end     -- still free-running (or still calibrating)
+
+        -- ═══════════════════════════════════════════════════════════════════════════
+        -- ★★★★★ PHASE 2: MEASURE THE CLOCK, IN THIS SESSION, AFTER THE TIMED BRACKET.
+        -- This file printed "@ 1.7898 MHz" as a LITERAL for every figure it ever produced --
+        -- the same defect AD-100 found in p3b_run.lua, still here [L-78]. A displayed constant
+        -- is an assertion, and the one run where it is false is the run nobody catches.
+        -- ★★★★ THE CALIBRATION RUNS *AFTER* THE FREE RUN, DELIBERATELY. Putting it first would
+        -- move the guest's one handshake init cycle out of the timing bracket and silently
+        -- re-base every published free-run figure -- a second change riding on this one [L-54].
+        -- The bracket below is byte-for-byte the bracket that produced AD-87 and AD-101.
+        if timed_dt == nil then
+            timed_dt = (park_t or m.time:as_double()) - timed_t0
+            timed_op = prog:read_u8(0x008B) * 256 + prog:read_u8(0x008C)
+            -- ★★★★ THE FREE RUN NOW CHECKS THAT IT RAN THE CYCLES IT CLAIMS. vm_cycle is
+            -- published at the park alongside vm_opcount, so "21 cycles in 2.0 s" is no longer
+            -- an assertion about a loop the host cannot see. ★★★ This is the check AD-102 was
+            -- missing in its other half: opcount says how much work, vm_cycle says how many
+            -- cycles, and either one alone can be satisfied by a loop that did neither.
+            timed_cy = prog:read_u8(CYCLE) * 256 + prog:read_u8(CYCLE + 1)
+            if SYM.res_chits and SYM.res_cmiss then
+                local function rd16(a) return prog:read_u8(a) * 256 + prog:read_u8(a + 1) end
+                timed_h, timed_m = rd16(SYM.res_chits), rd16(SYM.res_cmiss)
+            end
+            cal_open, cal_shut, park_t = nil, nil, nil
+            prog:write_u8(CALADDR, math.floor(TIMED_CAL / 256))
+            prog:write_u8(CALADDR + 1, TIMED_CAL % 256)
+            prog:write_u8(GO, 1)
+            return
+        end
+        if not (cal_open and cal_shut) then
+            w("★★★ CALIBRATION BRACKET DID NOT FIRE -- the marker tap saw open=%s shut=%s. "
+              .. "No clock figure is reported rather than a wrong one.",
+              tostring(cal_open), tostring(cal_shut))
+            m:exit(); return
+        end
+        local clk = (TIMED_CAL * 160000) / (cal_shut - cal_open)
+
+        local dt = timed_dt
         local cycles = TIMED + 1                     -- the released paced cycle counts too
         -- ★★ THE LOGIC CACHE'S OWN COUNTERS, read from the run that was just timed. A timing
         -- improvement is not evidence that the cache is what improved it; the hit rate is.
         -- ★ Absent from the symbol file on a pre-cache build, so this stays silent there.
-        if SYM.res_chits and SYM.res_cmiss then
-            local function rd16(a) return prog:read_u8(a) * 256 + prog:read_u8(a + 1) end
-            local h, ms = rd16(SYM.res_chits), rd16(SYM.res_cmiss)
-            local tot = h + ms
-            w("    cache: hits %d  misses %d  hit-rate %.1f%%", h, ms,
-              tot > 0 and (100.0 * h / tot) or 0)
+        if timed_h then
+            local tot = timed_h + timed_m
+            w("    cache: hits %d  misses %d  hit-rate %.1f%%", timed_h, timed_m,
+              tot > 0 and (100.0 * timed_h / tot) or 0)
+        end
+        w("clock MEASURED %.6f MHz (%d cycles calibrated, this session)", clk / 1e6,
+          TIMED_CAL * 160000)
+        if clk < 1.2e6 then
+            w("★★★ SLOW CLOCK -- the build is missing -DHAL_SYS_FAST_CLOCK [AD-100]")
         end
         w("AC-7 free-run: %d cycles in %.6f emulated s", cycles, dt)
-        w("    %.3f ms/cycle   %.0f CPU cycles/VM cycle @ 1.7898 MHz   %.1f VM cycles/s",
-          1000 * dt / cycles, 1789772.0 * dt / cycles, cycles / dt)
-        w("    opcount=%d  (%.1f commands/cycle)",
-          prog:read_u8(0x008B) * 256 + prog:read_u8(0x008C),
-          (prog:read_u8(0x008B) * 256 + prog:read_u8(0x008C)) / cycles)
+        w("    %.3f ms/cycle   %.0f CPU cycles/VM cycle   %.1f VM cycles/s",
+          1000 * dt / cycles, clk * dt / cycles, cycles / dt)
+        -- ★★★★★ opcount IS NOW CUMULATIVE OVER THE WHOLE BRACKET. It was the count from the one
+        -- pre-run handshake cycle and did not move when TIMED went 1 -> 20 -> 200; the probe now
+        -- publishes vm_opcount at the park. **A commands/cycle figure taken before this fix was
+        -- one cycle's commands divided by every cycle** [AD-102].
+        w("    opcount=%d  (%.2f commands/cycle)   vm_cycle=%d of %d expected%s",
+          timed_op, timed_op / cycles, timed_cy, cycles,
+          timed_cy == cycles and "" or "  ★★★ MISMATCH")
         m:exit()
         return
     end

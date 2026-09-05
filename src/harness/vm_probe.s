@@ -44,6 +44,12 @@ VP_ICGUARD      equ     $008D           ; logic.0 invocations in the last cycle
 VP_ARENA_BAD    equ     $008E           ; ★ 2 bytes: first arena address that failed readback, 0 = clean
 VP_FREE         equ     $0090           ; ★ 2 bytes: AC-7 free-run counter, 0 = normal handshake
 VP_CAL          equ     $0092           ; ★ 2 bytes: clock-calibration blocks, 0 = none
+* ★★★★ THE CALIBRATION BRACKET, STAMPED BY THE GUEST. The host cannot close this interval
+* itself: on release from the free-run park the guest runs one interpret cycle (~120,000 CPU
+* cycles on KQ1) before it reaches the calibration blocks, and charging that to the calibration
+* reported 1.5379 MHz for a 1.789772 MHz machine. ★★★ A marker written either side of the
+* blocks and read through a write tap gives one-instruction resolution -- P3b.12's pattern.
+VP_MARK         equ     $0094           ; 1 = calibration opens, 2 = calibration closes
 VP_HW_STACK     equ     $0700
 
                 org     $0700
@@ -151,6 +157,9 @@ vp_at_done:     std     VP_ARENA_BAD
 vp_loop:
                 ldd     VP_CAL
                 beq     vp_nocal
+                lda     #1
+                sta     VP_MARK                 ; ★ bracket opens -- see VP_MARK's note
+                ldd     VP_CAL
 vp_calblk:      pshs    d
                 ldx     #20000
 vp_calloop:     leax    -1,x
@@ -159,6 +168,8 @@ vp_calloop:     leax    -1,x
                 subd    #1
                 std     VP_CAL
                 bne     vp_calblk
+                lda     #2
+                sta     VP_MARK                 ; ★ bracket closes
                 clr     VP_GO                   ; park: the host reads the clock here
 vp_calwait:     lda     VP_GO
                 beq     vp_calwait
@@ -189,6 +200,26 @@ vp_paced:
 * ★★ The file's own header already said "parks at vm_pace's EXIT -- after the clock ticks that
 * led to this cycle, before the cycle body". The comment was right and the code was two
 * instructions away from it; a described invariant that nothing checks is not an invariant.
+* ═══════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ PUBLISH THE CUMULATIVE COUNTERS *BEFORE* THE PARK -- THE FREE-RUN NEVER DID.
+* This is AD-102's actual defect, and it is not the one the dispatch named. VP_OPCOUNT was
+* written ONLY in the block below, i.e. only on the handshake path AFTER a cycle. In free-run
+* mode the host writes VP_FREE and releases; the guest runs ONE handshake cycle here, writes
+* VP_OPCOUNT from it, then loops through VP_FREE free-run cycles that write NOTHING, and parks.
+* ★★★★ So the number the host read was the count from a single cycle -- logic.0's
+* initialisation -- taken BEFORE the free run began. Every cycle the measurement was about was
+* invisible to it.
+* ★★★★★ MEASURED, NOT ARGUED: baseline at TIMED=1 (2 cycles) reported opcount=184, and at
+* TIMED=20 (21 cycles) reported opcount=184, and at TIMED=200 (201 cycles) reported opcount=184.
+* **A counter that does not move when the work is multiplied by a hundred is not measuring the
+* work.** That it also matched across ablation ARMS was a symptom, not the disease.
+* ★★★ vm_cycle and vm_opcount are cumulative and monotone, so publishing them at the park is
+* correct on BOTH paths: in handshake mode nothing has changed since the block below wrote
+* them, and in free-run mode this is the only write that ever sees the free-run's work.
+                ldd     vm_cycle
+                std     VP_CYCLE
+                ldd     vm_opcount
+                std     VP_OPCOUNT
                 clr     VP_GO
 vp_wait:        lda     VP_GO
                 beq     vp_wait
@@ -196,8 +227,15 @@ vp_wait:        lda     VP_GO
                 lda     vm_quit
                 bne     vp_halted
 
+* ★★★★★ GUARDED, BECAUSE -DVM_PACEONLY MUST MEAN *NO INTERPRETATION ANYWHERE* [L-79].
+* The free-run branch above has carried `ifndef VM_PACEONLY` since T-P0-033 and this one did
+* not, so the pace-only arm still ran exactly one interpret cycle -- the one whose count was
+* then the only thing published. **An arm that is supposed to do no work must be able to drive
+* the check to zero, or the check has never been shown able to fail.**
+                ifndef  VM_PACEONLY
                 jsr     vm_interpret_cycle
                 jsr     vm_post_cycle
+                endc
 
                 ldd     vm_cycle
                 std     VP_CYCLE
@@ -219,9 +257,13 @@ vp_halted:      lda     #1
                 sta     VP_BADOP
                 lda     vm_badlogic
                 sta     VP_BADLOGIC
-                bra     vp_loop
+* ★★ `lbra`, NOT `bra`. The publish block above added 8 bytes and pushed both of these past the
+* -128 reach; lwasm said "Byte overflow" and named the branch, not the insertion. ★ Same shape as
+* pic_fill.s's ff_win_row placement -- an insert in the middle of a loop is a range change, and
+* the assembler reports it at the far end.
+                lbra    vp_loop
 vp_ok:          clr     VP_STATUS
-                bra     vp_loop
+                lbra    vp_loop
 
                 include "src/harness/vm_tables.s"
                 include "src/harness/vm_state.s"
