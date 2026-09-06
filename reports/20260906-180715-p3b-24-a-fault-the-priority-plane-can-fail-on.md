@@ -261,9 +261,8 @@ garbage before the title screen (§3.D); fixed and re-run.
 
 ### 7 — Uncertainty flags
 
-1. ★★★ **PoliceQuest1 catches the priority fault on 11 of 20 frames, not 20.** Not diagnosed. It is
-   also the corpus `COMP_FAULT` cannot reach at all, so it is the weakest of the nine on both
-   faults and worth a look.
+1. ~~★★★ **PoliceQuest1 catches the priority fault on 11 of 20 frames, not 20.** Not diagnosed.~~
+   ★★★★ **RESOLVED — see §12. Benign, and the diagnosis produced an exact separator.**
 2. ★★★ **`COMP_PRI_FAULT` is not in `gates.manifest`.** Neither is `COMP_FAULT`. **No fault build
    is a manifest row**, so fault-detectability is re-established by hand each time rather than
    audited — which is how it went unnoticed that the priority half had never failed.
@@ -302,6 +301,10 @@ i ask."*** No PNG is committed by this task; the scratch overlay left by P3b.21'
 deleted. **This overrides §2P's "commit the visualisation" default** — §2P still governs what may
 leave the machine at all, but the decision to commit a permitted image is Jay's.
 
+★★★ **After the report: Jay asked why PoliceQuest1 is 11/20 when the others are 20/20**, via the
+Orchestrator's note. **Answered in §12** — benign, and the answer produced the separator §8.3 had
+only guessed at.
+
 ---
 
 ### 10 — Candidate(s) captured this task
@@ -313,6 +316,100 @@ leave the machine at all, but the decision to commit a permitted image is Jay's.
 ### 11 — Commit
 
 `783378d` (the fault) · `5454d38` (§3.D's boot fix). Both pushed to origin/wip before this report.
-This report lands in the follow-up commit.
+The report landed in `e714d48`; §12 lands in the follow-up commit.
+
+---
+
+## 12 — ADDENDUM: why PoliceQuest1 is 11/20, and the separator it hands back
+
+★★★ **Jay's question, via the Orchestrator's note. It is benign — and settling it produced the
+exact separator §8.3 had only proposed.**
+
+### 12.1 ★★★★ The two readings, decided
+
+The note set out the test: **do the nine identical frames stamp priority at all?** The oracle's own
+dumps answer it without running anything — `after` minus `before` **is** what the compositor wrote.
+
+```
+frame   fault          pri stamped      vis drawn
+240     identical                0              0
+241     identical                0              0
+242     identical                0              0
+243     identical                0              0
+322-326 identical                0              0     (five frames)
+244     DIVERGENT               28             28
+245     DIVERGENT               70             70
+246     DIVERGENT              112            112
+320     DIVERGENT               89             87
+321     DIVERGENT               36             36
+327     DIVERGENT               46             43
+328     DIVERGENT              106            100
+329     DIVERGENT              172            163
+330     DIVERGENT              230            221
+396     DIVERGENT              254            254
+397     DIVERGENT              209            209
+★ No identical frame stamps priority -- the split is a corpus fact, and benign.
+```
+
+★★★★ **All nine stamp zero priority AND draw zero visual.** The sprites are present (the sweep
+reports "2 sprites" on every frame) and **draw nothing at all**. There is no path the fault fails
+to reach; there is nothing to reach. **Benign, and PQ1's staged corpus is thinner than the others.**
+
+### 12.2 ★★★★★ And the divergent eleven give an exact predictor [L-89]
+
+**The fault moves exactly the number of bytes the oracle's compositor stamps — 11 of 11.**
+28→28, 36→36, 46→46, 70→70, 89→89, 106→106, 112→112, 172→172, 209→209, 230→230, 254→254.
+
+★★★★ **And the total closes against a counter the stager already prints.** The eleven sum to
+**1,352**, and `comp_stage.py` reports for this staged set:
+
+```
+PoliceQuest1  tested 22690  written 1352  rejected-by-priority 15525
+```
+
+★★★★★ **`written` IS the separator.** It predicts the priority fault's byte count per frame and in
+total, and it was being printed on every staging run without being read as one.
+
+### 12.3 ★★★★★ Which resolves the note's §2 paradox exactly
+
+The note flagged that AD-119 measured **386 of 398 PoliceQuest1 frames** changing `after.priority`
+— the highest rate of the three titles — and asked how a corpus that *writes priority most* can
+*carry the fault least*.
+
+★★★★★ **Because the stager selects on REJECTION, and rejection is by definition NOT writing.**
+`comp_stage.py` scores frames by *"how many pixels the priority test actually REJECTS"* [L-38, to
+stop a gate passing with the priority test inverted]. PoliceQuest1 scores highest — 15,525 — because
+its sprites sit mostly **behind** scenery. A rejected pixel is tested and **not stamped**:
+
+| corpus | tested | **written** | rejected | write rate |
+|---|---|---|---|---|
+| larry1 | 109,948 | 44,932 | 0 | 41% |
+| SpaceQuest-1 | 29,260 | 13,466 | 9,314 | 46% |
+| KQ1ego1 | 14,320 | 5,108 | 1,820 | 36% |
+| **PoliceQuest1** | 22,690 | **1,352** | **15,525** | **6%** |
+
+★★★★ **The 386/398 is over the full 398-frame corpus; the staged 20 are a subset chosen to
+maximise rejection.** Both figures are right and they are not the same quantity — exactly as the
+note anticipated when it said "the two counts are not the same quantity".
+
+> ★★★★★ **The corpus selected as best at exercising the priority TEST is thereby the worst at
+> carrying a fault on the priority WRITE.** The selector optimises one and de-optimises the other,
+> and it does so silently.
+
+★★★ **Third instance of this task's own lesson**, and the sharpest: a separator is a prediction
+about one fault [§10's candidate]. `rejected-by-priority` was built to defeat an inverted priority
+test; used as a corpus score it actively selects against the pixels a value fault needs.
+
+★★ **It also explains `COMP_FAULT`'s 0/20 on PQ1** without a second mechanism: with 6% of tested
+pixels written, there is very little of anything for either fault to bite on.
+
+### 12.4 What this changes
+
+- ★★★★ **§8.3 is upgraded from a suggestion to a specific instruction:** re-stage the composite
+  corpus scored on **`written`** as well as `rejected`, because the two faults need opposite
+  populations and the current score serves only one — badly, in PQ1's case.
+- ★★ **Nothing in AC-3, AC-4, AC-5 or AC-8 moves.** The gate's priority half still fails under the
+  fault; all nine corpora still carry it; the mirror pair is still exact.
+- ★ **No new uncertainty.** The 11/20 is fully accounted for, byte for byte.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
