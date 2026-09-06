@@ -357,6 +357,7 @@ None during execution. The eye gate in §5 is outstanding and is addressed to Ja
 
 ### 11 — Commit
 
-See below. Pushed to origin/wip before this report.
+`95dc45d` (pushed to origin/wip before this report; this §11 hash lands in the follow-up commit).
+Pool candidate `2914882` on `methodology-candidate-pool@main`.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
