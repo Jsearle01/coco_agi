@@ -223,7 +223,22 @@ end)
 prog:write_u8(0xFF98, 0x80)
 prog:write_u8(0xFF99, 0x3E)
 for i = 0, 15 do prog:write_u8(0xFFB0 + i, 0x00) end
-print("display: mode 2 + 16 black palette entries asserted BEFORE staging")
+-- ★★★★★ AND POINT VOFFSET AT THE VISIBLE PLANE NOW, NOT AT CYCLE 2.
+-- ★★★★ The notifier below sets VOFFSET once the guest is running, so until then the display was
+-- still scanning wherever DECB left it -- the text screen, which the stager is busy overwriting.
+-- A black palette hid that, until the guest started installing the REAL palette at init and Jay
+-- saw it: "i saw a bunch of garbage before the king's quest title screen". **Two things have to
+-- be true for the boot to be black: the palette must be black AND the display must be looking at
+-- a plane we control.** Only the first was.
+-- ★★★ 40 is P3_BLK_VISIBLE [p3b_probe.s] written as a literal because the guest has not been
+-- staged yet, so p3_blk_vis cannot be read from memory. VOFFSET = block * 1024.
+-- ★★ The guest blacks that plane at init and only then loads the palette, so the screen is black
+-- from here until the first room is presented.
+local BLK_VISIBLE = 40
+prog:write_u8(0xFF9D, ((BLK_VISIBLE * 1024) >> 8) & 0xFF)
+prog:write_u8(0xFF9E, (BLK_VISIBLE * 1024) & 0xFF)
+print(string.format("display: mode 2 + 16 black palette entries + VOFFSET=$%04X asserted BEFORE staging",
+                    BLK_VISIBLE * 1024))
 -- ═══════════════════════════════════════════════════════════════════════════════════════════
 
 dofile("harness/tools/p3b_room.lua")

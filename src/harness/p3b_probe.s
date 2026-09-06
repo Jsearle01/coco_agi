@@ -222,7 +222,17 @@ P3_BLK_VISIBLE  equ     40              ; what the display shows and sprites com
 * their values -- and is what found the absence in the first place.
 * ★ Mode must be final before palette writes latch [gfx.s Constraint B]. The host sets mode 2
 * before staging, so it is by the time this runs -- stated in the report's §7, not assumed.
-                jsr     agi_pal_load
+*
+* ★★★★★ THE CALL IS BELOW, AFTER THE PLANE IS BLACK, AND THE ORDER IS THE WHOLE POINT.
+* ★★★★ Loading it HERE regressed the boot: Jay, on the first cold run, "i saw a bunch of garbage
+* before the king's quest title screen". The host asserts sixteen BLACK entries before staging,
+* which is what makes the load window invisible -- and this call replaced them with the real
+* palette while the visible plane still held uninitialised RAM. **The screen was black because
+* the palette was black, not because the plane was clear**, and installing real colours before
+* clearing the plane is exactly how you find that out.
+* ★★★ So the palette is installed LAST, after p3_black_visible has zeroed the plane it colours.
+* Index 0 is $00 [content/agi_palette.s], so a zeroed plane is black under the real palette too --
+* the screen never stops being black, and the transition is invisible rather than merely brief.
 * ═══════════════════════════════════════════════════════════════════════════════════════════
                 lda     #P3_BLK_VISIBLE
                 sta     ph_blk_fb
@@ -244,6 +254,8 @@ P3_BLK_VISIBLE  equ     40              ; what the display shows and sprites com
 * p3_room_check still whitens what the renderer draws on, so the renderer's contract is unchanged
 * and every picture still gates byte-identical.
                 jsr     p3_black_visible
+* ★★★★★ NOW the palette, with the plane already black beneath it (see the block above).
+                jsr     agi_pal_load
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ CLOCK CALIBRATION — A GUARD, NOT A DECORATION, AND ITS ABSENCE COST THIS TASK ITS
