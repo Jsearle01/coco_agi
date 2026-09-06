@@ -78,8 +78,12 @@ foreach ($v in $VARIANTS) {
     $env:VM_PROG   = $bin
     $env:VM_SYMBOLS = $sym
     $env:VM_OUT    = "build/vm_abl_out_$v"
+    # ★★★ -nothrottle [T-P0-058]. vm_run.ps1 has passed it for many tasks and this file is the
+    # ablation twin of that gate, so it was the odd one out. ★★ The figures here are ms/cycle
+    # derived from `m.time:as_double()` -- EMULATED time -- and opcount, a guest-side counter.
+    # Neither can see host pacing [L-78: a host-side interval was the wrong instrument].
     & C:\mame\mame.exe coco3 -rompath C:/mame/roms -video none -sound none -window -nomaximize `
-        -seconds_to_run 400 -autoboot_script harness/tools/vm_sweep.lua 2>&1 |
+        -nothrottle -seconds_to_run 400 -autoboot_script harness/tools/vm_sweep.lua 2>&1 |
         Select-String "free-run|ms/cycle|opcount|HALT|bad|clock MEASURED|SLOW CLOCK|cache:" |
         Select-Object -First 6
 }

@@ -36,9 +36,18 @@ for d in "$STAGEROOT"/*/; do
     t=$(basename "$d")
     TITLES="$TITLES $t"
     echo "═══ $t ═══"
+    # ★★★★★ CEL_STAGE/CEL_OUT/CEL_PROG PREFIX THE COMMAND BELOW AND NOTHING MAY COME BETWEEN.
+    # A comment inserted after the trailing backslash made the prefix apply to the COMMENT, so
+    # every title ran with the previous title's environment: six runs of Kingquest1 writing to
+    # build/cel_sweep instead of build/cel_sweep/<title>. ★★★★ AND THE GATE STILL SAID
+    # "9193 / 9193 (100.00%)", because celcheck.py adjudicated the per-title directories left by
+    # the PREVIOUS good run [L-72: a runner that exits 0 on a partial run asserts more than it
+    # tested]. **The pass survived the gate not running.**
+    # ★★ -nothrottle goes on the MAME line itself, below, where it cannot break this prefix.
     CEL_STAGE="$d" CEL_OUT="build/cel_sweep/$t" CEL_PROG=build/cel_probe.bin \
     "$MAME" coco3 -rompath C:/mame/roms -video none -sound none -window -nomaximize \
-        -seconds_to_run "${SECS:-900}" -autoboot_script harness/tools/cel_sweep.lua 2>&1 | tail -"${TAIL:-4}"
+        -nothrottle ${MAME_EXTRA:-} -seconds_to_run "${SECS:-900}" \
+        -autoboot_script harness/tools/cel_sweep.lua 2>&1 | tail -"${TAIL:-4}"
 done
 
 echo

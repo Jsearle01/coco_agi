@@ -71,15 +71,32 @@ run() {   # run <name> <script> <seconds> <src> <out> [flags...]
     echo "═══ $1 ═══"
     name="$1"; script="$2"; secs="$3"; shift 3
     build_and_stamp "$@" || { echo "★★★ $name SKIPPED -- could not build"; echo; return 1; }
-    # ★★★ MAME_EXTRA exists so a pacing flag can be TESTED without editing this file, and so the
-    # flag a measurement was taken under is visible in the environment rather than in a shell
-    # history [L-45's reasoning applied to the launch step, which is what this file is for].
-    # ★★ -seconds_to_run above is EMULATED seconds. The sweeps already exit early on completion
-    # (pic_sweep.lua, cel_sweep.lua, comp_sweep.lua, vm_sweep.lua all call machine:exit()), so it
-    # is a safety net rather than a budget that is always spent.
+    # ═══════════════════════════════════════════════════════════════════════════════════════
+    # ★★★★★ -nothrottle: MEASURED, NOT ASSUMED [T-P0-058]. MAME paces to emulated real time by
+    # default, so a gate that emulates 308 seconds took 308 seconds of Jay's day.
+    #     pic gate  THROTTLED  312.7 s at 99.98%     UNTHROTTLED  16.5 s at 2869%   -- 19x
+    # **45/45 PASS both ways, every per-picture hash identical**, and the same held for cel
+    # (9,193/9,193 with all six per-title counts unchanged), comp (9 corpora x 20/20) and p3b
+    # (pictures 22/1/3/83 at 0.0% on both planes).
+    # ★★★★ WHY IT CANNOT CHANGE A RESULT HERE, which is the part worth writing down: emulation is
+    # deterministic and throttle only paces the HOST. Nothing in this harness measures wall clock
+    # -- every timing call in every sweep is `m.time:as_double()`, which is EMULATED time. That is
+    # not luck: L-78/AD-100 moved this project off host-side intervals after one was found to be
+    # the wrong instrument, and VP_MARK exists for the same reason.
+    # ★★★ res_run.ps1 and vm_run.ps1 had ALREADY been passing -nothrottle for many tasks, so two
+    # of the gates had been validating this quietly the whole time and nobody had noticed the
+    # suite was half-paced.
+    # ★★ TO RESTORE PACING: MAME_EXTRA=-throttle. MAME_EXTRA is also how any other flag is added
+    # without editing this file, so the flag a measurement was taken under is visible in the
+    # environment rather than in a shell history [L-45, applied to the launch step].
+    # ★ -seconds_to_run is EMULATED seconds, and the sweeps already call machine:exit() on
+    # completion, so it is a safety net rather than a budget that is always spent.
+    # ★★★★★ JAY'S VISUAL GATE STAYS THROTTLED -- see the note in p3b_show.lua. A human watching a
+    # room appear needs it to appear at the speed the machine would.
     # shellcheck disable=SC2086
     "$MAME" coco3 -rompath C:/mame/roms -video none -sound none -window -nomaximize \
-        ${MAME_EXTRA:-} -seconds_to_run "$secs" -autoboot_script "$script" 2>&1 | tail -"${TAIL:-6}"
+        -nothrottle ${MAME_EXTRA:-} -seconds_to_run "$secs" \
+        -autoboot_script "$script" 2>&1 | tail -"${TAIL:-6}"
     echo
 }
 

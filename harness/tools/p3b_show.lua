@@ -33,6 +33,18 @@
 local SNAP_EVERY = tonumber(os.getenv("SHOW_SNAP_EVERY") or "0")   -- frames between snapshots
 local SYMS       = os.getenv("SHOW_SYMS") or "build/p3b_probe_pk.map"
 
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+-- ★★★★★ THIS SCRIPT MUST RUN THROTTLED. DO NOT ADD -nothrottle TO ITS LAUNCHER.
+-- ★★★★ T-P0-058 made -nothrottle the default for every BYTE gate -- pic, cel, comp, p3b's dump
+-- runs, the ablations -- after verifying each produces identical results either way. **This one
+-- is excluded by Jay's instruction and by what it is for.** It is the eye gate: a human watches
+-- a room appear, judges whether the fills and the palette are right, and needs the machine to
+-- run at the speed the machine would run at. At 2,800% a 7-second render is a flicker.
+-- ★★★ P3B_HOLD exists for the same reason [T-P0-056]: the gate had been running four times with
+-- the window closing on the frame the work finished, and nobody could see it.
+-- ★★ The dump path (p3b_room.lua, no display) IS unthrottled -- it produces plane bytes for
+-- plane_pair_diff.py and no human looks at it while it runs.
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
 local m    = manager.machine
 local cpu  = m.devices[":maincpu"]
 local prog = cpu.spaces["program"]

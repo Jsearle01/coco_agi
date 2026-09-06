@@ -43,7 +43,9 @@ for v in "$@"; do
     # match the BUILD or the readback reads the wrong length and the gate reports on nothing.
     case "$v" in *packed*) export PIC_PACKED=1 ;; *) unset PIC_PACKED ;; esac
     PIC_PROG="$bin" PIC_OUT="$out" \
-    "$MAME" coco3 -rompath C:/mame/roms -video none -sound none -window -nomaximize \
+    # ★★ -nothrottle [T-P0-058]. This measures CYCLES via the probe's own counters, not wall
+    # clock, so host pacing cannot reach the figures it produces.
+    "$MAME" coco3 -rompath C:/mame/roms -video none -sound none -window -nomaximize -nothrottle \
         -seconds_to_run "${SECS:-1800}" -autoboot_script harness/tools/pic_sweep.lua 2>&1 | tail -2
     echo "  pictures written: $(ls "$out"/*.fb.bin 2>/dev/null | wc -l)"
     python harness/tools/pic_counters.py --csv "$out/timing.csv" 2>&1 | sed 's/^/  /'

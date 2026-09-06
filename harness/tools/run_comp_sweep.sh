@@ -30,7 +30,10 @@ MAME=${MAME:-/c/mame/mame.exe}
 export COMP_STAGE="$STAGE" COMP_FRAMES="$FRAMES" COMP_PROG="$PROG"
 export COMP_OUT="${COMP_OUT:-build/comp_sweep}"
 
+# ★★★ -nothrottle by default [T-P0-058]: verified identical across all nine widened corpora,
+# 20 frames each, 20 identical / 0 divergent both ways. MAME_EXTRA=-throttle restores pacing.
+# shellcheck disable=SC2086
 "$MAME" coco3 -rompath C:/mame/roms \
     -video none -sound none -window -nomaximize \
-    -seconds_to_run "${SECS:-400}" \
+    -nothrottle ${MAME_EXTRA:-} -seconds_to_run "${SECS:-400}" \
     -autoboot_script harness/tools/comp_sweep.lua 2>&1 | tail -40
