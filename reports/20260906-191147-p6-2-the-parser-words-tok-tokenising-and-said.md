@@ -1,4 +1,10 @@
-## Form B Report — P6.1 — The parser: `WORDS.TOK`, tokenising, and `said()`
+## Form B Report — P6.2 — The parser: `WORDS.TOK`, tokenising, and `said()`
+
+> ★★★ **RENUMBERED FROM P6.1 after delivery.** `P6.1` was already taken by T-P0-031's
+> *64 KB layout reconciliation* (2026-08-29), which AD-78 cites for the arena and the two-slot
+> window. T-P0-058's §9 template named this work P6.1 and I used it. **The commits `166c272` and
+> `a07c46a` carry the old label in their subject lines and cannot be relabelled — they are
+> pushed** — so a reader tracing from either lands here. See §9.
 
 **Class:** build. wip.
 
@@ -385,6 +391,28 @@ because L-66, L-67 and AD-88 are all cases where the Python shape and the target
 and nothing had written down which was assumed.
 
 ★ **Standing, from the previous task and honoured here:** no PNG is committed.
+
+★★★★ **After delivery — the report label was wrong and is corrected.** Jay spotted that **two
+reports were numbered P6.1**: T-P0-031's *64 KB layout reconciliation* (2026-08-29) and this one.
+**T-P0-058's §9 commit template named this work P6.1 and I used it without checking the listing.**
+Renumbered to **P6.2**; the layout report keeps P6.1, which is what **AD-78 already cites** for the
+arena and the two-slot window.
+
+★★★ **Why it is worth a paragraph rather than a rename:** a citation in this project has to resolve
+to exactly one thing, and a duplicate label is the same class of problem as a figure that means two
+things — **AD-96's two build configurations and AD-122's one plane of two both cost multiple tasks.**
+
+★★ **Heading and filename both corrected**, as the note asks; the file is
+`20260906-191147-p6-2-the-parser-words-tok-tokenising-and-said.md`.
+
+★★ **What could NOT be fixed:** the commits `166c272` and `a07c46a` say "P6.1" in their subject
+lines and are pushed. **A reader tracing from either commit will not find a file matching its
+label** — recorded here so the mismatch is findable rather than surprising, and not rewritten
+because rewriting pushed history to correct a label costs more than the label is worth.
+
+★ **And the standing point, accepted:** I have the `reports/` listing in front of me every task and
+the Orchestrator does not. **I noticed this collision only after pushing** — in the message
+delivering the report — when checking it would have cost one glance before writing the heading.
 
 ---
 
