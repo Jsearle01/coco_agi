@@ -228,6 +228,9 @@ co_depth:
                 bne     co_st_lo
                 anda    #$0F                    ; even x: keep the ODD pixel, replace the high
                 ldb     co_prio
+                ifdef   COMP_PRI_FAULT
+                eorb    #1                      ; ★ INJECTED: adjacent band (see co_pri_fault)
+                endc
                 aslb
                 aslb
                 aslb
@@ -236,11 +239,44 @@ co_depth:
                 ora     ,s+
                 bra     co_st_put
 co_st_lo:       anda    #$F0                    ; odd x: keep the EVEN pixel, replace the low
+                ifdef   COMP_PRI_FAULT
+                ldb     co_prio
+                eorb    #1                      ; ★ INJECTED: adjacent band
+                pshs    b
+                ora     ,s+
+                else
                 ora     co_prio
+                endc
 co_st_put:      sta     ,x
                 else
                 leax    d,x
                 lda     co_prio
+* ═══════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ co_pri_fault — AC-3's INJECTED FAULT, AND IT PERTURBS THE VALUE, NOT THE DECISION.
+*
+* ★★★★★ WHY A SECOND FAULT WAS NEEDED. -DCOMP_FAULT flips the depth test at the EQUAL-priority
+* boundary, so it changes behaviour only where screenPriority == viewPriority -- and at such a
+* pixel **the priority value the sprite would write is the value already there**. Drawing and
+* not-drawing leave the priority plane byte-identical. Measured across two corpora and every
+* divergent frame: visual 1642/1612/1606/1566/5/6 bytes differ, PRIORITY **0**.
+* ★★★★ So "BOTH PLANES IDENTICAL" was one claim and one tautology: the composite gate had never
+* been shown able to fail on the priority plane, on any frame, under any fault. ★★★ That is the
+* same condition that let the fill's priority write stay broken for eleven tasks [AD-121] --
+* twice on the same plane, which is why L-62 wants the pair and not the green.
+*
+* ★★★ WHAT REAL BUG THIS RESEMBLES [AC-6]. The sprite stamps an ADJACENT priority band. Design
+* §3.5 makes priority banding a 168-byte LOOKUP TABLE rather than a computation, and an
+* off-by-one in a band table -- or a table built with the wrong rounding at a band edge -- lands
+* exactly here: every stamped pixel carries a plausible, in-range, WRONG band. ★★ `eor #1` keeps
+* the value inside 0-15, so nothing overflows a nibble and no plane changes size; the defect is
+* a wrong depth, not a corruption, which is the kind a byte gate exists to catch and an eye gate
+* would miss.
+* ★★ SEPARABLE FROM COMP_FAULT [L-54]: different symbol, different mechanism, different plane.
+* Neither replaces the other and the gate should be run under both.
+* ═══════════════════════════════════════════════════════════════════════════════════
+                ifdef   COMP_PRI_FAULT
+                eora    #1                      ; ★ INJECTED: adjacent band
+                endc
                 sta     ,x                      ; ★ the sprite stamps the priority plane
                 endc
                 bra     co_nextx
