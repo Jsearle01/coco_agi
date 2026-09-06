@@ -1,6 +1,15 @@
 ## Form B Report — P3b.21 — The eye gate finds the palette; the composite gate cannot fail on priority
 
-**Class:** build. wip. ★★★★★ **TWO TRIGGERS FIRED (1 and 4). This task STOPS.**
+**Class:** build. wip. ★★★★★ **TWO TRIGGERS FIRED (1 and 4). This task STOPPED, then resumed on
+Jay's instruction — see the ADDENDUM at the end.**
+
+> ★★★★★ **ADDENDUM, 2026-09-06, after the report was delivered.** Jay asked where the palette
+> decision was made, and **it was made and gated eight days before this report was written.**
+> ★★★★ **§3.C's diagnosis below is WRONG and is corrected in §12**, which also records
+> **AC-1 PASSING** and the four commits that followed. **§3.C is left standing rather than
+> rewritten**, because what it got wrong is the finding: a correct measurement, a correct
+> observation from Jay, and an attribution that never checked whether the thing it blamed had
+> already been decided [§2H check 3, which I did not run].
 
 ---
 
@@ -212,6 +221,9 @@ named at each step; the **prior-report grep** is §4's `flag_diff` item carried 
   the fill looks good"*. **Palette: FAIL** — *"the palette looks wrong"*, *"palette is off as in the
   first room"*, and room 1's *"trees look unfilled (white)"* is index 2 → light grey (§3.C).
   ★★★ **P3b's byte work is confirmed by eye; a new defect is opened.**
+  > ★★★★★ **SUPERSEDED — AC-1 SUBSEQUENTLY PASSED IN FULL.** After the palette was repointed and
+  > a display hold added, Jay re-ran the castle, room 22 and picture 3 live: ***"all three look
+  > good."*** **P3b's last acceptance criterion is closed.** See §12.
 - **AC-2 [class: byte-comparable] — PASS.** `hal_sync_check` OK in all three; `reg_discipline`
   **8 / 1 file / 2 registers**, unchanged. **All nine gates identical** (§4). §2T: P3b.20 §0.
 - **AC-3 [class: byte-comparable] — PASS.** **180 frames, 6 titles, 9 sources**, from 24/1/1.
@@ -302,6 +314,9 @@ to their sources (§4).
 
 **25.3 operator-runtime-smoke: ★★★★★ RUN BY JAY, live, `poke`, RGB.** Fills PASS, palette FAIL.
 Verdict quoted verbatim in AC-1.
+★★★★★ **SUPERSEDED — re-run after §12's fixes: PASSED.** Jay, live, `poke`, RGB, on the castle,
+room 22 and picture 3: ***"all three look good."*** Provenance line from each run:
+`palette: 16 entries from content/agi_palette.s [P4.4 AC-11/AC-12]  idx2=$10 idx6=$22 idx15=$3F`.
 
 ---
 
@@ -321,10 +336,13 @@ Verdict quoted verbatim in AC-1.
 
 ### 7 — Uncertainty flags
 
-1. ★★★★ **My corrected palette table is arithmetic and unverified** (§3.C, §8). It should be checked
-   against `docs/ground-truth/` before anyone builds it — CLAUDE.md §8 already flags the design
-   spec's palette table as Orchestrator arithmetic pending exactly that check.
-2. ★★★ **Whether the AGI palette belongs in `gfx.s` or `hal_globals.s` is a design call** (§3.C).
+1. ★★★★ ~~**My corrected palette table is arithmetic and unverified**~~ — ★★★★★ **WITHDRAWN
+   (§12.1). It is byte-for-byte the table Jay eye-gated at P4.4 AC-12 on 2026-08-29.** It was
+   neither arithmetic nor unverified, and this flag advised redoing work already done.
+2. ★★★ ~~**Whether the AGI palette belongs in `gfx.s` or `hal_globals.s` is a design call**~~ —
+   ★★★★ **WITHDRAWN (§12.4). It belongs in neither: CLAUDE.md §2B names `content/` for the RGB
+   palette table, and that is where it now lives**, included by `hal_globals.s` so no shared file
+   is touched. The question was answered in the rules before it was asked.
 3. ★★★ **AC-4's structural argument is a derivation** — supported by 0 priority bytes across every
    divergent frame in two corpora, but I have not proven no fault could move that plane, only that
    an equal-priority-boundary fault cannot.
@@ -335,7 +353,10 @@ Verdict quoted verbatim in AC-1.
 
 ### 8 — Follow-up candidates
 
-1. ★★★★★ **The palette** — Jay's ruling, then the table, then where it lives (§3.C).
+1. ★★★★★ ~~**The palette** — Jay's ruling, then the table, then where it lives~~ — ★★★★ **DONE,
+   §12.3/§12.4.** No ruling was needed (the values were gated at P4.4); the table moved to
+   `content/agi_palette.s`; every consumer now reads that one home. ★★ **What remains of this item
+   is §12.5.1: p3b still loads no palette of its own.**
 2. ★★★★★ **A composite fault that perturbs the priority VALUE**, so the plane can fail (§3.D).
 3. ★★★★ **Re-stage the composite gate on equal-priority score**, not rejection count (§3.E).
 4. ★★★ **Stage the remaining KQ1 volumes** — turns `p3b`'s 53 into 79.
@@ -351,6 +372,14 @@ request for a display delay (acted on, §3.B), *"the palette looks wrong"*, and 
 distinguishing fills from palette. ★★ **He also asked which items specifically to look at**, and was
 given two live commands and one image pair rather than the nine files.
 
+★★★★ **After the report was delivered he directed four further exchanges**, recorded in §12:
+*"so we closed the palette at the beginning of the project. can you find that decision"* (§12.1,
+and it corrected §3.C); *"do the one liner and setup the live run for me again"*; *"run the live
+for me"* → ***"all three look good. I closed the window manually"*** (§12.3 — and that also
+explains a picture-3 run I had flagged as a possible intermittent early exit; it was Jay closing
+the window, not a defect); and *"i want you to fix the palette so that it is in only one place"*
+(§12.4).
+
 ---
 
 ### 10 — Candidate(s) captured this task
@@ -361,7 +390,136 @@ given two live commands and one image pair rather than the nine files.
 
 ### 11 — Commit
 
-`b52ba07` (pushed to origin/wip before this report; this §11 hash lands in the follow-up commit).
+`b52ba07` (pushed to origin/wip before this report; this §11 hash landed in `d9958a1`).
 Pool candidate `fd27cd9` on `methodology-candidate-pool@main`.
+
+**After the report, on Jay's instruction (§12):**
+`c912df8` the palette parse repointed · `4601ef8` black from the load ·
+`6f7ebb5` the palette gets one home.
+
+---
+
+## 12 — ADDENDUM: the decision existed, AC-1 passed, and §3.C was wrong
+
+★★★★★ **Jay: *"so we closed the palette at the beginning of the project. can you find that
+decision"*.** It was found in one grep of the reports, and it is unambiguous.
+
+### 12.1 ★★★★★ The decision: T-P0-024 (P4.4), 2026-08-29
+
+**Jay added AC-11 and AC-12 mid-task and both passed.**
+
+- **AC-11 [byte-comparable]** — **16 of 16**, read back **by the guest** from `$FFB0`–`$FFBF`
+  with bits 7–6 masked [ref: `SockmasterGime.md`].
+- **AC-12 [eye-gated]** — ★★★ **PASSED — Jay, static-png, RGB.** Guest swatches beside a
+  synthesised EGA reference; ***"band 6 is brown in both"***.
+
+The table is `agi_pal16` [`pic_probe.s:498-514` at the time], with a source comment naming the exact
+failure mode it avoids: *"a 'double the CGA bit' conversion silently turns [brown] into dark
+yellow"*.
+
+★★★★ **It is byte-for-byte the table §7.1 of this report called "arithmetic and unverified".**
+**It was neither.** It was derived, desk-checked and eye-gated eight days earlier, and §7.1's
+recommendation to check it against `docs/ground-truth/` before building it was advice to redo work
+that was already done.
+
+### 12.2 ★★★★★ What §3.C got wrong, itemised
+
+§3.C made three claims about the fix and **all three were false**:
+
+| §3.C claimed | actually |
+|---|---|
+| the palette **table** is wrong | ★★★★ **no table is wrong.** `gfx_pal16` is the shared HAL's generic ramp, correct for modes 0–1 and never intended as AGI's — `hal_globals.s:133` said so in its own comment: *"AGI's own palette is loaded by the engine at init, NOT FROM HERE"* |
+| **§2B** requires Jay's ruling before overwriting it | ★★★ the values needed no ruling; **Jay had already gated them at AC-12** |
+| **§2M** makes it a three-repo shared-file change | ★★★ **no shared file was involved.** The fix touched `hal_globals.s`, which is PROJECT_LOCAL, and a new file under `content/` |
+
+★★★★★ **THE ACTUAL DEFECT WAS NARROWER AND WORSE.** `p3b_probe.s` loads **no palette at all** — no
+`pal_load`, no `agi_pal16`, no `$FFB0` write, and it never calls `HAL_gfx_set_mode`. **The palette
+work landed in the RENDERER probe and was never carried into the INTEGRATION probe**, and
+`p3b_show.lua` filled the gap host-side with the nearest table it could find. ★★★ **That is §4A's
+pattern exactly** — a defect in the glue between two independently-gated subsystems, invisible to
+both of their gates — **and this report named §4A's pattern in §3.C while misattributing this
+instance of it.**
+
+★★★★ **The method failure is §2H check 3, and it is mechanical.** *"Before citing a prior report's
+characterisation, grep the reports for the same subsystem."* **I did not grep.** One
+`grep -l palette reports/` returns sixteen files, P4.4 among them, and would have prevented the
+whole misattribution. ★★ §2H calls that check mechanical precisely so it cannot be skipped on
+judgement, and I skipped it on judgement.
+
+★ **What §3.C got RIGHT and is not retracted:** the mechanism (index 2 green → `$38` light grey is
+Jay's pale trees), the evidence that the planes were byte-identical throughout, and the conclusion
+that no byte gate can see a palette defect because the palette is in neither buffer.
+
+### 12.3 ★★★★ AC-1 PASSED — P3b is closed
+
+`c912df8` repointed the display's palette parse from `gfx_pal16` to the gated `agi_pal16`.
+`4601ef8` addressed Jay's second observation — ***"i need a delay after each is displayed to really
+see for sure"*** — with `P3B_HOLD`, and his third — ***"i want video set and cleared to black as
+soon as possible after the load"*** — in two halves: the host asserts mode 2 and sixteen black
+palette entries **before staging**, and the guest blacks its own visible plane at init
+(`p3_black_visible`), because the visible plane is only ever a destination for `p3_present` and so
+its initial contents are pure display state.
+
+★★★★★ **Jay, live, all three rooms: *"all three look good."*** ★★★ **Launch path `poke`, RGB.**
+**AC-1 of T-P0-056 is PASSED and P3b's last acceptance criterion is closed.**
+
+★★ **An eye gate the operator cannot look at is not an eye gate.** `p3b_run.lua` called `m:exit()`
+on the frame the cycle count completed, so the room being judged was on screen for a fraction of a
+second. **That gate had been run four times across P3b.14–P3b.21 before anyone said so**, because
+every previous run was scored from the plane dump rather than from the screen.
+
+### 12.4 ★★★★ The consolidation Jay then asked for [`6f7ebb5`]
+
+***"fix the palette so that it is in only one place and fix any code to reference this single
+location so multiple copies arent floating around."*** ★★★ **Two facts were duplicated, not one:**
+
+| fact | was | now |
+|---|---|---|
+| **the GIME bytes** | inside `pic_probe.s`, a renderer probe | **`content/agi_palette.s`** [§2B names this home; §2B also makes it PROTECTED] |
+| **the EGA reference** | **three copies** — `pal_check.py`, `pal_reference.py`, `comp_render.py`, in two shapes | **`harness/tools/agi_palette.py`**, imported by all three |
+
+★★★★ **`agi_palette.py` PARSES the GIME bytes out of the assembly rather than restating them**, so
+a host tool cannot disagree with what the guest assembles — L-45's reasoning applied to data.
+
+★★★★★ **The structural half: `hal_globals.s` mode 2 now points at `agi_pal16`, not `gfx_pal16`.**
+Any build selecting mode 2 through `HAL_gfx_set_mode` gets AGI's palette **by construction** rather
+than by a caller remembering to load it. ★★ `hal_globals.s` is PROJECT_LOCAL, so no shared file
+changed and `hal_sync_check` is OK in all three repos.
+
+**Cost, reported rather than absorbed.** `pic` 2642, `pic_nc` 2512, `pic_nc_pk` 2971, `pic_win`
+2655 keep their sizes with **shifted contents**; `comp` 967 untouched (no mode service);
+**`res` 2019→2035, `cel` 1436→1452, `vm` 8712→8728, `p3b` 13013→13029 — +16 each**, for a table
+they include and do not use. ★★★ **That is the price of one home.**
+
+**Behaviour re-proved, not assumed** — ★★★★ the `pic_*` binaries being the *same size* with
+*different content* is the case most likely to be waved through:
+
+```
+renderer gate      45/45 PASS, both planes, 3 games (KQ1=16, KQ2=15, KQ3=14)
+p3b                pic022 / pic001 / pic003 / pic083 all 0.0% visual, 0.0% priority
+agi_palette.py     16 of 16 agree with EGA through R1G1B1R0G0B0; entry 6 brown = $22
+comp_render        guest visual vs oracle visual: IDENTICAL
+gate_audit         9/9 identical      hal_sync_check: OK in all three
+```
+
+★ No table copy survives a grep; the two remaining `0xAA,0x55,0x00` uses were `gime()` calls in
+explanatory output and now read `EGA[6]`.
+
+### 12.5 Still open after the addendum
+
+1. ★★★★ **`p3b_probe.s` still loads no palette of its own** — the host asserts it every frame. With
+   mode 2 now pointing at the right table the fix is p3b calling `HAL_gfx_set_mode` or `pal_load`;
+   that is code under test and was not done after a trigger stop.
+2. ★★★★ **The composite gate still cannot fail on the priority plane** (§3.D, trigger 4) — unchanged.
+3. ★★ **AD-124 as filed is wrong** and is superseded by AD-125: the defect was not a wrong table.
+4. ★ **`flag_diff --manifest` over-reports** — open across three tasks now.
+
+### 12.6 What this addendum is evidence for
+
+★★★★★ **A correct measurement, a correct observation and a correct mechanism still produced a wrong
+attribution, and the check that would have caught it is one grep that §2H already mandates.** ★★★
+The eye gate found a real defect; the byte planes were genuinely identical; index 2 genuinely maps
+to light grey. **Everything was right except *which thing was broken*, and that is the part no
+measurement in this report was pointed at.**
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
