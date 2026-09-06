@@ -42,6 +42,10 @@ worked; **the gap is that a task can leave a faulted binary behind and only the 
 
 ### 1 — Summary
 
+★★★ **AC-7 is PARTIAL and the summary below was corrected to say so** — the still frames were
+delivered; the *animating* run on the CoCo3 was not, because the integrated probe has no present
+path at all (§3.F). **P3b's last byte-comparable AC is closed; its eye gate is not.**
+
 **The alignment problem dissolved rather than being solved, and that is the finding.** P4.9 refused to
 compare because guest cycle 8 and oracle loop 300 name different events — correct, and it assumed the
 comparison required aligning two independent runs. **It does not.** The compositing gate stages the
@@ -49,7 +53,8 @@ oracle's own per-frame inputs into the guest, so **the anchor is the frame's inp
 no clock to align.** With that established: **24 of 24 composited frames byte-identical on both
 planes**, on a corpus deliberately built to contain occlusion — and **the priority-test fault is
 caught on it**, which is what makes the 24/24 mean something. P3b's last byte-comparable AC is closed;
-**AC-7 is delivered to Jay and is pending his eye.**
+**AC-7's images are delivered and its
+animating run is not** (§3.F).
 
 ---
 
@@ -166,6 +171,42 @@ pixels through it), and it is reported separately rather than folded into the re
 calling routine is named at each step (`playGame` → `newRoom`; `vm_pace` → `interpretCycle`), and the
 prior-report grep is §3.A's reconciliation against P4.9 §6.1.
 
+#### 3.F ★★★★★ THE INTEGRATED PROBE HAS NO PRESENT PATH — nothing has ever reached the screen
+
+★★★★★ **Found after this report was first written, when Jay read it and said he expected a live run
+on the CoCo.** The expectation was correct and the delivery was a still. **The reason is not that
+this task chose a still — it is that a live view is not currently possible from the integrated
+probe.**
+
+★★★★ **`src/harness/p3b_probe.s` contains no present of any kind.** Grepped for `PRESENT`,
+`gfx_swap`, `gfx_present`: **no match.** The probe composites into RAM planes and never points the
+video hardware at them. ★★★ **So the MAME screen has been blank for every P3b run ever made**, and
+every "visual" in the phase — including all three images in AC-7 — is **plane bytes rendered to PNG
+by a host tool**, not a capture of the machine's display.
+
+★★★ **`pic_probe`'s recipe does not transfer, and assuming it did would have produced a confident
+wrong picture.** `pic_probe.s:421` gets its screenshots with `ifdef PIC_PRESENT` → `jsr
+HAL_gfx_swap`, which flips VOFFSET between `GFX_DB_A_BLOCK` and `GFX_DB_B_BLOCK` [`gfx.s:475-479`].
+**p3b's framebuffer is `MAP_PHASE_WIN`** [`p3b_probe.s:54`], its own phase-window slice — **not the
+HAL's double buffer.** Calling `HAL_gfx_swap` from p3b would point the screen at RAM the composite
+never wrote.
+★★ **Stated as inference, not measurement:** this reads two files against each other and was not
+confirmed by running it. **It is the first thing to check before anyone builds the present**, and it
+is exactly the shape of claim L-53 says to verify rather than carry forward.
+
+★★★ **What a live view needs**, so the next task does not rediscover it: point VOFFSET at the
+physical block `p3_composite_all` writes; guard it with an ifdef so the **gate build stays
+byte-identical**; and call it **per cycle** — `pic_probe.s:420` warns its own once-after-settling
+placement is wrong for motion (*"A moving picture must not copy this"*). ★ The capture side is
+already solved: `roomshots.ps1` records the flags that make a CoCo3 PNG correct (RGB monitor,
+`-snapview auto`, `-snapsize 640x480`, `-keepaspect`, scratch `-cfg_directory`), and
+`m.video:snapshot()` is established in `pal_gate.lua` and `pic_probe.lua`.
+
+★★★★ **Why it was not done here:** it is a change to `p3b_probe.s`, **the probe every P3b timing
+figure was taken against** — 8.3% compositing, 0.03929 s/cycle, the 4-sprite margin [AD-109]. It is
+out of T-P0-049's scope (§11), and the dispatch had ended at a stop. **Reported rather than
+attempted.**
+
 ---
 
 ### 4 — Verification (AC-by-AC)
@@ -198,8 +239,13 @@ prior-report grep is §3.A's reconciliation against P4.9 §6.1.
   set: 2,184 rejected pixels across 24 frames.** ★★★★ **Unaided, no reachable frame had occlusion** —
   rooms 1, 3 and 5 gave **1,353 frames with a maximum rejection of 5 pixels**, room 1 at **97% zero**.
   **The ego placement is what made the corpus able to fail** (§3.C).
-- **AC-7 [class: eye-gated] — DELIVERED TO JAY, pending his eye.** Three images produced, and the
-  §2P split is enforced by `comp_render.py` itself:
+- **AC-7 [class: eye-gated] — ★★★★ PARTIAL. The images were delivered; "ANIMATING" WAS NOT.**
+  ★★★★★ **CORRECTED after Jay read the first version of this report and said he expected a live run
+  on the CoCo.** He is right and the first version of this AC overstated itself: the criterion says
+  *"Jay sees a character partly behind scenery, **animating**"*, and what was delivered is **one
+  still frame**. ★★★ **The cause is structural and is §3.F's finding: the integrated probe has no
+  present path, so nothing has ever reached the CoCo3's screen.** What follows is what WAS
+  delivered, and the §2P split is enforced by `comp_render.py` itself:
   - **committed (ours):** `docs/gates/p3b14-frame568.priority.png` — the priority buffer, one colour
     per band; `docs/gates/p3b14-frame568.outcome-overlay.png` and `…frame569…` — **the sprite's
     per-pixel outcome**: GREEN drawn / RED refused / AMBER control-line, over the dimmed depth map.
@@ -208,6 +254,10 @@ prior-report grep is §3.A's reconciliation against P4.9 §6.1.
   ★★ **Launch path `poke`.** ★★★ **`25.3` is "pending Jay" and is NOT self-certified** — per §3 of
   CLAUDE.md I have not interpreted the PNG pixels; the figures above are the tool's own counted text
   output.
+  ★★★★★ **What is still owed on this AC:** a live run on the CoCo3 showing the character in motion.
+  It needs a present added to `p3b_probe.s` (§3.F) — **target code in the probe every P3b timing
+  figure was taken against**, so it is not something to bolt on at the end of a dispatch that ended
+  at a stop. **Recorded as owed, not quietly reclassified as satisfied by a still.**
 - **AC-8 [class: state-comparable] — RECORDED, deliberately not removed.** `vm_lastsec` (`rmb 4`,
   `vm_cycle.s:284`) and `vm_lastcyc` (`rmb 4`, `:285`) are referenced **only** by their declarations
   and the four zeroing `std`s at `:124-127`. **8 bytes of storage plus ~12 bytes of reset code, all
@@ -226,6 +276,12 @@ prior-report grep is §3.A's reconciliation against P4.9 §6.1.
   rejected pixels, while the priority map offers 600 (§3.C).
   (4) ★★★★ **Rejection count is the wrong selector for a boundary fault** — 2,184 rejected pixels
   across the staged set, and only 2 frames catch a `bhs`/`bhi` swap (§3.D).
+  (5) ★★★★★ **The integrated probe has no present path and the CoCo3's screen has been blank for
+  every P3b run** (§3.F). **Found only because Jay said he expected a live run** — no AC in this
+  dispatch or P4.9's would have surfaced it, because both are satisfied by plane bytes. ★★★ **The
+  phase has been calling plane dumps "the visual" throughout**, and the distinction between "the
+  bytes the guest produced" and "the machine displaying them" went unstated until a human asked for
+  the second one.
 - **AC-10 [class: suite]** — see §10.
 
 ---
@@ -357,9 +413,16 @@ room 2  sprites 0   composite 0.00002 s/cycle
 oracle's own output, staged by `comp_stage.py` into gitignored `build/`, and no game data is committed
 (§2P; `check-ignore` output above).
 
-**25.3 operator-runtime-smoke:** **pending Jay** — launch path **`poke`**. The composited frame and the
-oracle's rendering were **sent to Jay**; the priority and outcome overlays are committed under
-`docs/gates/`. ★ Not self-certified.
+**25.3 operator-runtime-smoke:** ★★★★ **INCOMPLETE — `static-png`, not a live gate.** Launch path
+**`poke`**. The composited frame and the oracle's rendering were **sent to Jay**; the priority and
+outcome overlays are committed under `docs/gates/`. ★ Not self-certified.
+
+★★★★★ **Recorded per CLAUDE.md §4's launch-path rule, which POP wrote for exactly this:** *"A static
+PNG is NOT a live gate… it verifies ENDPOINTS only and CANNOT show motion"*, and *"a motion-bearing
+effect gated only on `static-png` is an INCOMPLETE gate and must say so."* **A character animating
+behind scenery is motion-bearing.** ★★ **The first version of this report recorded 25.3 as "pending
+Jay" without that qualifier, which was the wrong label** — pending implies the gate is formed and
+awaiting an observer. It is not formed: **the machine cannot currently display anything** (§3.F).
 
 ---
 
@@ -381,15 +444,33 @@ oracle's rendering were **sent to Jay**; the priority and outcome overlays are c
 6. **`comp_pick.py`'s ranking was worked around, not fixed** — every ranking here was re-sorted on the
    rejection column. Fixing it is P4.9's follow-up 3 and belongs to a task that gates it.
 
+7. ★★★★★ **THIS REPORT WAS CORRECTED AFTER JAY READ IT.** Its first version recorded AC-7 as
+   "DELIVERED TO JAY, pending his eye" and 25.3 as "pending Jay". Jay replied that he expected a
+   live run on the CoCo. **He was right, the AC says "animating", and a still does not satisfy it.**
+   The investigation that followed produced §3.F — the probe has no present path — which is the
+   largest finding in this report and **was surfaced by a human noticing a gap no AC checked.**
+   ★★ **Corrections are marked in place rather than silently applied**: AC-7, 25.3, §1, AC-9(5),
+   §7 and §8 all carry what they previously said.
+
 **ROUTE ACCOUNTING.** No route was proposed in advance. Delivered: the anchor and its justification,
-the second-quantity demonstration, the 24/24 gate, the fault proof, the occlusion corpus, and the three
-images. **Not attempted:** removing A's dead storage, fixing `comp_pick.py`, the surviving resource
-copy, the cycle-rate decision.
+the second-quantity demonstration, the 24/24 gate, the fault proof, the occlusion corpus, and three
+still images. ★★★★ **NOT delivered: AC-7's animating run on the CoCo3** — and the first version of
+this report did not say so plainly enough (§6.7). **Not attempted:** the present path itself,
+removing A's dead storage, fixing `comp_pick.py`, the surviving resource copy, the cycle-rate
+decision.
 
 ---
 
 ### 7 — Uncertainty flags
 
+- ★★★★★ **§3.F's second claim is inference, not measurement.** That `HAL_gfx_swap` targets RAM the
+  p3b composite never writes comes from reading `p3b_probe.s:54` (`FB_BASE equ MAP_PHASE_WIN`)
+  against `gfx.s:475-479` (`GFX_DB_A_BLOCK`/`GFX_DB_B_BLOCK`). **It was not run.** The first claim —
+  that p3b has no present of any kind — IS measured, by grep. **Verify the second before building on
+  it** [L-53].
+- ★★★★ **AC-7 is not merely unobserved, it is unformed.** No amount of Jay's attention closes it
+  until the probe can present. **Do not read "pending Jay" anywhere in this phase's history as
+  meaning the image exists and awaits an eye** — for the animating gate, it never has.
 - ★★★★ **AC-5's margin is two frames.** The gate catches a priority-boundary fault, but 22 of 24
   frames do not. **A corpus selected by rejection count is not selected for boundary coverage**
   (§3.D), and no tool in the tree ranks by equal-band adjacency. **This is the weakest link in an
@@ -417,18 +498,22 @@ the fault is detectable on this corpus, with the margin stated.
 
 ### 8 — Follow-up candidates
 
-1. ★★★★ **Rank frames by equal-band adjacency, not rejection count** — AC-5's two-frame margin is the
+1. ★★★★★ **Add a guarded present to `p3b_probe.s` and close AC-7 with a live animated run.** §3.F has
+   what it needs and what to verify first (that `HAL_gfx_swap` targets the wrong RAM for p3b). ★★
+   **It changes the probe P3b's timing figures come from**, so it wants its own dispatch with a
+   re-run of those figures — the gate build must come out byte-identical and be shown to.
+2. ★★★★ **Rank frames by equal-band adjacency, not rejection count** — AC-5's two-frame margin is the
    symptom, and a boundary fault needs a boundary-aware selector.
-2. ★★★★ **Re-check gate artifacts at task END, not only at task start.** P4.9 left a faulted binary
+3. ★★★★ **Re-check gate artifacts at task END, not only at task start.** P4.9 left a faulted binary
    and nothing noticed until §4 of the next task.
-3. ★★★ **The surviving resource copy** — 63.6% of KQ3's extra cost [AD-106]. §11 kept it out; it is
+4. ★★★ **The surviving resource copy** — 63.6% of KQ3's extra cost [AD-106]. §11 kept it out; it is
    now the largest addressable term.
-4. ★★★ **Remove `vm_lastsec` and `vm_lastcyc`** (8 bytes + ~12 of reset code) in a task that re-runs
+5. ★★★ **Remove `vm_lastsec` and `vm_lastcyc`** (8 bytes + ~12 of reset code) in a task that re-runs
    the VM gate.
-5. ★★★ **Fix `comp_pick.py`'s sort key** (carried from P4.9).
-6. ★★ **Widen the occlusion corpus** beyond one room of one title before the compositor is called
+6. ★★★ **Fix `comp_pick.py`'s sort key** (carried from P4.9).
+7. ★★ **Widen the occlusion corpus** beyond one room of one title before the compositor is called
    gated across the corpus.
-7. ★★ **Retire or repair `VM_PACEONLY`, `ABL_NOCOPY`, `ABL_NOFETCH`** (carried from P4.8).
+8. ★★ **Retire or repair `VM_PACEONLY`, `ABL_NOCOPY`, `ABL_NOFETCH`** (carried from P4.8).
 
 ---
 
