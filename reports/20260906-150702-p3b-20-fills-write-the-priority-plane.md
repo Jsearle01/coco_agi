@@ -358,6 +358,7 @@ Jay checked progress four times during the sweeps and was given interim results 
 
 ### 11 — Commit
 
-Recorded in the follow-up commit. Pushed to origin/wip before this report.
+`583f462` (pushed to origin/wip before this report; this §11 hash lands in the follow-up commit).
+Pool candidate `d1773a7` on `methodology-candidate-pool@main`.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
