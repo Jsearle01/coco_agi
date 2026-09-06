@@ -1,7 +1,12 @@
 # CLAUDE.md — AGI Interpreter → CoCo3 Project (Clyde standing rules)
-## Working Agreement v1.5 (forked from POP3_port CLAUDE.md v1.1)
-**Version:** 1.5
+## Working Agreement v1.6 (forked from POP3_port CLAUDE.md v1.1)
+**Version:** 1.6
 **Instantiates:** CODM v0.7. Where this doc and v0.7 overlap, v0.7 governs; this doc adds AGI invariants.
+
+**Changelog v1.5 → v1.6 (2026-09-06, Jay).** ★★★★★ **§4A ADDED — on INTEGRATION tasks the eye gate runs
+FIRST and the byte gates confirm it.** Three defects in two runs were found by a human watching a screen
+and by no byte gate: a clear that stored 2 bytes instead of 26,880 [AD-111], a 71.5% divergence outside
+the gate corpus [AD-113], and a visible fill [AD-114]. No other rule changed.
 
 **Changelog v1.4 → v1.5 (2026-08-28, Jay).** ★★★ **§2J REWRITTEN AND BROADENED.** v1.4 scoped the
 heredoc ban to *creating and editing files*, so **inline scripts (`python3 - <<'EOF'`) read as outside
@@ -801,6 +806,44 @@ confirmation before executing a spatial correction.
   green suite; it was found only by Jay watching live.
 - **Report the path:** e.g. `25.3: PASSED — Jay, live-disk, RGB` or `25.3: PASSED — Jay, static-png, RGB
   (endpoints only — no motion under gate)`.
+
+---
+
+## 4A. ★★★★★ On integration tasks, the EYE GATE runs FIRST
+
+**A byte gate answers *"does this buffer match the reference on this input?"* — ★★★★ so you must already
+know WHICH BUFFER and WHICH INPUT.** ★★★★★ **An eye gate answers "is this right?" and requires neither.**
+
+> ★★★★★ **On any task that assembles two or more independently-gated subsystems, Jay sees it run BEFORE
+> the byte gates are reported — not after.**
+
+### 4A.1 Why — three defects in two runs, none reachable from inside a gate
+
+| found by watching | why no byte gate saw it |
+|---|---|
+| ★★★★★ **`p3_clear_planes` stored 2 bytes instead of 26,880** — an assemble-time constant overflow truncating `$12900` to `$2900` [AD-111] | ★★★★ **the renderer's 45/45 passes because it clears its OWN planes; the integrated clear was on no gated path** |
+| ★★★★★ **71.5% divergence on a picture outside the 45-picture corpus** [AD-113] | ★★★★ **every check ran on the same 45 for eleven tasks; "45/45" is a claim about 45 pictures** [L-85] |
+| ★★★★ **the fill visible as it draws** [AD-114] | ★★★ **both planes were byte-identical to the oracle; the defect was that they were never presented** |
+
+★★★ **The pattern: a byte gate cannot find a defect in the glue BETWEEN the things it gates, or outside
+the corpus it gates on, or on a path it does not measure at all.**
+
+### 4A.2 ★★★★ We had the rule and it was not enough
+
+**Idiom 19j has been recorded since P3.2:** *a readback path and a display path are different paths.*
+★★★★★ **Eleven tasks then ran on the readback side of it.**
+
+> ★★★★ **Having the lesson was not enough. It needed a gate that enforced the ordering.**
+
+### 4A.3 What this changes in practice
+
+- ★★★ **On an integration task, AC-1 is the eye gate**, not the last AC.
+- ★★ **"Pending Jay" at the end of a report is acceptable for a component task and NOT for an integration
+  task** — ★ **if Jay has not seen it, the task is not reportable.**
+- ★★★★ **A byte gate that passes where the eye gate fails is a finding about the GATE**, not about the
+  eye. ★★ **Report it as such** [L-85].
+- ★ **This does not weaken any byte gate.** ★★★ **They remain the only thing that catches a wrong pixel;
+  the eye gate is the only thing that catches a wrong QUESTION.**
 
 ---
 
