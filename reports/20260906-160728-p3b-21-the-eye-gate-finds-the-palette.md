@@ -361,6 +361,7 @@ given two live commands and one image pair rather than the nine files.
 
 ### 11 — Commit
 
-Recorded in the follow-up commit. Pushed to origin/wip before this report.
+`b52ba07` (pushed to origin/wip before this report; this §11 hash lands in the follow-up commit).
+Pool candidate `fd27cd9` on `methodology-candidate-pool@main`.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
