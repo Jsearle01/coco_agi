@@ -380,17 +380,81 @@ prc_out:        rts
 * HAL and wrong for an AGI picture [pic_core.s]. ★ The priority plane is PACKED, so the fill
 * value is $44 and the length is halved -- the same pair of changes pri_clear needed in
 * T-P0-034, and getting either alone wrong corrupts every other pixel.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ T-P0-050: THIS CLEAR WROTE THROUGH AN APERTURE IT DID NOT FIT IN, AND THE VISUAL HALF
+* CLEARED TWO BYTES. Found by the EYE GATE, not by any byte gate: Jay watched the run and saw the
+* room come up WIREFRAME -- lines drawn, fills absent. AGI's fills are bounded by white, so a
+* visual plane that was never whitened gives the flood nothing to stop at.
+*
+* ★★★★ THE VISUAL HALF WAS AN ASSEMBLE-TIME CONSTANT OVERFLOW, silently truncated:
+*     cmpx #FB_BASE+(PIC_W*PIC_H)   =  $C000 + $6900  =  $12900  ->  emitted as $2900
+* Confirmed from the listing, not the arithmetic: `20ED 8C 29 00`. X starts at $C000, which is
+* already above $2900, so `blo` failed on the FIRST pass and the loop stored once. **26,880 bytes
+* of intended clear became 2.** lwasm emitted it without a diagnostic.
+*
+* ★★★ THE PRIORITY HALF DID NOT OVERFLOW AND WAS WRONG ANYWAY: $A000+$3480 = $D480 fits, but the
+* priority aperture is $A000-$BFFF -- 8,192 bytes -- so it ran 13,440 and overran $C000..$D480,
+* which is the FRAMEBUFFER window. It cleared part of the plane it had just been asked not to
+* touch. (T-P0-034 fixed the fill VALUE and the LENGTH here; the APERTURE was the third term.)
+*
+* ★★★★★ WHY NO GATE CAUGHT EITHER. pic_probe's map is FLAT: FB_BASE $8000, so $8000+$6900 =
+* $E900 -- no overflow -- and its plane is contiguous, so a flat clear is correct there. **The
+* identical expression is right in pic_probe's map and wrong in p3b's**, and p3_clear_planes is
+* p3b-local code that no gate builds. The renderer's 45/45 was re-run on the WINDOWED build this
+* task and still passes, both planes: the renderer was never the defect.
+*
+* ★★ THE SHAPE OF THE FIX IS pic_probe.s:551-565's, which the 45/45 gate does cover -- walk the
+* slices, mapping each through the phase entry points, and clear one aperture at a time. The
+* slice counter lives in MEMORY because `ldd #$FFFF` destroys B [pic_probe.s:541-549: keeping it
+* in B cleared slice 0 forever and left exactly 8,192 non-zero bytes].
+* ★ Both planes need it here. pic_probe only windows the VISUAL plane (its priority plane is
+* flat, hence its flat pri_clear); p3b holds BOTH in blocks -- priority 0-1, framebuffer 2-5 --
+* so both walk.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+p3_cl_slice     fcb     0               ; the counter, in memory and not in B
 p3_clear_planes:
+* ---- visual: 26,880 B across four 8,192 B slices (blocks 2-5 = 32,768; the tail is spare) ----
+                clr     p3_cl_slice
+p3_cv_slice:    lda     p3_cl_slice
+                jsr     phase_draw_fb           ; map slice A into the framebuffer window
                 ldx     #FB_BASE
                 ldd     #$FFFF                  ; visual 15, both nibbles (the pixel doubling)
 p3_cv:          std     ,x++
-                cmpx    #FB_BASE+(PIC_W*PIC_H)
+                cmpx    #FB_BASE+8192           ; ★ ONE APERTURE, not the whole plane
                 blo     p3_cv
+                inc     p3_cl_slice
+                lda     p3_cl_slice
+                cmpa    #4
+                blo     p3_cv_slice
+* ---- priority: packed, 13,440 B across two slices (blocks 0-1 = 16,384; the tail is spare) ----
+                clr     p3_cl_slice
+p3_cp_slice:    lda     p3_cl_slice
+                jsr     phase_draw_pri          ; map slice A into the priority window
                 ldx     #PRI_BASE
                 ldd     #$4444                  ; four packed pixels of priority 4
 p3_cp:          std     ,x++
-                cmpx    #PRI_BASE+(PIC_W*PIC_H/2)
+                cmpx    #PRI_BASE+8192
                 blo     p3_cp
+                inc     p3_cl_slice
+                lda     p3_cl_slice
+                cmpa    #2
+                blo     p3_cp_slice
+* ---- restore the canonical draw-phase pair, and invalidate the slice caches ----
+* ★★ The walk left slot 5 and slot 6 on the LAST slice of each plane, which is not what the
+* caller's phase_draw_enter established. plane_win.s caches which slice each plane has mapped,
+* so both the register and the cache have to be put back [phase_draw_enter's own note].
+                clra
+                jsr     phase_draw
+* ★★★ COUNT THE REMAPS RATHER THAN LET AC-6's FIGURE QUIETLY UNDER-REPORT. This clear performs
+* eight MMU writes -- four framebuffer slices, two priority slices, and the restoring pair -- and
+* they are real. **P3_REMAPS is "two per phase transition"; these are not phase transitions**, so
+* they are added here and the per-room-change cost is visible instead of missing.
+                ldd     P3_REMAPS
+                addd    #8
+                std     P3_REMAPS
+                ifdef   PLANE_WINDOWED
+                jsr     plane_reset
+                endc
                 rts
 
 * ── p3_stage_sprites — VM PHASE ONLY. Copy out what the compositor will need ─────
