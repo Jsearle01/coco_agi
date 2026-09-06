@@ -35,6 +35,8 @@ from .optable import (VM_VAR_CURRENT_ROOM, VM_VAR_PREVIOUS_ROOM,
                       fAnimated, fDrawn, fUpdate, fUpdatePos, fIgnoreHorizon,
                       kMotionEgo, kMotionNormal)
 from .state import VmState, SCREENOBJECTS_MAX
+from .optable import VM_VAR_WORD_NOT_FOUND       # noqa: E402  -- words.cpp:376
+from . import parser                             # noqa: E402  -- T-P0-058
 
 
 class RandomSource:
@@ -78,6 +80,11 @@ class Vm:
         self.trace = trace
         self.should_quit = False
         self.cycle_nr = 0
+        # ★★ T-P0-058. All three default to "no parser", so a run that loads no vocabulary and
+        # feeds no input behaves exactly as the stub did and the nine-title VM gate is unmoved.
+        self.vocab = None            # parser.Vocabulary, or None
+        self.ego_words = []          # word NUMBERS only, bounded at parser.MAX_WORDS
+        self.said_trace = None       # list of tuples when the gate wants a trace
         self.modelled_calls = {}
         self.motion_modes_seen = {}
         self.instruction_counter = 0
@@ -203,10 +210,57 @@ class Vm:
         if n < len(self.state.object_rooms):
             self.state.object_rooms[n] = room & 0xFF
 
+    # ══════════════════════════════════════════════════════════════════════════════════════
+    # ★★★★★ THE PARSER [T-P0-058]. This was a stub returning False, honestly declared as
+    # "correct for a headless run and wrong the moment input exists". Input exists now.
+    #
+    # ★★★ THE VOCABULARY IS OPTIONAL AND ABSENT BY DEFAULT. With no vocabulary loaded and no
+    # input fed, feed_input() is never called, ENTERED_CLI is never set, and test_said() returns
+    # False on the guard -- exactly as the stub did. **Every existing VM gate run is therefore
+    # bit-for-bit unchanged**, which matters because that gate is byte-identical on nine titles
+    # and is the thing this change must not disturb.
+    # ══════════════════════════════════════════════════════════════════════════════════════
+    def load_vocabulary(self, entries):
+        """entries: list[(word_bytes, id, letter)] from tools/volread/words.py."""
+        self.vocab = parser.Vocabulary(entries)
+
+    def feed_input(self, text):
+        """words.cpp:326 parseUsingDictionary -- what pressing Enter does.
+
+        ★★ The two flags are set HERE, by the same call a keystroke would make, because they are
+        testSaid()'s entire guard and setting them anywhere else would be poking parser state.
+        """
+        if self.vocab is None:
+            raise RuntimeError("feed_input before load_vocabulary")
+        ego, not_found, entered = parser.parse_using_dictionary(text, self.vocab)
+        self.ego_words = ego
+        st = self.state
+        st.set_flag(VM_FLAG_ENTERED_CLI, entered)
+        st.set_flag(VM_FLAG_SAID_ACCEPTED_INPUT, False)
+        if not_found:
+            self.set_var(VM_VAR_WORD_NOT_FOUND, not_found)
+        return ego
+
     def test_said(self, p):
-        # `said` matches parsed input words. With no input there is never a match, which is
-        # correct for a headless run and wrong the moment input exists. Declared, not silent.
-        return False
+        """op_test.cpp:318. p is the 16-byte window at code+ip: p[0] = N, then N LE16 operands.
+
+        ★★ The operand count comes from the STREAM, not from the opcode table [optable.py:19,
+        L-28]. The evaluator's skip_instruction() reads it the same way; both must agree or the
+        stream desynchronises and it presents as a VM defect rather than a parser one.
+        """
+        n = p[0]
+        operands = [p[1 + i * 2] | (p[2 + i * 2] << 8) for i in range(n)]
+        st = self.state
+        result, accepted = parser.test_said(
+            operands, self.ego_words,
+            st.get_flag(VM_FLAG_SAID_ACCEPTED_INPUT),
+            st.get_flag(VM_FLAG_ENTERED_CLI))
+        st.set_flag(VM_FLAG_SAID_ACCEPTED_INPUT, accepted)
+        if self.said_trace is not None:
+            self.said_trace.append((self.cycle_nr, st.cur_logic_nr, n, operands,
+                                    list(self.ego_words),
+                                    st.get_flag(VM_FLAG_ENTERED_CLI), result))
+        return result
 
     # ── the interpreter ────────────────────────────────────────────────────────────────────
     def run_logic(self, logic_nr):

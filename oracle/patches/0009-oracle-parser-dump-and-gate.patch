@@ -1,0 +1,604 @@
+# 0009 -- ORACLE PARSER INSTRUMENTATION (T-P0-058): the vocabulary dump, the said() trace,
+# scripted input, and the parser gate harness.
+#
+# =====================================================================================
+# THIS PATCH IS CUMULATIVE FOR THE FOUR FILES IT TOUCHES, AND 0001-0008 ARE NOT.
+#
+# Every earlier patch here is incremental -- it carries only its own hunks, 1.8-6.8 KB each.
+# This one is 25 KB because it was produced with `git diff` against the PIN while the working
+# tree already carried 0001-0008, and git cannot separate hunks by which patch introduced them.
+# It therefore APPLIES TO THE PIN, not on top of 0001-0008, and applying it after them will
+# conflict.
+#
+# Reported rather than quietly shipped: reproducing this task's dumps means applying this patch
+# to a clean checkout at 9d9b9e93, which reproduces 0001-0008's instrumentation as well. That is
+# a weaker artifact than the others and the way to fix it is to rebuild the patch series from a
+# clean tree, which is not this task's work.
+#
+# What is NEW here, all marked "P6.1" in the source:
+#   words.cpp    loadDictionary()  -- dump the loaded vocabulary, bucket order, to
+#                                     oracle_words.bin  (u8 bucket, u8 len, bytes, u16 id LE)
+#   op_test.cpp  testSaid()        -- trace EVERY call incl. guard rejections, numbers only,
+#                                     to oracle_said.txt
+#   cycle.cpp    interpretCycle()  -- g_oracleCycleNr promoted to a global; scripted input read
+#                                     from oracle_said_script.txt (<cycle>TAB<text>)
+#   agi.cpp      after loadWords() -- the PARSER GATE: read oracle_parser_cases.txt
+#                                     (<operands>TAB<input>), run parseUsingDictionary + testSaid
+#                                     per case, write oracle_parser_results.txt
+#
+# All four are inert without their input files, so every existing gate that runs this binary is
+# unaffected -- confirmed by the nine-title VM gate passing byte-identical after the change.
+# =====================================================================================
+warning: in the working copy of 'engines/agi/cycle.cpp', CRLF will be replaced by LF the next time Git touches it
+diff --git a/engines/agi/agi.cpp b/engines/agi/agi.cpp
+index 7280068f..9ac1bba2 100644
+--- a/engines/agi/agi.cpp
++++ b/engines/agi/agi.cpp
+@@ -54,6 +54,11 @@
+ 
+ namespace Agi {
+ 
++// coco_agi ORACLE INSTRUMENTATION (P1.1, AC-5) -- forward declaration.
++// The definition sits beside loadResource() where it is used most, but agiInit()'s sweep
++// calls it earlier in the file, so C++ needs to have seen it first.
++static void oracleDumpRaw(int16 resourceType, int16 resourceNr, const uint8 *data, uint32 len);
++
+ void AgiEngine::allowSynthetic(bool allow) {
+ 	_allowSynthetic = allow;
+ }
+@@ -155,10 +160,167 @@ int AgiEngine::agiInit() {
+ 	if (ec == errOK)
+ 		ec = _loader->loadWords();
+ 
++	// coco_agi ORACLE INSTRUMENTATION (P6.1, AC-3) -- THE PARSER GATE.
++	//
++	// ??????????????? WHY THIS AND NOT A SCRIPTED PLAYTHROUGH. The first attempt fed input into the
++	// running engine at a chosen cycle. It works -- parseUsingDictionary() is exactly what a
++	// keystroke calls -- but the engine then STOPS: a typed command produces a response the
++	// game waits on, and a null backend has no key to give it. Measured: 11 cycles against a
++	// 331-cycle baseline with input at cycle 10, and 301 with input at cycle 300, and ZERO
++	// said() calls reached in either. **A gate that cannot reach the thing it gates is not a
++	// gate**, and adding synthetic keypresses to get past the wait would be reaching states a
++	// player's input alone does not [T-P0-004].
++	//
++	// ???????????? So the parser is gated as what it is: a pure function of (vocabulary, input,
++	// operands). The operand patterns are not invented -- said_census.py walks the shipped
++	// LOGIC bytecode and extracts every real call site, so the cases are the game's own
++	// grammar in the game's own proportions.
++	//
++	// ?????? Each case calls parseUsingDictionary() first, which is what clears
++	// SAID_ACCEPTED_INPUT and sets ENTERED_CLI -- so every case starts from the state a fresh
++	// keystroke establishes, and said()'s match-consumes-input side effect cannot leak between
++	// cases.
++	// ??? Absent file = nothing runs. Every existing gate is unaffected.
++	if (ec == errOK) {
++		Common::File cases;
++		if (cases.open("oracle_parser_cases.txt")) {
++			Common::DumpFile out;
++			out.open("oracle_parser_results.txt");
++			int n = 0;
++			while (!cases.eos()) {
++				Common::String line = cases.readLine();
++				if (line.empty() || line[0] == '#')
++					continue;
++				uint32 tab = 0;
++				while (tab < line.size() && line[tab] != '\t')
++					tab++;
++				if (tab >= line.size())
++					continue;
++				Common::String opsStr(line.c_str(), tab);
++				Common::String input(line.c_str() + tab + 1);
++
++				// operands: comma-separated decimal, packed LE16 as the stream holds them
++				uint8 cc[64];
++				uint8 nwords = 0;
++				uint32 p = 0;
++				while (p < opsStr.size() && nwords < 30) {
++					uint32 q = p;
++					while (q < opsStr.size() && opsStr[q] != ',')
++						q++;
++					int v = atoi(Common::String(opsStr.c_str() + p, q - p).c_str());
++					cc[nwords * 2] = v & 0xFF;
++					cc[nwords * 2 + 1] = (v >> 8) & 0xFF;
++					nwords++;
++					p = (q < opsStr.size()) ? q + 1 : q;
++				}
++
++				_words->parseUsingDictionary(input.c_str());
++				bool r = testSaid(nwords, cc);
++
++				Common::String res = Common::String::format("%d ego=", n);
++				int ec2 = _words->getEgoWordCount();
++				for (int i = 0; i < ec2; i++)
++					res += Common::String::format("%s%d", i ? "," : "", _words->getEgoWordId(i));
++				res += Common::String::format(" -> %d\n", r ? 1 : 0);
++				out.write(res.c_str(), res.size());
++				n++;
++			}
++			out.flush();
++			out.close();
++			cases.close();
++			warning("oracle: parser gate ran %d case(s)", n);
++		}
++	}
++
+ 	// Load logic 0 into memory
+ 	if (ec == errOK)
+ 		ec = loadResource(RESOURCETYPE_LOGIC, 0);
+ 
++	// coco_agi ORACLE INSTRUMENTATION (P1.1, AC-5) -- dump EVERY resource, raw.
++	//
++	// * Calls loadVolumeResource() DIRECTLY rather than loadResource(), deliberately: the
++	//   latter runs each type's decoder, and a decoder that rejects one resource would abort
++	//   the whole sweep. AC-5 compares RAW bytes, so the decoders are not merely unnecessary
++	//   here, they are a liability.
++	// * Order matters for LOGIC only, and this runs before anything decrypts in place.
++	if (ec == errOK) {
++		AgiDir *dirs[4] = { _game.dirLogic, _game.dirView, _game.dirPic, _game.dirSound };
++		const int16 types[4] = { RESOURCETYPE_LOGIC, RESOURCETYPE_VIEW,
++		                         RESOURCETYPE_PICTURE, RESOURCETYPE_SOUND };
++		int dumped = 0;
++		for (int t = 0; t < 4; t++) {
++			for (int16 nr = 0; nr < MAX_DIRECTORY_ENTRIES; nr++) {
++				if (dirs[t][nr].offset == _EMPTY)
++					continue;
++				uint8 *raw = _loader->loadVolumeResource(&dirs[t][nr]);
++				if (raw != nullptr) {
++					oracleDumpRaw(types[t], nr, raw, dirs[t][nr].len);
++					free(raw);
++					dumped++;
++				}
++			}
++		}
++		warning("oracle: dumped %d raw resources", dumped);
++
++		// coco_agi ORACLE INSTRUMENTATION (P2.1, AC-3) -- RENDER every picture and dump the
++		// resulting buffers. decodePicture() ends by calling oracleDumpScreens() (patch 0001),
++		// which writes pic<NNN>.visual.bin / pic<NNN>.priority.bin -- the 160x168 planes our
++		// renderer is diffed against.
++		//
++		// * clearScreen = true, matching what draw.pic does and what our render() reproduces:
++		//   clear to white/4, then draw. An overlay (overlay.pic) is a different operation and
++		//   is not what AC-3 compares.
++		// * Wrapped so one bad picture cannot abort the sweep -- 150+ pictures are needed and
++		//   losing the tail to a single malformed resource would silently shrink the sample.
++		int rendered = 0;
++		for (int16 nr = 0; nr < MAX_DIRECTORY_ENTRIES; nr++) {
++			if (_game.dirPic[nr].offset == _EMPTY)
++				continue;
++			if (loadResource(RESOURCETYPE_PICTURE, nr) != errOK)
++				continue;
++			_picture->decodePicture(nr, true);
++			unloadResource(RESOURCETYPE_PICTURE, nr);
++			rendered++;
++		}
++		warning("oracle: rendered %d pictures", rendered);
++
++		// coco_agi ORACLE INSTRUMENTATION (P5.1) -- decode EVERY view, so oracleDumpCel() in
++		// view.cpp sees a reproducible, representative sample rather than whatever the first
++		// few seconds of play happened to touch (which under-reports mirrored loops badly --
++		// they cluster in walking sprites).
++		//
++		// ?????? OPT-IN, AND THAT IS NOT OPTIONAL. Measured at P5.1: running this sweep
++		// unconditionally CHANGES THE GAME. Kingquest1's flag 20 completes one cycle earlier
++		// (divergence at cycle 185 instead of 186) against an otherwise byte-identical
++		// pre-sweep oracle. The cause is an interaction with patch 0004, which has already
++		// called loadVolumeResource() for every VIEW; this sweep's unloadResource() then tears
++		// down state 0004 established, and the game behaves differently afterwards.
++		//
++		// The oracle is the BASELINE (CLAUDE.md ??2O.1). Instrumentation that changes it is not
++		// instrumentation, it is a different oracle. So the sweep runs only when explicitly
++		// asked for, and a cel-dump run is a SEPARATE run from any run whose vmstate is used.
++		//
++		// Enable by putting `coco_view_sweep=true` in the [scummvm] section of the scummvm.ini
++		// in the process working directory. harness/tools/oracle_dump.sh does this when
++		// CEL_DUMP=1.
++		if (ConfMan.hasKey("coco_view_sweep") && ConfMan.getBool("coco_view_sweep")) {
++			int viewsDecoded = 0;
++			int viewsFailed = 0;
++			for (int16 nr = 0; nr < MAX_DIRECTORY_ENTRIES; nr++) {
++				if (_game.dirView[nr].offset == _EMPTY)
++					continue;
++				if (loadResource(RESOURCETYPE_VIEW, nr) != errOK) {
++					viewsFailed++;
++					continue;
++				}
++				unloadResource(RESOURCETYPE_VIEW, nr);
++				viewsDecoded++;
++			}
++			warning("oracle: decoded %d views (%d failed)", viewsDecoded, viewsFailed);
++			warning("oracle: VIEW SWEEP WAS ACTIVE -- this run's vmstate is NOT a valid baseline");
++		}
++	}
++
+ 	_keyHoldMode = false;
+ 	_keyHoldModeLastKey = Common::KEYCODE_INVALID;
+ 
+@@ -204,6 +366,35 @@ void AgiEngine::agiDeinit() {
+ 	clearImageStack();
+ }
+ 
++// coco_agi ORACLE INSTRUMENTATION (P1.1, AC-5) -- dump the RAW bytes the engine loads.
++//
++// ?????? THIS IS THE BASELINE OUR PYTHON PARSER IS DIFFED AGAINST (CLAUDE.md ??2O.1). The whole
++// value is that these bytes did not come from us. So the dump is taken at exactly one point:
++// immediately after loadVolumeResource() returns and BEFORE any decode.
++//
++// ??? FOR LOGIC THAT ORDERING IS NOT A DETAIL, IT IS THE WHOLE THING. decodeLogic() DECRYPTS THE
++// MESSAGE STRINGS IN PLACE. Dumping after it would compare our pre-decode bytes against their
++// post-decode bytes and fail everywhere -- or worse, would tempt someone to "fix" the parser to
++// match, which inverts the validation exactly as tuning to POP's 59 would have.
++static void oracleDumpRaw(int16 resourceType, int16 resourceNr, const uint8 *data, uint32 len) {
++	if (data == nullptr)
++		return;
++	// ?????? INDEXED BY THE REAL ENUM, WHICH STARTS AT 1 AND IS NOT IN THE OBVIOUS ORDER.
++	// agi.h:171-174:  RESOURCETYPE_LOGIC = 1, SOUND = 2, VIEW = 3, PICTURE = 4.
++	// An earlier version of this array assumed {logic,object,view,picture,sound} from 0 and
++	// mislabelled EVERY dump -- LOGIC written as "object", PICTURE compared against VIEW.
++	// The gate then read 0 of 299 matching and looked like a parser failure. Read the enum.
++	static const char *kNames[] = { "other", "logic", "sound", "view", "picture" };
++	const char *nm = (resourceType >= 1 && resourceType <= 4) ? kNames[resourceType] : "other";
++	Common::String path = Common::String::format("oracle_%s_%03d.bin", nm, resourceNr);
++	Common::DumpFile df;
++	if (!df.open(Common::Path(path)))
++		return;
++	df.write(data, len);
++	df.finalize();
++	df.close();
++}
++
+ int AgiEngine::loadResource(int16 resourceType, int16 resourceNr) {
+ 	if (resourceNr >= MAX_DIRECTORY_ENTRIES)
+ 		return errBadResource;
+@@ -217,6 +408,7 @@ int AgiEngine::loadResource(int16 resourceType, int16 resourceNr) {
+ 
+ 			// load raw resource into data
+ 			data = _loader->loadVolumeResource(&_game.dirLogic[resourceNr]);
++			oracleDumpRaw(resourceType, resourceNr, data, _game.dirLogic[resourceNr].len);
+ 			_game.logics[resourceNr].data = data;
+ 
+ 			// uncompressed logic files need to be decrypted
+@@ -239,6 +431,7 @@ int AgiEngine::loadResource(int16 resourceType, int16 resourceNr) {
+ 			// if cached but not loaded, etc
+ 			unloadResource(RESOURCETYPE_PICTURE, resourceNr);
+ 			data = _loader->loadVolumeResource(&_game.dirPic[resourceNr]);
++			oracleDumpRaw(resourceType, resourceNr, data, _game.dirPic[resourceNr].len);
+ 
+ 			if (data != nullptr) {
+ 				_game.pictures[resourceNr].rdata = data;
+@@ -252,6 +445,7 @@ int AgiEngine::loadResource(int16 resourceType, int16 resourceNr) {
+ 	case RESOURCETYPE_SOUND:
+ 		if (~_game.dirSound[resourceNr].flags & RES_LOADED) {
+ 			data = _loader->loadVolumeResource(&_game.dirSound[resourceNr]);
++			oracleDumpRaw(resourceType, resourceNr, data, _game.dirSound[resourceNr].len);
+ 
+ 			// "data" is freed by objects created by createFromRawResource on success
+ 			const bool isAgiV1 = (getVersion() <= 0x2001);
+@@ -273,6 +467,7 @@ int AgiEngine::loadResource(int16 resourceType, int16 resourceNr) {
+ 		if (~_game.dirView[resourceNr].flags & RES_LOADED) {
+ 			unloadResource(RESOURCETYPE_VIEW, resourceNr);
+ 			data = _loader->loadVolumeResource(&_game.dirView[resourceNr]);
++			oracleDumpRaw(resourceType, resourceNr, data, _game.dirView[resourceNr].len);
+ 			if (data) {
+ 				_game.dirView[resourceNr].flags |= RES_LOADED;
+ 				ec = decodeView(data, _game.dirView[resourceNr].len, resourceNr);
+diff --git a/engines/agi/cycle.cpp b/engines/agi/cycle.cpp
+index 3f49e6dc..29722d64 100644
+--- a/engines/agi/cycle.cpp
++++ b/engines/agi/cycle.cpp
+@@ -20,8 +20,10 @@
+  */
+ 
+ #include "common/config-manager.h"
++#include "common/file.h" // coco_agi ORACLE INSTRUMENTATION (P0.2): Common::DumpFile
+ 
+ #include "agi/agi.h"
++#include "agi/words.h" // coco_agi ORACLE INSTRUMENTATION (P6.1): parseUsingDictionary
+ #include "agi/sprite.h"
+ #include "agi/graphics.h"
+ #include "agi/inv.h"
+@@ -154,7 +156,101 @@ void AgiEngine::resetControllers() {
+ 	}
+ }
+ 
++// coco_agi ORACLE INSTRUMENTATION (P4.1): the deterministic virtual clock, defined in
++// global.cpp. Advanced once per main-loop iteration in playGame() below.
++extern uint32 g_oracleVirtualMs;
++
++// coco_agi ORACLE INSTRUMENTATION (P0.2) -- per-cycle VM state.
++//
++// Dumped at cycle ENTRY, which is the state the cycle is about to act on. One line
++// per cycle, hex, fixed width, so a diff against the CoCo3 interpreter is a line
++// diff and the first divergent cycle is the first differing line.
++//
++//   cycle <n> flags <64 hex chars = 32 bytes = 256 flags> vars <512 hex = 256 vars>
++//
++// AgiGame holds flags[] as 32 packed bytes and vars[] as 256 bytes (agi.h:383-384),
++// so this is the engine's own storage emitted verbatim, not a reconstruction.
++static void oracleDumpVmState(uint32 cycleNr, const uint8 *flags, const uint8 *vars) {
++	static Common::DumpFile s_vmLog;
++	if (!s_vmLog.isOpen()) {
++		if (!s_vmLog.open(Common::Path("vmstate.txt")))
++			return;
++	}
++
++	Common::String line = Common::String::format("cycle %06u flags ", cycleNr);
++	for (int i = 0; i < MAX_FLAGS; i++)
++		line += Common::String::format("%02x", flags[i]);
++	line += " vars ";
++	for (int i = 0; i < MAX_VARS; i++)
++		line += Common::String::format("%02x", vars[i]);
++	line += "\n";
++
++	s_vmLog.write(line.c_str(), line.size());
++	s_vmLog.flush();
++}
++
++// coco_agi ORACLE INSTRUMENTATION (P6.1) -- the cycle number, promoted from a function-static to
++// a global so op_test.cpp's said() trace can stamp each call with the cycle it happened in.
++// Without that stamp, two calls to the same said() in different cycles are indistinguishable in
++// the trace -- and the whole point of the trace is to be line-diffable against our matcher.
++uint32 g_oracleCycleNr = 0;
++
++// coco_agi ORACLE INSTRUMENTATION (P6.1, AC-3) -- SCRIPTED PARSER INPUT.
++//
++// ????????? The gate needs deterministic input. This reads ORACLE_SAID_SCRIPT, a file of lines
++//         <cycle><TAB><what the player typed>
++//     and calls parseUsingDictionary() at the top of that cycle -- which is exactly what the
++//     engine does when the player presses Enter. It drives the REAL input path rather than poking
++//     parser state, which matters for T-P0-004's reason: it reaches no state a player could not.
++// ?????? parseUsingDictionary() itself sets VM_FLAG_ENTERED_CLI and clears SAID_ACCEPTED_INPUT, so
++//     the two guards testSaid() checks are established by the same call a keystroke would make.
++// ??? With the variable unset nothing is read and nothing changes, so every existing gate that runs
++//     this binary is unaffected -- stated because the VM gate runs it on nine titles.
++static void oracleFeedScriptedInput(AgiEngine *vm, uint32 cycleNr) {
++	static bool s_loaded = false;
++	static Common::Array<uint32> s_cycles;
++	static Common::Array<Common::String> s_texts;
++
++	if (!s_loaded) {
++		s_loaded = true;
++		// ?????? A FIXED FILENAME IN THE WORKING DIRECTORY, NOT AN ENVIRONMENT VARIABLE.
++		// ScummVM's common/forbidden.h bans getenv() outright, and it is right to: the engine
++		// must not take behaviour from ambient state. The dumps already work this way --
++		// oracle_dump.sh cd's to the output directory and everything lands there -- so the
++		// script is read the same way, from the run's own directory.
++		// ??? Absent file = no scripted input = every existing gate that runs this binary is
++		// bit-for-bit unaffected. Stated because the VM gate runs it on nine titles.
++		Common::File f;
++		if (f.open("oracle_said_script.txt")) {
++			while (!f.eos()) {
++				Common::String line = f.readLine();
++				if (line.empty() || line[0] == '#')
++					continue;
++				uint32 i = 0;
++				while (i < line.size() && line[i] != '\t')
++					i++;
++				if (i >= line.size())
++					continue;
++				s_cycles.push_back((uint32)atoi(Common::String(line.c_str(), i).c_str()));
++				s_texts.push_back(Common::String(line.c_str() + i + 1));
++			}
++			f.close();
++			warning("oracle: loaded %u scripted input line(s)", s_cycles.size());
++		}
++	}
++
++	for (uint i = 0; i < s_cycles.size(); i++) {
++		if (s_cycles[i] == cycleNr) {
++			warning("oracle: cycle %u feeding scripted input", cycleNr);
++			vm->_words->parseUsingDictionary(s_texts[i].c_str());
++		}
++	}
++}
++
+ void AgiEngine::interpretCycle() {
++	oracleFeedScriptedInput(this, g_oracleCycleNr);
++	oracleDumpVmState(g_oracleCycleNr++, _game.flags, _game.vars);
++
+ 	ScreenObjEntry *screenObjEgo = &_game.screenObjTable[SCREENOBJECTS_EGO_ENTRY];
+ 
+ 	if (!_game.playerControl)
+@@ -373,6 +469,52 @@ void AgiEngine::playGame() {
+ 	do {
+ 		processAGIEvents();
+ 
++		// coco_agi ORACLE INSTRUMENTATION (P4.1): advance the deterministic virtual clock by
++		// one 25 ms tick per main-loop iteration. See global.cpp for why the clock is virtual.
++		// This is the unit the pacing gate below already counts in, so the ratio between loop
++		// iterations and interpreted cycles is unchanged -- only its dependence on the host's
++		// speed is removed.
++		g_oracleVirtualMs += 25;
++
++		// coco_agi ORACLE INSTRUMENTATION (P5.3) -- gated room jump.
++		//
++		// ????????? WHY: T-P0-028 captured 1,680 composited frames and the EGO appeared in NONE of
++		// them. Left alone, an AGI game sits in its credits/attract sequence for the whole
++		// window, so every frame gated, timed and shown was an intro. The compositing cost and
++		// the priority-test coverage were both taken on decorations the player never controls.
++		//
++		// ?????? This calls the engine's OWN newRoom(), which is exactly what the AGI debug
++		// console's `room` command does (console.cpp Cmd_Room). It resets the screen-object
++		// table, unloads resources, sets playerControl/horizon, writes VM_VAR_CURRENT_ROOM and
++		// loads the room's LOGIC -- so the game proceeds as if it had walked there.
++		//
++		// ??? IT PERTURBS THE ENGINE and a run with it on is NOT a valid vmstate baseline --
++		// patch 0006's rule, restated. The composite's inputs (before-planes + sprite list) and
++		// its output are still the oracle's own, which is what the compositing gate compares.
++		{
++			static int s_cocoLoop = 0;
++			static bool s_cocoJumped = false;
++			s_cocoLoop++;
++			if (ConfMan.hasKey("coco_room")) {
++				const int after = ConfMan.hasKey("coco_room_after")
++				                  ? ConfMan.getInt("coco_room_after") : 300;
++				if (!s_cocoJumped && s_cocoLoop >= after) {
++					s_cocoJumped = true;
++					newRoom(ConfMan.getInt("coco_room"));
++				}
++				// ??? Optional ego placement, a settling delay after the jump so the room's own
++				// logic has run its animate.obj/draw first. Without the delay the position is
++				// overwritten by the room's setup and the jump looks like it did nothing.
++				if (s_cocoJumped && ConfMan.hasKey("coco_ego_x")
++				    && s_cocoLoop == after + (ConfMan.hasKey("coco_ego_after")
++				                             ? ConfMan.getInt("coco_ego_after") : 120)) {
++					ScreenObjEntry *ego = &_game.screenObjTable[SCREENOBJECTS_EGO_ENTRY];
++					ego->xPos = ConfMan.getInt("coco_ego_x");
++					ego->yPos = ConfMan.getInt("coco_ego_y");
++				}
++			}
++		}
++
+ 		inGameTimerUpdate();
+ 
+ 		byte timeDelay;
+diff --git a/engines/agi/op_test.cpp b/engines/agi/op_test.cpp
+index f290f22c..57b681b1 100644
+--- a/engines/agi/op_test.cpp
++++ b/engines/agi/op_test.cpp
+@@ -314,6 +314,42 @@ bool AgiEngine::testObjRight(uint8 n, uint8 x1, uint8 y1, uint8 x2, uint8 y2) {
+ 	       v->xPos + v->xSize - 1 <= x2 && v->yPos >= y1 && v->yPos <= y2;
+ }
+ 
++// coco_agi ORACLE INSTRUMENTATION (P6.1, AC-3) -- the said() trace.
++//
++// * EVERY call is recorded, including the ones the guard rejects, because "said was reached and
++//   returned false" and "said was never reached" are different facts and a gate that cannot tell
++//   them apart cannot localise a divergence [L-36].
++// * Numbers only: logic, cycle, the operand word IDs, the ego word IDs, the two guard flags and
++//   the result. **No vocabulary text and no message strings** (??2P).
++// * One line per call, fixed field order, so a diff against our Python matcher is a line diff and
++//   the first divergent line is the first divergent call.
++extern uint32 g_oracleCycleNr;
++
++static void oracleDumpSaid(int16 logicNr, uint8 nwords, const uint8 *cc,
++                           Words *words, bool guardAccepted, bool guardCli, bool result) {
++	static Common::DumpFile s_saidLog;
++	static bool s_open = false;
++	if (!s_open) {
++		s_open = true;
++		s_saidLog.open("oracle_said.txt");
++	}
++	if (!s_saidLog.isOpen())
++		return;
++
++	Common::String line = Common::String::format("cyc=%u log=%d n=%u ops=",
++	                                             g_oracleCycleNr, logicNr, nwords);
++	for (uint8 i = 0; i < nwords; i++)
++		line += Common::String::format("%s%d", i ? "," : "", READ_LE_UINT16(cc + i * 2));
++	line += " ego=";
++	int egoCount = words->getEgoWordCount();
++	for (int i = 0; i < egoCount; i++)
++		line += Common::String::format("%s%d", i ? "," : "", words->getEgoWordId(i));
++	line += Common::String::format(" accepted=%d cli=%d -> %d\n",
++	                               guardAccepted ? 1 : 0, guardCli ? 1 : 0, result ? 1 : 0);
++	s_saidLog.write(line.c_str(), line.size());
++	s_saidLog.flush();
++}
++
+ // When player has entered something, it is parsed elsewhere
+ bool AgiEngine::testSaid(uint8 nwords, uint8 *cc) {
+ 	AgiGame *state = &_game;
+@@ -322,8 +358,17 @@ bool AgiEngine::testSaid(uint8 nwords, uint8 *cc) {
+ 	int n = words->getEgoWordCount();
+ 	int z = 0;
+ 
+-	if (vm->getFlag(VM_FLAG_SAID_ACCEPTED_INPUT) || !vm->getFlag(VM_FLAG_ENTERED_CLI))
++	// coco_agi: capture the guard inputs before they are consumed, for the trace below.
++	const bool o_accepted = vm->getFlag(VM_FLAG_SAID_ACCEPTED_INPUT);
++	const bool o_cli = vm->getFlag(VM_FLAG_ENTERED_CLI);
++	const uint8 *o_cc = cc;
++	const uint8 o_nwords = nwords;
++	const int16 o_logic = state->curLogicNr;
++
++	if (vm->getFlag(VM_FLAG_SAID_ACCEPTED_INPUT) || !vm->getFlag(VM_FLAG_ENTERED_CLI)) {
++		oracleDumpSaid(o_logic, o_nwords, o_cc, words, o_accepted, o_cli, false);
+ 		return false;
++	}
+ 
+ 	// FR:
+ 	// I think the reason for the code below is to add some speed....
+@@ -353,23 +398,30 @@ bool AgiEngine::testSaid(uint8 nwords, uint8 *cc) {
+ 		case 1: // any word
+ 			break;
+ 		default:
+-			if (words->getEgoWordId(c) != z)
++			if (words->getEgoWordId(c) != z) {
++				oracleDumpSaid(o_logic, o_nwords, o_cc, words, o_accepted, o_cli, false);
+ 				return false;
++			}
+ 			break;
+ 		}
+ 	}
+ 
+ 	// The entry string should be entirely parsed, or last word = 9999
+-	if (n && z != 9999)
++	if (n && z != 9999) {
++		oracleDumpSaid(o_logic, o_nwords, o_cc, words, o_accepted, o_cli, false);
+ 		return false;
++	}
+ 
+ 	// The interpreter string shouldn't be entirely parsed, but next
+ 	// word must be 9999.
+-	if (nwords != 0 && READ_LE_UINT16(cc) != 9999)
++	if (nwords != 0 && READ_LE_UINT16(cc) != 9999) {
++		oracleDumpSaid(o_logic, o_nwords, o_cc, words, o_accepted, o_cli, false);
+ 		return false;
++	}
+ 
+ 	setFlag(VM_FLAG_SAID_ACCEPTED_INPUT, true);
+ 
++	oracleDumpSaid(o_logic, o_nwords, o_cc, words, o_accepted, o_cli, true);
+ 	return true;
+ }
+ 
+diff --git a/engines/agi/words.cpp b/engines/agi/words.cpp
+index b5ccf41f..32119ccd 100644
+--- a/engines/agi/words.cpp
++++ b/engines/agi/words.cpp
+@@ -23,6 +23,7 @@
+ #include "agi/words.h"
+ 
+ #include "common/textconsole.h"
++#include "common/file.h" // coco_agi ORACLE INSTRUMENTATION (P6.1): Common::DumpFile
+ 
+ namespace Agi {
+ 
+@@ -127,6 +128,36 @@ int Words::loadDictionary(Common::SeekableReadStream &stream) {
+ 		}
+ 	}
+ 
++	// coco_agi ORACLE INSTRUMENTATION (P6.1, AC-2) -- dump the loaded vocabulary.
++	//
++	// * Dumped in BUCKET ORDER, which is the order findWordInDictionary() scans and therefore
++	//   the order that decides which of several matching entries wins. A dump sorted any other
++	//   way would compare equal while describing a different matcher.
++	// * Record: u8 bucket, u8 length, bytes, u16 id (LE). Length-prefixed rather than
++	//   terminated because a vocabulary may legitimately contain any byte < 0x80.
++	// * The SQ0 workaround above SKIPS entries whose first char != its bucket letter; this dump
++	//   therefore contains what the ORACLE loaded, not what the file holds. words_census.py
++	//   counts the difference as off_bucket and it is zero on every title in our corpus.
++	{
++		Common::DumpFile out;
++		if (out.open("oracle_words.bin")) {
++			uint32 total = 0;
++			for (int16 b = 0; b < 26; b++) {
++				Common::Array<WordEntry *> &dict = _dictionaryWords[b];
++				for (uint idx = 0; idx < dict.size(); idx++) {
++					out.writeByte((byte)b);
++					out.writeByte((byte)dict[idx]->word.size());
++					out.write(dict[idx]->word.c_str(), dict[idx]->word.size());
++					out.writeUint16LE(dict[idx]->id);
++					total++;
++				}
++			}
++			out.flush();
++			out.close();
++			warning("oracle: dumped %u dictionary entries", total);
++		}
++	}
++
+ 	return errOK;
+ }
+ 
+
