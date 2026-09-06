@@ -67,18 +67,43 @@ local function sym(name)
 end
 
 -- ★★★★★ THE PALETTE COMES FROM ITS SOURCE, NOT FROM THE LOADED BINARY, AND THIS IS §2F.
--- The first version read gfx_pal16 out of guest memory at a map-supplied address. That couples
+-- The first version read the table out of guest memory at a map-supplied address. That couples
 -- the capture to WHICH BUILD is loaded, and this session found build/p3b_probe_pk.map to be five
 -- days older than build/p3b_probe_pk.bin -- so the address was wrong and the palette would have
 -- been read from whatever happened to sit there. **A wrong palette does not fail; it renders.**
--- ★★★ gfx.s is the palette's one home [§2F; palette_check.py already reads gfx_pal4 out of this
--- file by path, so the precedent for parsing it here is the project's own].
+--
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+-- ★★★★★ T-P0-056: THIS READ gfx_pal16 AND THAT IS THE WRONG TABLE [AD-125].
+-- ★★★★ gfx_pal16 is the SHARED HAL's generic 16-colour ramp. It is not AGI's palette and was
+-- never meant to be: hal_globals.s:133 points mode 2 at it with the words "AGI's own palette is
+-- loaded by the engine at init (design §2.2), NOT FROM HERE". Reading it here made this script
+-- assert the placeholder over the display, every frame.
+--
+-- ★★★★★ AGI'S PALETTE WAS DECIDED AND GATED EIGHT DAYS BEFORE THIS BUG WAS SEEN. T-P0-024 P4.4
+-- closed it: AC-11 proved 16 of 16 values land in $FFB0-$FFBF (read back by the guest, bits 7-6
+-- masked), and AC-12 is Jay's eye gate on the swatches beside a synthesised EGA reference --
+-- "band 6 is brown in both". The table is agi_pal16 [pic_probe.s:498-514].
+--
+-- ★★★★ THE DIFFERENCE IS NOT SUBTLE, and index 2 is the one Jay saw:
+--       idx 2  green   agi_pal16 $10 = R0 G2 B0     gfx_pal16 $38 = R2 G2 B2 (light grey)
+-- Jay, live: "in the first room the trees look unfilled (white)". Green foliage through the
+-- placeholder is pale grey. **The planes were byte-identical to the oracle throughout** -- the
+-- fills were complete and only the value-to-colour map was wrong.
+--
+-- ★★★ WHY THIS SURVIVED: p3b_probe.s loads NO palette at all -- no pal_load, no agi_pal16, no
+-- $FFB0 write, and it never calls HAL_gfx_set_mode. The palette work landed in the RENDERER
+-- probe and was never carried into the INTEGRATION probe, and this script filled the gap with
+-- the nearest table it could find. That is §4A's pattern exactly: a defect in the glue between
+-- two independently-gated subsystems, invisible to both of their gates.
+-- ★★ Reading it from pic_probe.s is a harness-side stopgap, not the fix. §2F wants one home for
+-- agi_pal16 once p3b needs it too; that move is the Orchestrator's to place.
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
 local function read_pal16()
-    local fh = io.open("src/hal/coco3-dsk/gfx.s", "r")
+    local fh = io.open("src/harness/pic_probe.s", "r")
     if not fh then return nil end
     local pal, inside = {}, false
     for line in fh:lines() do
-        if line:find("^gfx_pal16:") then inside = true
+        if line:find("^agi_pal16:") then inside = true
         elseif inside then
             local hex = line:match("^%s*fcb%s+%$(%x%x)")
             if hex then
@@ -98,8 +123,13 @@ local PAL16 = read_pal16()
 -- stop. p3_blk_vis names the visible plane and never moves.
 -- ★ Falls back to ph_blk_fb so this file still works against a pre-shadow build.
 local A_FB  = sym("p3_blk_vis") or sym("ph_blk_fb")
-print(string.format("palette: %s from gfx.s   visible-plane byte=$%04X (%s)",
-                    PAL16 and "16 entries" or "★★★ NOT FOUND", A_FB or 0,
+-- ★★★ NAME THE TABLE IN THE LOG. The old line said "from gfx.s" and was accurate about a file
+-- that held the wrong table -- a provenance string is only useful if a reader can tell from it
+-- whether the RIGHT thing was loaded, so it now prints the entries as well as the source.
+print(string.format("palette: %s from pic_probe.s agi_pal16 [P4.4 AC-11/AC-12]%s   visible-plane byte=$%04X (%s)",
+                    PAL16 and "16 entries" or "★★★ NOT FOUND",
+                    PAL16 and string.format("  idx2=$%02X idx6=$%02X idx15=$%02X",
+                                            PAL16[3], PAL16[7], PAL16[16]) or "", A_FB or 0,
                     sym("p3_blk_vis") and "p3_blk_vis" or "ph_blk_fb -- pre-shadow build"))
 
 local ST, CYCLE = 0x0020, 0x0024
