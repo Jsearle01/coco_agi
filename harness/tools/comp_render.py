@@ -107,7 +107,17 @@ def main():
     p2 = render(gp, PRI_RAMP, gate / ("%s.priority.png" % a.tag))
 
     # ★ A byte-level statement about the pair, so the visual is not the only evidence.
-    same = "IDENTICAL" if gv == ov else "★★★ DIFFER"
+    # ★★★★★ T-P0-056: THIS LINE COMPARED RAW BYTES AND SAID "DIFFER" ABOUT PLANES THAT MATCH.
+    # The guest DOUBLES each pixel into both nibbles ($AA for colour 10) and the oracle writes the
+    # bare value ($0A), so a raw compare reports a difference on every pixel of a perfect render.
+    # ★★★★ THE SAME FILE ALREADY KNEW: render() forty lines above masks `& 0x0F` to get the
+    # value, and its images were correct the whole time. **Only the one-line verdict was wrong**,
+    # which is the dangerous shape -- the picture looks right and the text under it says DIFFER.
+    # ★★★ Third instance of this class in the project [P3b.15's 97.6%, P3b.19's 99.2%, this], and
+    # the first inside a COMMITTED tool rather than a scratch script. Compare the value, and mask
+    # both sides with the same expression render() uses.
+    same = ("IDENTICAL" if all((g & 0x0F) == (o & 0x0F) for g, o in zip(gv, ov))
+            else "★★★ DIFFER")
     print("frame %s" % a.tag)
     print("  guest visual vs oracle visual: %s" % same)
     print()

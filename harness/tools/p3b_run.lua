@@ -61,6 +61,9 @@ local prog = cpu.spaces["program"]
 -- string stated the one thing it was not checking, and every timing figure was 2.003x wrong.
 local CAL_CYCLES = 160009
 local cal_t0, CLOCK = nil, nil
+-- ★ P3B_HOLD: emulated seconds to keep the finished picture displayed before exiting (AC-1).
+local HOLD = tonumber(os.getenv("P3B_HOLD") or "0")
+local hold_until = nil
 
 _G._ptap = prog:install_write_tap(PHASE, PHASE, "p3bphase", function(offset, data, mask)
     local v = data % 256
@@ -229,6 +232,13 @@ _G._n = emu.add_machine_frame_notifier(function()
             end
         end
         if n >= NCYC then
+            -- ★★★ THE HOLD IS TESTED FIRST so the summary and the plane dump happen exactly
+            -- once. Placing it after them re-ran the whole report on every frame of the hold --
+            -- 900 copies of "final room 22" for a 15-second look at the screen.
+            if hold_until then
+                if m.time:as_double() < hold_until then return end
+                m:exit(); return
+            end
             local tot = m.time:as_double() - t0
             table.sort(per)
             local med = per[math.floor(#per/2)+1] or 0
@@ -319,6 +329,20 @@ _G._n = emu.add_machine_frame_notifier(function()
                     fp:write(table.concat(tp)); fp:close()
                     w("    planes written to %s", OUT)
                 end
+            end
+            -- ★★★★★ P3B_HOLD -- KEEP THE PICTURE ON SCREEN AFTER THE LAST CYCLE [T-P0-056 AC-1].
+            -- ★★★★ This exited the instant the cycles completed, so the room Jay is being asked
+            -- to judge was on screen for a fraction of a second and then the window closed.
+            -- **An eye gate the operator cannot actually look at is not an eye gate**, and this
+            -- one had been run four times before he said so: "i need a delay after each is
+            -- displayed to really see for sure".
+            -- ★★★ Emulated seconds, like everything else here: the guest is idle across the hold
+            -- so nothing it does can change what is displayed, and the dump above has already
+            -- been written -- the hold cannot affect any measurement.
+            if HOLD > 0 then
+                hold_until = m.time:as_double() + HOLD
+                w("    ★ holding the display for %g emulated s (P3B_HOLD)", HOLD)
+                return
             end
             m:exit(); return
         end
