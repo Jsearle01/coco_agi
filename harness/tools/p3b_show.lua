@@ -92,9 +92,15 @@ local function read_pal16()
 end
 
 local PAL16 = read_pal16()
-local A_FB  = sym("ph_blk_fb")
-print(string.format("palette: %s from gfx.s   ph_blk_fb=$%04X",
-                    PAL16 and "16 entries" or "★★★ NOT FOUND", A_FB or 0))
+-- ★★★★★ FOLLOW p3_blk_vis, NOT ph_blk_fb. Since T-P0-051 the picture renders into a SHADOW plane
+-- and ph_blk_fb points AT THAT SHADOW for the duration of the render -- so a display that tracked
+-- ph_blk_fb would show the draw happening, which is the exact thing the shadow buffer exists to
+-- stop. p3_blk_vis names the visible plane and never moves.
+-- ★ Falls back to ph_blk_fb so this file still works against a pre-shadow build.
+local A_FB  = sym("p3_blk_vis") or sym("ph_blk_fb")
+print(string.format("palette: %s from gfx.s   visible-plane byte=$%04X (%s)",
+                    PAL16 and "16 entries" or "★★★ NOT FOUND", A_FB or 0,
+                    sym("p3_blk_vis") and "p3_blk_vis" or "ph_blk_fb -- pre-shadow build"))
 
 local ST, CYCLE = 0x0020, 0x0024
 local shots, armed, last_snap_cycle = 0, -1, -1

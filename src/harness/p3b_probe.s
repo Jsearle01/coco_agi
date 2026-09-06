@@ -177,8 +177,39 @@ p3b_entry:
 * ★ Blocks 0-1 priority (13,440 B), 2-5 framebuffer (26,880 B). The host stages volumes from
 * block 8 up, and $38-$3F are the CPU window, so 0-7 are free.
                 clr     ph_blk_pri
-                lda     #2
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ T-P0-051: THE PICTURE RENDERS INTO A SHADOW AND IS BLITTED WHEN IT IS FINISHED.
+* Jay watched the render happen -- strokes and floods appearing in resource order -- and ruled
+* that the draw must not be visible. The ORACLE is the argument, not taste: Sierra's $E1B1 emits
+* an ALREADY-RENDERED buffer at 24 cy/pixel with zero comparisons on pixel data [T-P0-019].
+* **Render then present is what the original does.**
+*
+* ★★★★ THIS IS NARROWER THAN DOUBLE-BUFFERING AND DELIBERATELY SO. The picture render happens
+* ONCE PER ROOM, so only the RENDER gets a shadow. Sprites still composite straight onto the
+* visible plane with the same save-under §3.6 chose, and the compositing loop is untouched --
+* which is §11's out-of-scope line and trigger 5's condition.
+*
+* ★★★ THE BLOCKS. Priority 0-1, shadow framebuffer 2-5, and the host stages volumes at 8-13 and
+* 14-38 [measured from p3b_run.lua's own staging log]; $38-$3F is the CPU window. **40-43 are
+* free**, so the visible plane costs four blocks nobody was using and moves no volume.
+* ★★ p3b already exceeds 128 KB by staging 31 blocks of volumes, so §2K's 128 KB rule is not
+* newly broken here -- it was never a 128 KB harness. Stated rather than assumed.
+P3_BLK_SHADOW   equ     2               ; the picture renders here, unseen
+P3_BLK_VISIBLE  equ     40              ; what the display shows and sprites composite onto
+* ★★★★ p3_blk_vis IS DECLARED WITH p3_present, NOT HERE. The first version put its `fcb` between
+* `clr ph_blk_pri` and the `lda` below -- i.e. IN THE INSTRUCTION STREAM -- so the 6809 executed
+* the byte 40 as $28 (BVC) and the probe derailed before it ran. The tell was the harness never
+* setting the video mode: its notifier waits on a cycle counter the guest never wrote.
+* ★★★ Same class as the data-symbol-in-code defect this project has now hit three times
+* [vm_icguard at the top of a cycle profile; PAL_READBACK aliasing the pic counters].
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+                lda     #P3_BLK_VISIBLE
                 sta     ph_blk_fb
+* ★★★ CLEAR THE VISIBLE PLANE ONCE, HERE. Blocks 40-43 have never been written, so without this
+* the display shows uninitialised RAM for the whole of the first room's ~7 s render -- a direct
+* consequence of the shadow buffer, since the visible plane is no longer the one being drawn into.
+* ★ ph_blk_fb is the visible plane at this point and p3_clear_planes resolves against it.
+                jsr     p3_clear_planes
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ CLOCK CALIBRATION — A GUARD, NOT A DECORATION, AND ITS ABSENCE COST THIS TASK ITS
@@ -362,11 +393,19 @@ p3_room_check:
 * their job, and keeping them put the image 5 bytes over the code region -- which would have
 * meant a fourth bite out of the parser/sound reservation to carry debug scaffolding.
 * ── now the draw phase, and only now ──
+* ★★★ RENDER INTO THE SHADOW. ph_blk_fb selects which four blocks every plane_win call and every
+* phase_draw_fb resolves against, so pointing it at the shadow redirects the WHOLE render --
+* clear, lines and fills -- with no change to pic_core. The visible plane keeps the previous
+* room on screen throughout, which is the point.
+                lda     #P3_BLK_SHADOW
+                sta     ph_blk_fb
                 jsr     phase_draw_enter
                 jsr     p3_clear_planes
                 ldx     p3_picptr
                 stx     pic_ptr
                 jsr     pic_render_at
+* ★★★ AND NOW PRESENT IT: one copy per room, against a ~2.8 s render.
+                jsr     p3_present
                 jsr     res_close
                 lda     #1
                 sta     p3_drew
@@ -451,6 +490,66 @@ p3_cp:          std     ,x++
 * they are added here and the per-room-change cost is visible instead of missing.
                 ldd     P3_REMAPS
                 addd    #8
+                std     P3_REMAPS
+                ifdef   PLANE_WINDOWED
+                jsr     plane_reset
+                endc
+                rts
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ p3_present — copy the finished picture from the shadow to the visible plane.
+*
+* ★★★ ONE COPY PER ROOM. The render is ~2.8 s; this is 26,880 bytes moved once at the end of it.
+* It is not a per-frame cost and it is not double-buffering: the compositor keeps writing the
+* visible plane directly, every cycle, exactly as before [§3.6's save-under is untouched].
+*
+* ★★★★ IT BORROWS SLOT 5, WHICH HOLDS THE PRIORITY PLANE, AND THAT IS SAFE ONLY BECAUSE OF WHEN
+* IT RUNS. The picture is finished and the sprites have not started, so nothing reads priority
+* across this call -- the same argument mmu_phase.s makes for the fill's straddle borrow, and it
+* has to be made explicitly here because the borrow is longer.
+* ★★ The restore below puts slot 5 back and invalidates plane_win.s's caches, because **a cache
+* of a register's contents is wrong the moment anyone else writes that register**.
+*
+* ★ The slice counter is in memory: `ldd` destroys B, which cost pic_probe a whole gate run
+* [pic_probe.s:541-549].
+* ★ Both bytes live HERE, after a `rts` and before the entry label, so nothing falls through them.
+p3p_slice       fcb     0
+p3_blk_vis      fcb     P3_BLK_VISIBLE  ; the harness display reads this; it never moves
+p3_present:
+                clr     p3p_slice
+p3p_next:
+* --- destination: the VISIBLE plane's slice, borrowed into slot 5 ($A000) ---
+                lda     #P3_BLK_VISIBLE
+                sta     ph_blk_fb
+                lda     p3p_slice
+                jsr     phase_draw_fb_slot5
+* --- source: the SHADOW plane's slice, in its usual slot 6 ($C000) ---
+                lda     #P3_BLK_SHADOW
+                sta     ph_blk_fb
+                lda     p3p_slice
+                jsr     phase_draw_fb
+* --- one aperture, two bytes at a time ---
+                ldx     #FB_BASE                ; $C000, the shadow slice
+                ldu     #PRI_BASE               ; $A000, the visible slice (borrowed slot 5)
+p3p_cp:         ldd     ,x++
+                std     ,u++
+                cmpx    #FB_BASE+8192
+                blo     p3p_cp
+                inc     p3p_slice
+                lda     p3p_slice
+                cmpa    #4
+                blo     p3p_next
+* --- restore: ph_blk_fb back to the visible plane, slot 5 back to priority ---
+* ★★ The compositor runs next and writes the VISIBLE plane, so ph_blk_fb stays at
+* P3_BLK_VISIBLE until the next room change points it at the shadow again.
+                lda     #P3_BLK_VISIBLE
+                sta     ph_blk_fb
+                clra
+                jsr     phase_draw
+* ★ Eight maps for the four slices plus the restoring pair, counted rather than left out of
+* AC-6's figure -- the same accounting p3_clear_planes now does.
+                ldd     P3_REMAPS
+                addd    #10
                 std     P3_REMAPS
                 ifdef   PLANE_WINDOWED
                 jsr     plane_reset
