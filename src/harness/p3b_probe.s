@@ -459,7 +459,24 @@ p3_cv_slice:    lda     p3_cl_slice
                 ldx     #FB_BASE
                 ldd     #$FFFF                  ; visual 15, both nibbles (the pixel doubling)
 p3_cv:          std     ,x++
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ P3B_FAULT_CLEAR — THE HISTORICAL DEFECT, RESTORABLE ON DEMAND [T-P0-054 AC-4].
+* ★★★★ A gate is only worth its green if a known-bad build turns it red, and this project has
+* twice published a clean gate that was measuring nothing [P4.7's inert fault injection, P3b.15's
+* three inert windowed runs]. The way to not repeat that is to keep the FAULT, not the memory of
+* it: the exact expression that shipped, behind a flag, so the check is re-runnable by anyone.
+* ★★★ Under -DP3B_FAULT_CLEAR this restores the assemble-time constant overflow verbatim --
+*     $C000 + $6900 = $12900, silently truncated by lwasm to $2900, with X starting at $C000 --
+* so `blo` fails on the first pass and 26,880 bytes of intended clear become 2. **lwasm emits it
+* without a diagnostic, which is the whole reason it survived to the screen.**
+* ★★ NOT reachable by accident: no default build defines this, and the artifact it produces is
+* written to a different filename so it can never be mistaken for the shipped probe.
+                ifdef   P3B_FAULT_CLEAR
+                cmpx    #FB_BASE+(PIC_W*PIC_H)  ; ★ THE DEFECT: overflows to $2900
+                else
                 cmpx    #FB_BASE+8192           ; ★ ONE APERTURE, not the whole plane
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
                 blo     p3_cv
                 inc     p3_cl_slice
                 lda     p3_cl_slice

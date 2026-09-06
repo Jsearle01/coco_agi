@@ -36,3 +36,19 @@ res	src/harness/res_probe.s	build/res_probe.bin	-DHAL_GFX_MODE_SERVICE
 cel	src/harness/cel_probe.s	build/cel_probe.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK
 comp	src/harness/comp_probe.s	build/comp_probe.bin
 vm	src/harness/vm_probe.s	build/vm_probe.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK
+# ★★★★★ T-P0-054 AC-3: p3b WAS THE ONE PROBE THIS FILE DID NOT LIST, and it is the integration
+# probe -- 48,537 bytes of source and sixteen p3_* routines built by no gate at all. Every defect
+# of the last four tasks lived here (p3_clear_planes' 2-byte clear, the shadow buffer, the byte in
+# the instruction stream), which is precisely the code the eight rows above never assembled.
+# ★★★★ THE FLAGS WERE RECOVERED BY BYTE-MATCH, not from memory: this line reproduces the shipped
+# build/p3b_probe_pk_fresh.bin at 12,859 bytes IDENTICAL. Six other plausible flag sets were tried
+# and none did.
+# ★★★★★ AND THE ROW LOOKS WRONG UNTIL YOU KNOW WHY. **PLANE_WIN_MMU is absent from this line and
+# p3b IS windowed through the MMU**: `PLANE_WIN_MMU equ 1` is set UNCONDITIONALLY IN THE SOURCE
+# [p3b_probe.s:65], so passing it on the command line is a Multiply-defined-symbol error and every
+# build that tries FAILS TO ASSEMBLE. ★★★ Do not "fix" this row by adding it. The reading it
+# invites -- "no PLANE_WIN_MMU, so p3b does not window" -- is the exact inverse of the truth, and
+# is the same inert-flag confusion that made three of P3b.15/16's results meaningless [AD-119].
+# ★★ Contrast the pic_win row above, which passes -DPLANE_WINDOWED and NOT -DPLANE_WIN_MMU and
+# therefore genuinely does NOT window: the same two symbols mean opposite things in the two files.
+p3b	src/harness/p3b_probe.s	build/p3b_probe_pk_fresh.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED	integration probe -- PLANE_WIN_MMU comes from the SOURCE (line 65), never the command line
