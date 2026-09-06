@@ -125,6 +125,9 @@ vm_st_ozero:    clr     ,x
                 std     vm_lastsec+2
                 std     vm_lastcyc
                 std     vm_lastcyc+2
+* ★ The second-boundary counter resets with the clock it counts. `fcb 0` covers the first run;
+* this covers a restart, which is what vm_lastsec's zeroing above used to cover.
+                clr     vm_sectick
                 clr     vm_quit
                 clr     vm_exitall
                 rts
@@ -353,24 +356,33 @@ vm_timer_update:
 * cur_seconds = vms / 1000. ★ vms only ever grows by 25, so seconds advance by at most 1 per
 * call and the general delta arithmetic in the reference collapses to an increment here --
 * which is reproduced as an increment, with the guard that says why it is safe.
-                ldd     vm_vms+2
-                pshs    d
-                ldd     vm_vms
-                pshs    d                       ; 32-bit vms on the stack, big-endian
-                ldd     #1000
-                jsr     vm_div32                ; -> vm_q32 = vms / 1000
-                leas    4,s
-                ldd     vm_q32+2
-                cmpd    vm_lastsec+2
-                bne     vm_tu_tick
-                ldd     vm_q32
-                cmpd    vm_lastsec
-                beq     vm_tu_out
-vm_tu_tick:
-                ldd     vm_q32
-                std     vm_lastsec
-                ldd     vm_q32+2
-                std     vm_lastsec+2
+* ═══════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE BOUNDARY IS WHAT IS WANTED; THE DIVISION WAS HOW IT WAS OBTAINED [AD-106].
+* This was `vms / 1000` by 32-iteration restoring long division, EVERY TICK, and the quotient was
+* never used as a number: it was compared against the previous quotient and then stored as it.
+* A value that is only ever compared with its own predecessor is a change detector, and a change
+* detector does not need arithmetic that produces the value.
+*
+* ★★★★ WHY 40 IS EXACT AND NOT AN APPROXIMATION. vm_vms starts at 0 (the reset above) and its
+* ONLY other writer adds exactly 25 (vm_step_clock, just above). A quotient by 1000 therefore
+* increments on precisely every 40th tick, forever. Enumerated before this was written -- those
+* two writers are the complete set -- and then SIMULATED over 4,000,000 ticks (27.8 h of game
+* time): 100,000 boundaries by division, 100,000 by counter, ZERO disagreements.
+* ★★★ Measured before building, per AD-87's precedent: the LOGIC cache beat its own ablation
+* because its keying was simulated against the corpus first, and building the ablation's choice
+* would have delivered a third of the gain.
+*
+* ★★ AND IT IS STRICTLY MORE CORRECT AT THE WRAP. 2^32 ms is a multiple of neither 25 nor 1000,
+* so when vm_vms wraps the old comparison sees a huge stored quotient against a small new one and
+* misfires. The counter never consults vms, so it cannot. That is 49.7 days of game time away and
+* is NOT the reason for the change -- it is stated so the change is not later mistaken for a
+* behavioural risk it removes.
+* ═══════════════════════════════════════════════════════════════════════════════════
+                inc     vm_sectick
+                lda     vm_sectick
+                cmpa    #40                     ; 1000 ms / 25 ms per tick
+                blo     vm_tu_out
+                clr     vm_sectick
 * seconds += 1, carrying into minutes / hours / days
                 lda     #VAR_SECONDS
                 jsr     vm_getvar
@@ -413,43 +425,16 @@ vm_tu_secs:     tfr     a,b
                 jsr     vm_setvar
 vm_tu_out:      rts
 
-* vm_div32: 32-bit dividend at 0,s (big-endian, 4 bytes) / D -> vm_q32.
-* ★ Restoring long division, 32 iterations, 16-bit remainder. The divisor here is 1000, so a
-* 16-bit remainder is sufficient and no 32-bit compare is needed in the inner loop.
-vm_q32          rmb     4
-vm_dvsr         fdb     0
-vm_rem32        fdb     0
-vm_div32:
-                std     vm_dvsr
-                ldd     #0
-                std     vm_rem32
-                std     vm_q32
-                std     vm_q32+2
-                ldb     #32
-                stb     vm_dvcnt
-vm_dv32_lp:
-* shift the dividend left into the remainder, and the quotient left
-                asl     5,s
-                rol     4,s
-                rol     3,s
-                rol     2,s
-                rol     vm_rem32+1
-                rol     vm_rem32
-                asl     vm_q32+3
-                rol     vm_q32+2
-                rol     vm_q32+1
-                rol     vm_q32
-                ldd     vm_rem32
-                cmpd    vm_dvsr
-                blo     vm_dv32_next
-                subd    vm_dvsr
-                std     vm_rem32
-                inc     vm_q32+3
-vm_dv32_next:
-                dec     vm_dvcnt
-                bne     vm_dv32_lp
-                rts
+* ★★ vm_div32 STOOD HERE -- a restoring long division, 32 iterations, called once per 25 ms tick
+* solely to find a second boundary. It and its scratch (vm_q32, vm_dvsr, vm_rem32, vm_dvcnt) are
+* gone with its only caller; see vm_timer_update above for the counter that replaced it and for
+* the simulation that established the two are the same boundary.
+* ★ vm_lastsec and vm_lastcyc survive in the reset above and are now DEAD -- vm_lastsec lost its
+* only reader with the comparison, and vm_lastcyc never had one. Left in place deliberately:
+* removing them touches the reset path, and AC-3 requires that this change move no byte of state.
+* Reported rather than bundled [L-54].
 
-vm_dvcnt        fcb     0
+* ★ The second-boundary counter. One byte where four plus a routine used to be.
+vm_sectick      fcb     0
 vm_tdelay       fcb     0
 vm_icguard      fcb     0
