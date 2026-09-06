@@ -129,7 +129,7 @@ local A_FB  = sym("p3_blk_vis") or sym("ph_blk_fb")
 -- ★★★ NAME THE TABLE IN THE LOG. The old line said "from gfx.s" and was accurate about a file
 -- that held the wrong table -- a provenance string is only useful if a reader can tell from it
 -- whether the RIGHT thing was loaded, so it now prints the entries as well as the source.
-print(string.format("palette: %s from content/agi_palette.s [P4.4 AC-11/AC-12]%s   visible-plane byte=$%04X (%s)",
+print(string.format("palette: %s EXPECTED from content/agi_palette.s [P4.4 AC-11/AC-12] -- INSTALLED BY THE GUEST%s   visible-plane byte=$%04X (%s)",
                     PAL16 and "16 entries" or "★★★ NOT FOUND",
                     PAL16 and string.format("  idx2=$%02X idx6=$%02X idx15=$%02X",
                                             PAL16[3], PAL16[7], PAL16[16]) or "", A_FB or 0,
@@ -148,12 +148,19 @@ _G._show = emu.add_machine_frame_notifier(function()
     prog:write_u8(0xFF98, 0x80)
     prog:write_u8(0xFF99, 0x3E)
 
-    -- 2. the project's own 16-entry palette, from gfx.s
-    if PAL16 then
-        for i = 1, 16 do
-            prog:write_u8(0xFFB0 + i - 1, PAL16[i])
-        end
-    end
+    -- ═══════════════════════════════════════════════════════════════════════════════════════
+    -- ★★★★★ 2. THE PALETTE IS THE GUEST'S NOW, AND THIS NO LONGER WRITES IT [T-P0-057].
+    -- ★★★★ This loop asserted the table from the host on EVERY FRAME, so the colours Jay
+    -- approved at AC-1 were the host's and said nothing about p3b. A write tap proved it: 16
+    -- writes to $FFB0-$FFBF across a whole run, all from PC $C00F -- Disk BASIC's ROM -- and
+    -- none from the guest. **Leaving this in would keep the display correct and the program
+    -- wrong, which is the exact condition that hid the defect for four tasks.**
+    -- ★★★ p3b now calls agi_pal_load at init [p3b_probe.s], so the screen shows what the
+    -- PROGRAM established. If that regresses, the colours go wrong and someone sees it.
+    -- ★★ PAL16 is still parsed, and still printed at startup, purely so the log records what the
+    -- guest is EXPECTED to install -- a reader can compare it against the tap's report.
+    -- ═══════════════════════════════════════════════════════════════════════════════════════
+
 
     -- 3. VOFFSET = physical / 8, and physical = block * 8192, so VOFFSET = block * 1024
     if A_FB then

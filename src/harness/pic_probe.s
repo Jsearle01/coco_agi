@@ -47,6 +47,14 @@
                 include "src/engine/memmap.inc"
                 endc
 
+* ★★★ AC-11's readback routine is guarded in content/agi_palette.s so it links only where it is
+* called -- linking 19 bytes into every probe that includes the file, to serve the one probe that
+* calls it, pushed p3b past its code region. **This probe IS the caller** [pal_readback below],
+* so it asks for the routine HERE, in source, where a reader of this file can see it. Same idiom
+* as PLANE_WIN_MMU above [AD-119: a symbol on a command line is a fact nobody can see from the
+* source].
+AGI_PAL_READBACK equ    1
+
 PIC_W           equ     160
 PIC_H           equ     168
 
@@ -456,15 +464,13 @@ ph_wait:        lda     GO
 * ★ These 16 values are a TRANSCRIPTION of AGI's EGA palette, not a choice. Entry 6 is brown
 * $22 = (R2,G1,B0) — the ONLY non-uniform entry, and the one a "double the CGA bit" conversion
 * silently turns into dark yellow.
+*
+* ★★★★★ THE LOOP MOVED TO content/agi_palette.s [T-P0-057]. It was the only way to install the
+* table and it lived in this probe, so p3b could reach the DATA and had no way to install it --
+* and installed nothing. **A second copy of this loop in p3b would have been the duplication
+* T-P0-056b had just removed**, one level down. This delegates; the symbol is unchanged.
 * ═══════════════════════════════════════════════════════════════════
-pal_load:
-                ldx     #agi_pal16
-                ldy     #$FFB0
-pal_lp:         lda     ,x+
-                sta     ,y+
-                cmpx    #agi_pal16+16
-                blo     pal_lp
-                rts
+pal_load:       jmp     agi_pal_load
 
 * ═══════════════════════════════════════════════════════════════════
 * pal_readback — AC-11: read $FFB0-$FFBF back and stage it for the host
@@ -485,15 +491,12 @@ pal_lp:         lda     ,x+
 * that is AC-12's eye gate, and it is Jay's (CLAUDE.md §3, §4).
 * ═══════════════════════════════════════════════════════════════════
 PAL_READBACK    equ     $00A0           ; 16 bytes the host reads after the run
+* ★★ The masked read moved to content/agi_palette.s beside the loader, same reasoning: p3b needs
+* to prove its own writes landed and a second masked loop is a second thing to get right. This
+* supplies the destination and delegates [T-P0-057].
 pal_readback:
-                ldy     #$FFB0
                 ldx     #PAL_READBACK
-pal_rb_lp:      lda     ,y+
-                anda    #$3F                    ; ★ mask bits 7-6 [SockmasterGime.md, above]
-                sta     ,x+
-                cmpy    #$FFC0
-                blo     pal_rb_lp
-                rts
+                jmp     agi_pal_readback
 
 * ★★★★★ agi_pal16 IS NO LONGER DEFINED HERE. It lives in content/agi_palette.s and reaches this
 * file through hal_globals.s's include [CLAUDE.md §2F, §2B; T-P0-056b].

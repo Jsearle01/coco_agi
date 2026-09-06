@@ -85,6 +85,8 @@ P3_T_COMP       equ     MAP_STATUS+16
 P3_T_FETCH      equ     MAP_STATUS+20
 P3_T_RENDER     equ     MAP_STATUS+24
 P3_REMAPS       equ     MAP_STATUS+28   ; 2 B: MMU writes this cycle -- AC-6
+* ★ MAP_STATUS+32 is left free for a palette readback if this probe ever has room for one; see
+* the note beside the agi_pal_load call. The status block is 224 B [memmap.inc].
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ P3_PHASE — THE TIMING MARKER, AND AC-5 CANNOT BE ANSWERED WITHOUT IT.
 * P3_T_VM..P3_T_RENDER have existed since P3b.1 and are ZEROED EVERY CYCLE AND NEVER WRITTEN --
@@ -202,6 +204,25 @@ P3_BLK_VISIBLE  equ     40              ; what the display shows and sprites com
 * setting the video mode: its notifier waits on a cycle counter the guest never wrote.
 * ★★★ Same class as the data-symbol-in-code defect this project has now hit three times
 * [vm_icguard at the top of a cycle profile; PAL_READBACK aliasing the pic counters].
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ LOAD THE PALETTE. p3b DID NOT, AND AC-1 PASSED ANYWAY [T-P0-057].
+* ★★★★ A write tap on $FFB0-$FFBF across a full run recorded 16 writes, every one of them from
+* PC $C00F -- Disk BASIC's ROM -- and ZERO from this program. The three rooms Jay approved were
+* coloured by p3b_show.lua asserting the table from the host on every frame. **The pass was real
+* and its cause was outside the thing under test**, which is L-86's shape: picture 80 was clean
+* for a reason nobody had checked, and this is the same error one level up.
+* ★★★ NOT HAL_gfx_set_mode, deliberately. That would load mode 2's palette for us -- and also
+* remap slot 6 to a GFX_DB block, tearing this probe's framebuffer slice out from under it
+* [p3b_show.lua's header records exactly that hazard]. The palette is what is wanted; the MMU
+* side effects are not.
+* ★★ NO READBACK HERE, AND THE REASON IS A MEASUREMENT. This code region is $2000-$5300 and the
+* build sits 27 bytes under it: the loader plus this call is 23 and fits, adding the readback and
+* its call is 25 more and does not [content/agi_palette.s, AGI_PAL_READBACK]. **The palette is
+* proved instead by a write tap on $FFB0-$FFBF**, which records this program's own stores and
+* their values -- and is what found the absence in the first place.
+* ★ Mode must be final before palette writes latch [gfx.s Constraint B]. The host sets mode 2
+* before staging, so it is by the time this runs -- stated in the report's §7, not assumed.
+                jsr     agi_pal_load
 * ═══════════════════════════════════════════════════════════════════════════════════════════
                 lda     #P3_BLK_VISIBLE
                 sta     ph_blk_fb

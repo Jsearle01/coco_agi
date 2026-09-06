@@ -43,6 +43,66 @@
 *     harness/tools/agi_palette.py      parses this file; the Python tools import from there
 *     harness/tools/p3b_show.lua        parses this file to assert the palette host-side
 
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ agi_pal_load / agi_pal_readback — THE ONE LOADER, beside the one table [T-P0-057].
+*
+* ★★★★ WHY THE ROUTINE MOVED HERE TOO. T-P0-056b gave the DATA one home and left the LOADER in
+* pic_probe.s, so p3b could reach the table and still had no way to install it. **It installed
+* nothing**: a write tap on $FFB0-$FFBF across a full p3b run recorded 16 writes, all of them
+* from PC $C00F -- Disk BASIC's ROM -- and ZERO from the guest. Every correct colour Jay saw was
+* asserted by the host script, so AC-1 passed on a machine state p3b did not establish.
+* ★★★ Consolidating the data and leaving the mechanism behind is half a fix, and the half that
+* was left is the half that made the defect invisible.
+*
+* ★★ REGISTER-CLEAN, because both callers reach it from init code with live registers and one of
+* them (p3b) has no spare. A/X/Y are preserved.
+* ★★★★ $FFB0-$FFBF IS THE HAL'S RANGE (§2N: "the HAL owns $FF90-$FF9F and $FFB0-$FFBF"). This
+* file is included BY hal_globals.s, so the owner is unchanged -- the write site did not move out
+* of the HAL, it moved out of a probe INTO it.
+* ★ Constraint B [gfx.s:143]: palette writes may not latch until $FF98/$FF99 are final, so the
+* caller must have set the video mode first. Both callers do; p3b's is set host-side before
+* staging, which is stated in §7 rather than assumed here.
+agi_pal_load:
+        pshs    a,x,y
+        ldx     #agi_pal16
+        ldy     #$FFB0
+agi_pl_lp:
+        lda     ,x+
+        sta     ,y+
+        cmpx    #agi_pal16+16
+        blo     agi_pl_lp
+        puls    a,x,y,pc
+
+* ── agi_pal_readback — in: X = 16-byte destination. Proves the values LANDED. ──
+* ★★★★ GUARDED, AND THE GUARD IS A MEASUREMENT NOT A PREFERENCE. p3b's code region is $2000-$5300
+* and the build sits 27 bytes under it; the loader plus its call site is 23 and fits, the readback
+* plus its call site is 25 and does not. **Linking 19 bytes of routine into every probe that
+* includes this file, to serve the one probe that calls it, is what pushed p3b over.**
+* ★★ pic_probe.s sets AGI_PAL_READBACK in its own source (like p3b sets PLANE_WIN_MMU), so the
+* symbol travels with the file that needs it rather than with a command line [AD-119's lesson:
+* a flag on a command line is a fact nobody can see from the source].
+* ★ p3b does NOT link it. Its palette is proved instead by a write tap on $FFB0-$FFBF, which
+* records the guest's own stores and their values -- stronger than a readback for the question
+* "did THIS program write them", and weaker for "did they land". Both are reported.
+                ifdef   AGI_PAL_READBACK
+* ★★★ BITS 7-6 MUST BE MASKED ON READ, documented rather than discovered: *"These registers can
+* also be read to determine what palettes are set but like the MMU registers, the upper 2 bits
+* must be masked out."* [ref: docs/ground-truth/SockmasterGime.md, "FFB0-FFBF Color palette
+* registers"]. ★★ Without the mask a correct write compares as sixteen mismatches.
+* ★ Read BY THE GUEST. A host-side read tests MAME's palette model, not the guest's writes.
+agi_pal_readback:
+        pshs    a,x,y
+        ldy     #$FFB0
+agi_pr_lp:
+        lda     ,y+
+        anda    #$3F
+        sta     ,x+
+        cmpy    #$FFC0
+        blo     agi_pr_lp
+        puls    a,x,y,pc
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+
 agi_pal16:
         fcb     $00             ;  0 black          R0 G0 B0
         fcb     $08             ;  1 blue           R0 G0 B2

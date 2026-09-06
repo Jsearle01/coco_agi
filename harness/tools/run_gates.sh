@@ -71,8 +71,15 @@ run() {   # run <name> <script> <seconds> <src> <out> [flags...]
     echo "═══ $1 ═══"
     name="$1"; script="$2"; secs="$3"; shift 3
     build_and_stamp "$@" || { echo "★★★ $name SKIPPED -- could not build"; echo; return 1; }
+    # ★★★ MAME_EXTRA exists so a pacing flag can be TESTED without editing this file, and so the
+    # flag a measurement was taken under is visible in the environment rather than in a shell
+    # history [L-45's reasoning applied to the launch step, which is what this file is for].
+    # ★★ -seconds_to_run above is EMULATED seconds. The sweeps already exit early on completion
+    # (pic_sweep.lua, cel_sweep.lua, comp_sweep.lua, vm_sweep.lua all call machine:exit()), so it
+    # is a safety net rather than a budget that is always spent.
+    # shellcheck disable=SC2086
     "$MAME" coco3 -rompath C:/mame/roms -video none -sound none -window -nomaximize \
-        -seconds_to_run "$secs" -autoboot_script "$script" 2>&1 | tail -"${TAIL:-6}"
+        ${MAME_EXTRA:-} -seconds_to_run "$secs" -autoboot_script "$script" 2>&1 | tail -"${TAIL:-6}"
     echo
 }
 
