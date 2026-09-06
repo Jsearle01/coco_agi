@@ -210,6 +210,19 @@ P3_BLK_VISIBLE  equ     40              ; what the display shows and sprites com
 * consequence of the shadow buffer, since the visible plane is no longer the one being drawn into.
 * ★ ph_blk_fb is the visible plane at this point and p3_clear_planes resolves against it.
                 jsr     p3_clear_planes
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ AND THEN BLACK IT. p3_clear_planes writes WHITE, because white is what an AGI PICTURE
+* is drawn onto -- fills are bounded by white, so the plane being rendered into must start white
+* [pic_core.s]. ★★★★ THE VISIBLE PLANE IS NOT BEING RENDERED INTO. Since the shadow buffer
+* landed it is only ever a destination for p3_present, so its initial contents are pure display
+* state -- and a white screen is the wrong display state to sit on for the ~7 s of the first
+* room's render. Jay: "i want video set and cleared to black as soon as possible after the load."
+* ★★★ Black is index 0 and index 0 is $00 in agi_pal16 [pic_probe.s:499], so a zeroed plane is
+* black under the real palette rather than only under a blanked one.
+* ★★ This does NOT touch the shadow plane or the priority plane: the per-room clear in
+* p3_room_check still whitens what the renderer draws on, so the renderer's contract is unchanged
+* and every picture still gates byte-identical.
+                jsr     p3_black_visible
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ CLOCK CALIBRATION — A GUARD, NOT A DECORATION, AND ITS ABSENCE COST THIS TASK ITS
@@ -512,6 +525,44 @@ p3_cp:          std     ,x++
                 jsr     plane_reset
                 endc
                 rts
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★ p3_black_visible — fill the VISIBLE plane with index 0. Called once, at init.
+*
+* ★★★ Same slice walk as p3_clear_planes' visual half and for the same reason: FB_BASE+26,880
+* does not fit the 8,192-byte aperture, and the constant that expresses it overflows to $2900
+* [AD-111 -- the clear that cleared two bytes]. **One aperture at a time, counter in memory
+* because `ldd` destroys B.**
+* ★★ ph_blk_fb must already name the VISIBLE plane when this is called. It does at init; it
+* would not during a room render, which is why this has no business being called from anywhere
+* else and is not.
+* ★ Four slices of $0000 = 32,768 bytes, ~0.09 s once. It is not on any per-room path.
+p3_bv_slice     fcb     0
+p3_black_visible:
+                clr     p3_bv_slice
+p3_bv_next:     lda     p3_bv_slice
+                jsr     phase_draw_fb           ; map slice A into the framebuffer window
+                ldx     #FB_BASE
+                ldd     #$0000                  ; index 0, both nibbles (the pixel doubling)
+p3_bv:          std     ,x++
+                cmpx    #FB_BASE+8192
+                blo     p3_bv
+                inc     p3_bv_slice
+                lda     p3_bv_slice
+                cmpa    #4
+                blo     p3_bv_next
+* ★★ Restore the canonical draw-phase pair and invalidate plane_win.s's slice caches -- the walk
+* left slot 6 on the LAST slice, which is not what the caller established [phase_draw_enter].
+                clra
+                jsr     phase_draw
+                ldd     P3_REMAPS
+                addd    #5                      ; four slice maps plus the restoring pair's fb half
+                std     P3_REMAPS
+                ifdef   PLANE_WINDOWED
+                jsr     plane_reset
+                endc
+                rts
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ p3_present — copy the finished picture from the shadow to the visible plane.

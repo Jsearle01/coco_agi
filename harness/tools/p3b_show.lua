@@ -181,6 +181,29 @@ _G._show = emu.add_machine_frame_notifier(function()
     end
 end)
 
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+-- ★★★★★ BLACK THE SCREEN BEFORE THE LOAD, NOT AFTER IT [T-P0-056b].
+-- ★★★★ The notifier above returns until the guest's cycle counter reaches 2, so for the WHOLE
+-- of staging and the whole of cycle 1's ~7 s render the machine sat in DECB's text mode --
+-- displaying VRAM that the stager was busy overwriting with the program image. Jay: "the program
+-- sits in the text screen which is overwritten by the code on load and i'd rather it just be
+-- black as soon as possible".
+-- ★★★ This runs BEFORE the dofile below, which is what does the staging, so it is the earliest
+-- point in the session at which anything can be asserted about the display.
+-- ★★ A BLANKED PALETTE, NOT A CLEARED BUFFER, is what makes this safe here: the MMU is not up
+-- yet and nothing has allocated the framebuffer blocks, so there is no buffer this script could
+-- correctly clear. Sixteen black entries render whatever is in VRAM as black without needing to
+-- know where VRAM is. The real values are written by the notifier from cycle 2, by which point
+-- the guest has cleared the visible plane and presented its first room.
+-- ★ The guest blacks its own visible plane at init as well [p3b_probe.s p3_black_visible], so
+-- the port does not depend on this script for the same effect -- this covers only the window
+-- before the guest is running at all.
+prog:write_u8(0xFF98, 0x80)
+prog:write_u8(0xFF99, 0x3E)
+for i = 0, 15 do prog:write_u8(0xFFB0 + i, 0x00) end
+print("display: mode 2 + 16 black palette entries asserted BEFORE staging")
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+
 dofile("harness/tools/p3b_room.lua")
 
 
