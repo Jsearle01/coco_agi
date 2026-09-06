@@ -109,6 +109,17 @@ def compare(name, guest, ref, show_rows, clear):
               "WRONG-COLOUR %d (%.1f%%) | OVER-FILL %d (%.1f%%)"
               % (clear, under, 100.0 * under / total, wrong, 100.0 * wrong / total,
                  over, 100.0 * over / total))
+        # ★★★★ SPLIT AT THE PLANE'S 8 KB SLICE BOUNDARY. A defect that is an APERTURE OVERFLOW
+        # -- an address computed flat, running past the end of the 8,192-byte window -- can only
+        # damage rows at or beyond the boundary, and must leave everything before it intact. A
+        # defect in the MAPPING damages rows on both sides. The two need different fixes, and the
+        # row band is what tells them apart without guessing from source.
+        # ★ Packed priority is 80 B/row, so byte 8192 is row 102.4; visual is 160 B/row, row 51.2.
+        bnd = int(8192 // (W // 2)) if clear == 4 else int(8192 // W)
+        before = sum(d for y, d in diff_rows if y < bnd)
+        after = sum(d for y, d in diff_rows if y >= bnd)
+        print("     SLICE BOUNDARY at row %d: %d differing BEFORE it, %d at/after"
+              % (bnd, before, after))
     if show_rows and diff_rows:
         for y, d in diff_rows[:24]:
             print("        row %3d  %5d  %s" % (y, d, "#" * min(50, d * 50 // W)))

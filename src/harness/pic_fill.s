@@ -113,6 +113,26 @@ FC_NEVER        equ     2               ; always false        (the rest)
 * secondary write needs no address arithmetic beyond one LEA.
 PRI_DELTA       equ     PRI_BASE-FB_BASE
 
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ PRI_WIN_WRITE — "this build reaches the priority plane through the MMU window".
+* ★★★★ DEFINED HERE, AT THE TOP, BECAUSE TWO SITES NEED IT AND ONE OF THEM COMES FIRST.
+* It was originally declared beside ff_store_pri, which is 900 lines below fill_check -- and
+* `ifdef` is resolved in source order, so the seed test would have silently taken the flat branch
+* while the flush took the windowed one. **Two sites disagreeing about whether the plane is
+* windowed is the defect this symbol exists to prevent**, so its definition precedes both uses.
+* ★★★ The two sites, and they are a READ and a WRITE of the same plane:
+*     fill_check      the per-seed FC_PRIORITY test   -- reads priority   [AD-122]
+*     ff_store_pri    the packed second-plane flush   -- writes priority  [AD-121]
+* ★★ -DPRI_FAULT_FLAT withholds it, which is AC-6's fault: both sites revert together.
+                ifdef   PLANE_WIN_MMU
+                ifndef  PLANE_PRI_FLAT
+                ifndef  PRI_FAULT_FLAT
+PRI_WIN_WRITE   equ     1
+                endc
+                endc
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+
 * ── fc_count — the counted build's instrumentation, factored out ───
 * ★★ The inline tests must keep counting or AC-5's comparison against T-P0-014 breaks. Putting
 * the counters in a subroutine costs a call in the COUNTED build only; timings come from
@@ -262,8 +282,19 @@ fc_notvis:      cmpa    #FC_PRIORITY
                 tfr     a,b
                 clra                            ; D = x >> 1  (UNSIGNED, L-40)
                 addd    ,s++                    ; D = y*80 + (x>>1)
+* ★★★★★ AD-122: THE SEED TEST READ THE PRIORITY PLANE FLAT, exactly as ff_store_pri wrote it
+* flat. The FC_VISUAL branch forty lines above was windowed at T-P0-041 (`jsr plane_vis`) and
+* **this branch was left behind** -- the same omission, on the same plane, in the same routine.
+* ★★★★ SYMPTOM: an FC_PRIORITY seed that tests false is dropped silently and its whole region
+* never fills, so the damage is priority-plane UNDER-FILL with the visual plane perfect. Measured
+* after AD-121's fix: pictures 1, 2, 15, 16 and 33 -- and every one of them has PRI-ONLY > 0
+* while every picture that passes has PRI-ONLY == 0.
+                ifdef   PRI_WIN_WRITE
+                jsr     plane_pri               ; X = window address, slice mapped
+                else
                 addd    #PRI_BASE
                 tfr     d,x
+                endc
                 ifndef  PIC_NOCOUNT
                 inc     PATH_P+1
                 bne     fc_pp
@@ -287,8 +318,15 @@ fc_pk_got:
                 mul
                 addb    fc_x
                 adca    #0
+* ★★ The unpacked twin of the site above. No current build combines an unpacked priority plane
+* with windowing, so this is symmetry rather than a measured fix -- and it is made anyway,
+* because leaving one of two identical sites flat is how the packed one came to be flat.
+                ifdef   PRI_WIN_WRITE
+                jsr     plane_pri
+                else
                 addd    #PRI_BASE
                 tfr     d,x
+                endc
                 ifndef  PIC_NOCOUNT
                 inc     PATH_P+1
                 bne     fc_pp
@@ -1072,6 +1110,164 @@ fwml_pri:       jsr     phase_draw_pri
 * Which wins depends on run length, and P3.3 measured the fill's median span at 9 bytes, so the
 * ends are NOT amortised away. **AC-7 reports this rather than assuming it.**
 * ★ in: ff_runx = start x, fc_y = row, ff_runn = pixel count, pri_color = value.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ T-P0-055: THIS ROUTINE ADDRESSED THE PRIORITY PLANE FLAT WHILE THE PLANE WAS WINDOWED,
+* AND THAT IS WHY FILLS DID NOT WRITE PRIORITY [AD-121].
+*
+* ★★★★ WHAT IT DID: `addd #PRI_BASE` on a flat offset of up to 13,439 bytes, into an 8,192-byte
+* window. Two consequences, and the measurement showed BOTH:
+*   1. ★★★★ IT NEVER MAPPED A SLICE. The fill's row seam (ff_win_row) maps only the plane the
+*      TEST reads -- the VISUAL plane on 100% of KQ1's fills -- so nothing ever put the priority
+*      slice this run needs into slot 5. The write landed on whatever happened to be mapped, and
+*      on a straddling span [ff_win_map_lo] that is a FRAMEBUFFER slice. **Priority values were
+*      being written into the visual plane**, which is the visual plane's wrong-colour damage and
+*      the priority plane's under-fill, from one cause.
+*   2. ★★ ROWS AT AND BEYOND 102 ADDRESSED PAST THE APERTURE ($A000 + 8192 = $C000, slot 6).
+*
+* ★★★★★ THE EVIDENCE IT IS THE MAPPING AND NOT ONLY THE OVERFLOW: the divergence sits on BOTH
+* sides of the 8 KB boundary and is HEAVIER BEFORE IT -- pic022 4,606 differing before row 102
+* against 427 at or after. An overflow alone cannot damage a row it never addresses.
+*
+* ★★★ THE FIX USES MACHINERY THAT ALREADY EXISTED AND THIS ROUTINE DID NOT CALL: `plane_pri`
+* maps the slice and returns the window address, and `plane_avail` reports how many bytes of the
+* run fit before the boundary -- **written for exactly this and wired to the visual plane only**.
+* ★★ A run is at most 160 pixels (80 bytes) and a slice is 8,192, so it crosses AT MOST ONE
+* boundary; the loop below therefore runs at most twice.
+*
+* ★★★★ THE FLAT BUILD KEEPS ITS ORIGINAL CODE, BYTE FOR BYTE. The eight gate artifacts are built
+* without PLANE_WIN_MMU and must not move [AC-8], and `pic_probe` forces PLANE_PRI_FLAT whenever
+* it does window -- so the windowed-priority path below is p3b's alone, which is precisely why it
+* was never gated.
+* ★ P3.3's inner loop is untouched: the store loop below is the same four instructions. What is
+* added is per-SPAN address setup, not per-pixel work.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ -DPRI_FAULT_FLAT IS AC-6's FAULT, AND IT COSTS NOTHING TO CARRY because it is the code
+* below, unmodified: withholding PRI_WIN_WRITE makes the windowed build take the FLAT path and
+* reproduces AD-121 exactly. ★★★★ The priority plane had never been the subject of a failing test
+* -- every fault this project has injected damaged the VISUAL plane [P3B_FAULT_CLEAR is 64.5%
+* visual and 0.0% priority], which is how a plane nothing could fail on stayed broken for eleven
+* tasks. ★★ The symbol is defined at the top of this file; see the block beside PRI_DELTA.
+
+                ifdef   PRI_WIN_WRITE
+* ── windowed: map per chunk, split at the slice boundary ──
+ff_store_pri:
+                lda     ff_runn
+                beq     ffsp_ret
+                lda     ff_runx
+                sta     ff_pcx                  ; current start x
+                lda     ff_runn
+                sta     ff_prem                 ; pixels still to write
+ffsp_chunk:
+* ---- flat byte offset of (ff_pcx, fc_y) in the PACKED priority plane ----
+                lda     fc_y
+                ldb     #PIC_W/2
+                mul                             ; D = y * 80
+                std     ff_pflat
+                lda     ff_pcx
+                lsra
+                tfr     a,b
+                clra                            ; D = x >> 1 (unsigned, L-40)
+                addd    ff_pflat
+                std     ff_pflat
+* ---- how many bytes of this slice remain from here ----
+                ldd     ff_pflat
+                jsr     plane_avail             ; B = bytes available in this slice
+                stb     ff_pavail
+* ---- how many bytes this run still needs: ((x&1) + rem + 1) >> 1 ----
+* ★ rem <= 160 and (x&1) <= 1, so the sum cannot leave 8 bits.
+                lda     ff_pcx
+                anda    #1
+                adda    ff_prem
+                inca
+                lsra
+                cmpa    ff_pavail
+                bls     ffsp_final              ; fits: one chunk and done
+* ---- it crosses: this chunk is avail*2 pixels, less one if x is odd ----
+                lda     ff_pavail
+                asla                            ; ★ avail < need <= 81 here, so this fits a byte
+                sta     ff_pchunk
+                lda     ff_pcx
+                anda    #1
+                beq     ffsp_even
+                dec     ff_pchunk
+ffsp_even:
+                lda     ff_pchunk
+                sta     ff_pn2
+                bsr     ffsp_body
+                lda     ff_pcx
+                adda    ff_pchunk
+                sta     ff_pcx                  ; ★ lands on a byte boundary by construction
+                lda     ff_prem
+                suba    ff_pchunk
+                sta     ff_prem
+                bne     ffsp_chunk
+ffsp_ret:       rts
+ffsp_final:
+                lda     ff_prem
+                sta     ff_pn2
+                bsr     ffsp_body
+                rts
+
+* ── ffsp_body — write ff_pn2 pixels starting at ff_pcx, flat offset in ff_pflat ──
+ffsp_body:
+                lda     ff_pn2
+                beq     ffsp_out
+                sta     ff_pn
+                ldd     ff_pflat
+                jsr     plane_pri               ; ★ X = window address, slice mapped
+* ★ the doubled nibble byte, formed once for the whole run
+                lda     pri_color
+                asla
+                asla
+                asla
+                asla
+                ora     pri_color
+                sta     ff_pval
+* ── odd leading pixel: patch the LOW nibble, keeping the EVEN pixel beside it ──
+                lda     ff_pcx
+                bita    #1
+                beq     ffsp_whole
+                lda     ,x
+                anda    #$F0
+                ora     pri_color
+                sta     ,x+
+                dec     ff_pn
+                beq     ffsp_out
+ffsp_whole:
+                lda     ff_pn
+                lsra                            ; whole bytes = pixels / 2
+                beq     ffsp_tail
+                tfr     a,b
+                lda     ff_pval
+ffsp_lp:        sta     ,x+
+                decb
+                bne     ffsp_lp
+ffsp_tail:
+* ── odd trailing pixel: patch the HIGH nibble, keeping the ODD pixel beside it ──
+                lda     ff_pn
+                bita    #1
+                beq     ffsp_out
+                lda     ,x
+                anda    #$0F
+                ldb     pri_color
+                aslb
+                aslb
+                aslb
+                aslb
+                pshs    b
+                ora     ,s+
+                sta     ,x
+ffsp_out:       rts
+
+ff_pflat        fdb     0
+ff_pavail       fcb     0
+ff_pcx          fcb     0
+ff_prem         fcb     0
+ff_pn2          fcb     0
+ff_pchunk       fcb     0
+
+                else
+* ── flat: the original, unchanged, so no gate artifact moves [AC-8] ──
 ff_store_pri:
                 lda     ff_runn
                 beq     ffsp_out
@@ -1132,6 +1328,8 @@ ffsp_tail:
 ffsp_out:       rts
 
 ff_ptmp         fdb     0
+                endc
+
 ff_pn           fcb     0
 ff_pval         fcb     0
 * ═══════════════════════════════════════════════════════════════════════════════════════════
