@@ -33,58 +33,19 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
-# EGA's standard 16-colour RGB values, 8 bits per channel. 0x00 / 0x55 / 0xAA / 0xFF are the
-# only levels EGA uses, which is what makes a 2-bit-per-channel encoding exact rather than
-# approximate -- there is no rounding decision hidden anywhere in this conversion.
-EGA = [
-    ("black",         0x00, 0x00, 0x00),
-    ("blue",          0x00, 0x00, 0xAA),
-    ("green",         0x00, 0xAA, 0x00),
-    ("cyan",          0x00, 0xAA, 0xAA),
-    ("red",           0xAA, 0x00, 0x00),
-    ("magenta",       0xAA, 0x00, 0xAA),
-    ("brown",         0xAA, 0x55, 0x00),
-    ("light grey",    0xAA, 0xAA, 0xAA),
-    ("dark grey",     0x55, 0x55, 0x55),
-    ("light blue",    0x55, 0x55, 0xFF),
-    ("light green",   0x55, 0xFF, 0x55),
-    ("light cyan",    0x55, 0xFF, 0xFF),
-    ("light red",     0xFF, 0x55, 0x55),
-    ("light magenta", 0xFF, 0x55, 0xFF),
-    ("yellow",        0xFF, 0xFF, 0x55),
-    ("white",         0xFF, 0xFF, 0xFF),
-]
-
-LEVEL = {0x00: 0, 0x55: 1, 0xAA: 2, 0xFF: 3}
-
-
-def gime(r, g, b):
-    """Pack three 2-bit levels as R1 G1 B1 R0 G0 B0 [SockmasterGime.md FFB0-FFBF]."""
-    lr, lg, lb = LEVEL[r], LEVEL[g], LEVEL[b]
-    return (((lr >> 1) & 1) << 5 | ((lg >> 1) & 1) << 4 | ((lb >> 1) & 1) << 3
-            | (lr & 1) << 2 | (lg & 1) << 1 | (lb & 1))
-
-
-def table_from_source(path):
-    """Read agi_pal16 out of the assembly, so the check cannot drift from the shipped table."""
-    text = pathlib.Path(path).read_text(encoding="utf-8", errors="replace")
-    body = text.split("agi_pal16:", 1)[1]
-    vals = []
-    for line in body.splitlines()[1:]:
-        m = re.match(r"\s*fcb\s+\$([0-9A-Fa-f]{2})", line)
-        if not m:
-            if vals:
-                break
-            continue
-        vals.append(int(m.group(1), 16))
-        if len(vals) == 16:
-            break
-    return vals
+# ★★★★★ EGA, LEVEL, gime() and the assembly reader USED TO BE DEFINED HERE and are now imported
+# [T-P0-056b]. The EGA table was written out three times in this directory -- here,
+# pal_reference.py and comp_render.py -- and the assembly reader pointed at pic_probe.s, which is
+# where the GIME table used to live. Both facts now have one home each [CLAUDE.md §2F].
+# ★★ This file keeps its own job: presenting the derivation entry by entry, and comparing the
+# guest's readback against it. What it no longer does is restate the data it checks.
+from agi_palette import EGA, LEVEL, SOURCE, gime, table as table_from_source  # noqa: E402
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--source", default=str(ROOT / "src" / "harness" / "pic_probe.s"))
+    # ★ Defaults to the palette's one home; it named pic_probe.s until T-P0-056b.
+    ap.add_argument("--source", default=str(SOURCE))
     ap.add_argument("--readback", default="",
                     help="AC-11: build/pal/readback.txt from pal_gate.lua")
     a = ap.parse_args()
@@ -105,7 +66,7 @@ def main():
                  got if got is not None else 0xFF, mark))
     print()
     print("★ entry 6 (brown) derives as $%02X. A 'double the CGA bit' conversion would give $32"
-          % gime(0xAA, 0x55, 0x00))
+          % gime(*EGA[6][1:]))   # ★ brown FROM the table, not retyped beside it
     print("  (dark yellow) -- the note's named failure mode. The table has $%02X." % have[6])
     print()
     print("desk check: %s"

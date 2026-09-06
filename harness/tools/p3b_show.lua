@@ -99,7 +99,10 @@ end
 -- agi_pal16 once p3b needs it too; that move is the Orchestrator's to place.
 -- ═══════════════════════════════════════════════════════════════════════════════════════════
 local function read_pal16()
-    local fh = io.open("src/harness/pic_probe.s", "r")
+    -- ★★★ content/agi_palette.s is the palette's ONE HOME [CLAUDE.md §2F/§2B, T-P0-056b]. This
+    -- read named gfx.s, then pic_probe.s, and both were places the table happened to be rather
+    -- than where it belongs. It is now a file whose only purpose is to hold it.
+    local fh = io.open("content/agi_palette.s", "r")
     if not fh then return nil end
     local pal, inside = {}, false
     for line in fh:lines() do
@@ -126,7 +129,7 @@ local A_FB  = sym("p3_blk_vis") or sym("ph_blk_fb")
 -- ★★★ NAME THE TABLE IN THE LOG. The old line said "from gfx.s" and was accurate about a file
 -- that held the wrong table -- a provenance string is only useful if a reader can tell from it
 -- whether the RIGHT thing was loaded, so it now prints the entries as well as the source.
-print(string.format("palette: %s from pic_probe.s agi_pal16 [P4.4 AC-11/AC-12]%s   visible-plane byte=$%04X (%s)",
+print(string.format("palette: %s from content/agi_palette.s [P4.4 AC-11/AC-12]%s   visible-plane byte=$%04X (%s)",
                     PAL16 and "16 entries" or "★★★ NOT FOUND",
                     PAL16 and string.format("  idx2=$%02X idx6=$%02X idx15=$%02X",
                                             PAL16[3], PAL16[7], PAL16[16]) or "", A_FB or 0,

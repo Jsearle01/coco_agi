@@ -35,10 +35,10 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 W, H = 160, 168
 SCALE = 3          # ★ 160x168 is small on a modern display; nearest-neighbour, no smoothing
 
-EGA = [(0x00, 0x00, 0x00), (0x00, 0x00, 0xAA), (0x00, 0xAA, 0x00), (0x00, 0xAA, 0xAA),
-       (0xAA, 0x00, 0x00), (0xAA, 0x00, 0xAA), (0xAA, 0x55, 0x00), (0xAA, 0xAA, 0xAA),
-       (0x55, 0x55, 0x55), (0x55, 0x55, 0xFF), (0x55, 0xFF, 0x55), (0x55, 0xFF, 0xFF),
-       (0xFF, 0x55, 0x55), (0xFF, 0x55, 0xFF), (0xFF, 0xFF, 0x55), (0xFF, 0xFF, 0xFF)]
+# ★★★ THE THIRD COPY OF EGA'S PALETTE LIVED HERE, as bare tuples [T-P0-056b]. Same sixteen
+# colours as pal_check.py's and pal_reference.py's, written a third way. One home now
+# [CLAUDE.md §2F]; agi_palette.EGA_RGB is that table without the colour names.
+from agi_palette import EGA_RGB as EGA  # noqa: E402
 
 # ★★ THE PRIORITY RAMP IS DELIBERATELY NOT THE EGA PALETTE. Priority is depth, not colour, and
 # reusing the picture palette would invite reading it as a picture. Bands 0-2 are CONTROL data

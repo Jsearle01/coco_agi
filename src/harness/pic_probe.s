@@ -495,23 +495,13 @@ pal_rb_lp:      lda     ,y+
                 blo     pal_rb_lp
                 rts
 
-agi_pal16:
-                fcb     $00             ;  0 black
-                fcb     $08             ;  1 blue
-                fcb     $10             ;  2 green
-                fcb     $18             ;  3 cyan
-                fcb     $20             ;  4 red
-                fcb     $28             ;  5 magenta
-                fcb     $22             ;  6 brown      ★ (2,1,0), the odd one out
-                fcb     $38             ;  7 light grey
-                fcb     $07             ;  8 dark grey
-                fcb     $0F             ;  9 light blue
-                fcb     $17             ; 10 light green
-                fcb     $1F             ; 11 light cyan
-                fcb     $27             ; 12 light red
-                fcb     $2F             ; 13 light magenta
-                fcb     $37             ; 14 yellow
-                fcb     $3F             ; 15 white
+* ★★★★★ agi_pal16 IS NO LONGER DEFINED HERE. It lives in content/agi_palette.s and reaches this
+* file through hal_globals.s's include [CLAUDE.md §2F, §2B; T-P0-056b].
+* ★★★★ IT WAS DEFINED HERE, AND THAT IS WHY EVERY ROOM p3b DREW WAS THE WRONG COLOUR FOR FOUR
+* TASKS. The table sat inside a renderer probe, so the integration probe could not reach it and
+* hal_globals.s's mode 2 row pointed at the shared HAL's generic ramp instead [AD-125]. The
+* symbol resolves exactly as before; only its home moved.
+* ★★ pal_load and pal_readback above are unchanged and still gate it (AC-11 / AC-12).
 
 * ═══════════════════════════════════════════════════════════════════
 * vis_clear / pri_clear — THE AGI CANVAS IS WHITE-ON-RED, NOT BLACK

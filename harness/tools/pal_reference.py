@@ -36,25 +36,10 @@ import zlib
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
-# The same table pal_check.py derives from; EGA's 16 colours, 8 bits per channel.
-EGA = [
-    ("black",         0x00, 0x00, 0x00),
-    ("blue",          0x00, 0x00, 0xAA),
-    ("green",         0x00, 0xAA, 0x00),
-    ("cyan",          0x00, 0xAA, 0xAA),
-    ("red",           0xAA, 0x00, 0x00),
-    ("magenta",       0xAA, 0x00, 0xAA),
-    ("brown",         0xAA, 0x55, 0x00),
-    ("light grey",    0xAA, 0xAA, 0xAA),
-    ("dark grey",     0x55, 0x55, 0x55),
-    ("light blue",    0x55, 0x55, 0xFF),
-    ("light green",   0x55, 0xFF, 0x55),
-    ("light cyan",    0x55, 0xFF, 0xFF),
-    ("light red",     0xFF, 0x55, 0x55),
-    ("light magenta", 0xFF, 0x55, 0xFF),
-    ("yellow",        0xFF, 0xFF, 0x55),
-    ("white",         0xFF, 0xFF, 0xFF),
-]
+# ★★★ The comment here used to read "the same table pal_check.py derives from" -- which was true,
+# and was a copy anyway. **A comment saying two tables agree is not a mechanism that keeps them
+# agreeing.** One home now [CLAUDE.md §2F, T-P0-056b]; this file renders it.
+from agi_palette import EGA  # noqa: E402
 
 
 def ihdr_size(path):

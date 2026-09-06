@@ -99,12 +99,29 @@ s4_dest_row         equ $66     ; 16-bit scroll-blit destination row ($66/$67)
 *
 * Row layout is the SHARED contract, gfx.s GFX_MODE_ENTSZ = 7:
 *   +0 VRES  +1 stride  +2 size in WORDS  +4 palette ptr  +6 palette count
-* The palettes are shared and live in gfx.s.
+* Modes 0 and 1 use the palettes that are SHARED and live in gfx.s; AGI's own mode 2 uses
+* AGI's own palette, which is authored content and lives under content/ (see below).
                 ifdef   HAL_GFX_MODE_SERVICE
 
                 ifdef   OBJTARGET
                 section code
                 endc
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ AGI'S PALETTE, INCLUDED FROM ITS ONE HOME [CLAUDE.md §2F, §2B].
+* ★★★★ Mode 2's palette pointer below used to name gfx_pal16 -- the SHARED HAL's generic
+* 16-colour ramp -- with a comment saying AGI's own palette was "loaded by the engine at init,
+* not from here". **Nothing loaded it.** The engine does not exist yet, the renderer probe kept
+* a private copy, and the integration probe therefore drew every room through the HAL's ramp:
+* index 2 is EGA green and the ramp maps it to light grey, so foliage rendered as pale grey and
+* read as unfilled [AD-125, found by Jay's eye gate and by no byte gate].
+* ★★★ Pointing the row at the real table is what makes that unrepeatable: any build that selects
+* mode 2 through HAL_gfx_set_mode now gets AGI's palette by construction rather than by a caller
+* remembering to load it.
+* ★★ The include sits HERE, in a PROJECT_LOCAL file, so no shared file changes (§2M) and every
+* probe that includes hal_globals.s can resolve the symbol.
+                include "content/agi_palette.s"
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 
 GFX_MODE_MAX        equ 2           ; highest supported id — AGI ships 0, 1 and 2
 
@@ -130,8 +147,9 @@ gfx_mode_table:
         fcb     $3E                     ; mode 2: 320x200x16 VRES  [GIME-RM $FF99 LPF=01]
         fcb     160                     ;   160 bytes/row
         fdb     $3E80                   ;   32,000 B / 2 = $3E80 = 16,000 words
-        fdb     gfx_pal16               ;   shared palette; AGI's own palette is loaded by the
-                                        ;   engine at init (design §2.2), not from here
+        fdb     agi_pal16               ; ★ AGI's OWN palette, content/agi_palette.s -- gated at
+                                        ;   P4.4 (AC-11 readback, AC-12 Jay's eye gate). This row
+                                        ;   named gfx_pal16 until T-P0-056b [AD-125].
         fcb     16                      ;   palette regs $FFB0-$FFBF
 
                 ifdef   OBJTARGET

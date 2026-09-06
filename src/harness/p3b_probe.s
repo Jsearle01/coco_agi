@@ -217,7 +217,7 @@ P3_BLK_VISIBLE  equ     40              ; what the display shows and sprites com
 * landed it is only ever a destination for p3_present, so its initial contents are pure display
 * state -- and a white screen is the wrong display state to sit on for the ~7 s of the first
 * room's render. Jay: "i want video set and cleared to black as soon as possible after the load."
-* ★★★ Black is index 0 and index 0 is $00 in agi_pal16 [pic_probe.s:499], so a zeroed plane is
+* ★★★ Black is index 0 and index 0 is $00 in agi_pal16 [content/agi_palette.s], so a zeroed plane is
 * black under the real palette rather than only under a blanked one.
 * ★★ This does NOT touch the shadow plane or the priority plane: the per-room clear in
 * p3_room_check still whitens what the renderer draws on, so the renderer's contract is unchanged
