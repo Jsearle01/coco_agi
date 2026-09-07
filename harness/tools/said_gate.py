@@ -90,6 +90,85 @@ def build(game_dir, said_json, limit):
     return vocab, cases
 
 
+def build_tokenise(game_dir, limit):
+    """AC-4: gate the TOKENISER on its own, independent of said().
+
+    ★★★★★ WHY SEPARATELY. P6.2 §7.3 flagged it: the tokeniser was gated only THROUGH said()'s
+    results, and **a tokenise defect that produces the same IDs by a different route would pass**.
+    That is L-38's shape -- two things matching for different reasons. Here the comparison is the
+    ego word ID LIST itself, with said() reduced to a constant: every case uses the operand
+    pattern (1,), so the match result carries no information and cannot mask a tokenise defect.
+
+    ★★★★ THE INPUTS TARGET cleanUpInput() AND findWordInDictionary(), not said():
+      * separators   ,.?!();:[]{}  -> become spaces        [words.cpp:184]
+      * invalid      ' ` - \\ "     -> DELETED, not separated [words.cpp:205]
+      * "a" / "i" alone             -> IGNORE, occupy no slot [words.cpp:264]
+      * an unknown word             -> recorded, then parsing STOPS [words.cpp:374]
+      * multi-word dictionary entries and prefix collisions -> the LAST full match in bucket
+        order wins, which is the rule a "longest match" rewrite would get wrong
+      * case, leading/trailing/multiple spaces, empty input
+    ★★ The vocabulary supplies the words, so the cases are the title's own, not invented text.
+    """
+    wt = pathlib.Path(game_dir) / "WORDS.TOK"
+    d = words_mod.parse(wt.read_bytes())
+    vocab = ap.Vocabulary(d.words)
+
+    # words grouped so the generated inputs are real vocabulary, never invented text
+    plain, multi, ignorable = [], [], []
+    for w, wid, _l in d.words:
+        s = w.decode("latin-1")
+        if wid == 0:
+            ignorable.append(s)
+        elif " " in s:
+            multi.append(s)
+        else:
+            plain.append(s)
+
+    inputs = []
+    inputs.append("")                                    # empty -> no words, ENTERED_CLI false
+    inputs.append("   ")                                 # spaces only
+    for s in plain[:limit]:
+        inputs.append(s)                                 # one word
+        inputs.append(s.upper())                         # case folding
+        inputs.append("  " + s + "  ")                   # leading/trailing space
+        inputs.append(s + ",")                           # trailing separator
+        inputs.append(s + "'s")                          # apostrophe is DELETED, not a break
+        inputs.append("a " + s)                          # "a" ignored
+        inputs.append("i " + s)                          # "i" ignored
+        inputs.append("zzqq " + s)                       # unknown FIRST -> parsing stops
+        inputs.append(s + " zzqq")                       # unknown SECOND -> recorded, stops
+    for s in plain[:limit]:
+        for t in plain[:6]:
+            inputs.append(s + " " + t)                   # pairs, incl. prefix collisions
+    for s in multi[:limit]:
+        inputs.append(s)                                 # a multi-word dictionary entry
+        inputs.append(s + " " + (plain[0] if plain else "x"))
+    for s in ignorable[:40]:
+        inputs.append(s)                                 # id 0 -> occupies no slot at all
+        inputs.append(s + " " + (plain[0] if plain else "x"))
+    # ★★★★★ CAPPED AT 19 WORDS, AND THE CAP IS A MEASUREMENT. The first version generated
+    # 25-word inputs to probe past MAX_WORDS (20). **The oracle SEGFAULTS** -- exit 139, twice,
+    # reproducibly. words.cpp:367 writes `_egoWords[wordCount].id` with no bound check and
+    # agi.h:81 sizes that array at 20, so a 21st word writes off the end.
+    # ★★★★ P6.2 §7.4 recorded this as "the oracle's behaviour there is undefined; ours stops".
+    # It is stronger than that: **there is no reference behaviour because the reference dies.**
+    # T-P0-059 §1 declined gating it on the grounds that there is nothing to gate against --
+    # correct, and now evidenced rather than inferred.
+    # ★★ So the gate stays inside the array. Our implementation stopping at 20 is the safer
+    # divergence and is recorded, not gated.
+    for s in plain[:20]:
+        inputs.append((s + " ") * 19)                    # 19 words: inside MAX_WORDS = 20
+
+    # ★ said() is held constant at (1,) so this gate reports the TOKENISER and nothing else.
+    seen, cases = set(), []
+    for text in inputs:
+        if text in seen:
+            continue
+        seen.add(text)
+        cases.append(((1,), text))
+    return vocab, cases
+
+
 def build_synonyms(game_dir):
     """AC-8: one synonym class, EVERY spelling, end to end.
 
@@ -131,8 +210,14 @@ def ours(vocab, cases):
     return res
 
 
-def read_oracle(workdir):
-    p = pathlib.Path(workdir) / "oracle_parser_results.txt"
+def read_oracle(workdir, path=""):
+    """★★ Same record format either side, deliberately: "<n> ego=a,b,c -> r".
+
+    The 6809 probe writes it too [parser_gate.lua], so AC-7's port diff reuses this reader and
+    the same ours() -- **one comparison, two references**. A second reader would be a second
+    thing to get right, and the two sides could then differ in the reader rather than the parser.
+    """
+    p = pathlib.Path(path) if path else pathlib.Path(workdir) / "oracle_parser_results.txt"
     out = []
     for line in p.read_text(encoding="ascii", errors="replace").splitlines():
         if not line.strip():
@@ -154,6 +239,12 @@ def main():
     a_.add_argument("--emit", action="store_true")
     a_.add_argument("--check", action="store_true")
     a_.add_argument("--limit", type=int, default=400)
+    a_.add_argument("--results", default="",
+                    help="AC-7: diff against this results file instead of the oracle's")
+    a_.add_argument("--tokenise", action="store_true",
+                    help="AC-4: gate the tokeniser alone, said() held constant")
+    a_.add_argument("--fault-tokenise", action="store_true",
+                    help="AC-5: inject the tokeniser fault")
     a_.add_argument("--synonyms", action="store_true",
                     help="AC-8: gate the largest synonym class, every spelling")
     a_.add_argument("--fault", action="store_true",
@@ -163,6 +254,33 @@ def main():
     if a.fault:
         ap.FAULT_ANY_WORD = True
         print("★★★ FAULT INJECTED: operand 1 no longer means 'any word'")
+    if a.fault_tokenise:
+        ap.FAULT_LONGEST_MATCH = True
+        print("★★★ FAULT INJECTED: findWordInDictionary keeps the FIRST match, not the last")
+
+    if a.tokenise:
+        vocab, cases = build_tokenise(a.game_dir, a.limit)
+        if a.emit:
+            p, n = emit(cases, a.workdir)
+            print("wrote %s  (AC-4: %d tokeniser cases)" % (p, n))
+            return 0
+        mine = ours(vocab, cases)
+        theirs = read_oracle(a.workdir, a.results)
+        if len(mine) != len(theirs):
+            print("★★★ case count %d vs oracle %d" % (len(mine), len(theirs)))
+            return 1
+        bad = [i for i, ((e1, _r1), (e2, _r2)) in enumerate(zip(mine, theirs)) if e1 != e2]
+        nonempty = sum(1 for e, _r in theirs if e)
+        print("tokeniser cases   : %d" % len(mine))
+        print("  produced words  : %d cases tokenised to at least one word" % nonempty)
+        print("  ego-list differs: %d" % len(bad))
+        if bad:
+            i = bad[0]
+            print("★★★ first divergence at case %d: ours=%s oracle=%s"
+                  % (i, mine[i][0], theirs[i][0]))
+            return 1
+        print("★ %d of %d identical on the tokenised word list" % (len(mine), len(mine)))
+        return 0
 
     if a.synonyms:
         vocab, cases, wid, nsp = build_synonyms(a.game_dir)
@@ -171,7 +289,7 @@ def main():
             print("wrote %s  (AC-8: word id %d, %d spellings)" % (p, wid, nsp))
             return 0
         mine = ours(vocab, cases)
-        theirs = read_oracle(a.workdir)
+        theirs = read_oracle(a.workdir, a.results)
         if len(mine) != len(theirs):
             print("★★★ case count %d vs oracle %d" % (len(mine), len(theirs)))
             return 1
@@ -193,10 +311,15 @@ def main():
         return 0
 
     mine = ours(vocab, cases)
-    theirs = read_oracle(a.workdir)
+    theirs = read_oracle(a.workdir, a.results)
+    # ★★★★ NAME THE SIDE THAT IS ACTUALLY LOADED. --results swaps the right-hand reference from
+    # ScummVM's dump to the 6809 probe's, and the output went on printing "oracle" either way --
+    # so AC-7's runs read as a comparison against ScummVM that they were not. **A label is a
+    # claim about provenance**, and this one was wrong on every port run this task made.
+    other = "6809" if a.results else "oracle"
     if len(mine) != len(theirs):
-        print("★★★ case count %d vs oracle %d -- the oracle did not run every case"
-              % (len(mine), len(theirs)))
+        print("★★★ case count %d vs %s %d -- the %s did not run every case"
+              % (len(mine), other, len(theirs), other))
         return 1
 
     bad_ego = bad_res = 0
@@ -215,13 +338,13 @@ def main():
     matched = sum(1 for _e, r in theirs if r)
     print("cases            : %d   (%d distinct operand patterns)"
           % (total, len({c[0] for c in cases})))
-    print("oracle matched   : %d of %d" % (matched, total))
+    print("%-6s matched   : %d of %d" % (other, matched, total))
     print("tokenise differs : %d" % bad_ego)
     print("match differs    : %d" % bad_res)
     if first:
         i, kind, pat, e1, e2, r1, r2 = first
-        print("★★★ first divergence at case %d (%s): operands=%s ours ego=%s->%s "
-              "oracle ego=%s->%s" % (i, kind, list(pat), e1, r1, e2, r2))
+        print("★★★ first divergence at case %d (%s): operands=%s python ego=%s->%s "
+              "%s ego=%s->%s" % (i, kind, list(pat), e1, r1, other, e2, r2))
         return 1
     print("★ %d of %d identical on BOTH the tokenised words and the match result" % (total, total))
     return 0

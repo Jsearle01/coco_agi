@@ -62,6 +62,16 @@ DICT_IGNORE = 0                     # words.h:28
 # ★★ Off by default and set only by harness/tools/said_gate.py --fault.
 FAULT_ANY_WORD = False
 
+# ★★★★★ AC-5's SECOND FAULT, and it is deliberately one the said() gate would MISS.
+# FAULT_LONGEST_MATCH makes findWordInDictionary keep the FIRST full match instead of the last --
+# i.e. the "longest match" rewrite this module's header warns against. ★★★★ It changes which
+# dictionary entry wins only where one word is a PREFIX OF ANOTHER in the same bucket, and in
+# most of those cases both spellings share a word id (they are synonyms), so **the ego word
+# NUMBER is unchanged and said() cannot see it**. That is P6.2 §7.3's exact prediction --
+# "a tokenise defect that produces the same IDs by a different route" -- and it is why the
+# tokeniser needed a gate of its own [L-38].
+FAULT_LONGEST_MATCH = False
+
 # words.cpp:184 isCharSeparator
 SEPARATORS = set(" ,.?!();:[]{}")
 # words.cpp:205 isCharInvalid
@@ -137,6 +147,8 @@ class Vocabulary:
                     continue
                 end = start + wlen
                 if end >= n or lower[end] == " ":
+                    if FAULT_LONGEST_MATCH and found_len:
+                        continue        # ★ INJECTED: keep the FIRST match, not the last
                     word_id = wid
                     found_len = wlen
                     if left == found_len:

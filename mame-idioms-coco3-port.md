@@ -2521,3 +2521,67 @@ tapped the wrong 8 KB and confidently reported no render burst at all.
 ★ `install_write_tap` returns an object with `:remove()`, so a wide discovery tap can be
 installed for a short window and taken out again. Keep every tap in `_G` or it is
 garbage-collected and silently stops firing.
+
+---
+
+## 42. Reading your own symbols in a Lua harness: `require("lfs")`, and the map must be newer than the binary (P6.3)
+
+★★★★★ **A hex literal naming a variable inside your own assembled binary is a copy of a fact that
+has a producer, and when the producer moves it does not fail — it reports a different variable
+under the old name.** `parser_gate.lua` dumped three of the ported parser's cursors from
+`$21A9/$21AD/$20E6`, taken from an earlier build's map. The source grew two bytes; all three were
+now two bytes low. The dump printed `fpos=33849` — an offset of 33,849 into a 34-byte string,
+which is not a plausible wrong answer but the single most incriminating one the situation could
+produce, and it sent several rounds of investigation into a runaway cursor that did not exist.
+
+**Read the assembler's own map instead.** `lwasm --map=<file>` emits lines of the form
+`Symbol: <name> (<object>) = <HEX>`:
+
+```lua
+local sym = {}
+for line in io.lines(MAP) do
+    local n, v = line:match("^Symbol:%s+(%S+)%s+%b()%s+=%s+(%x+)")
+    if n then sym[n] = tonumber(v, 16) end
+end
+```
+
+★★ Make a missing symbol **fatal**, and resolve a reported PC to nearest-symbol-plus-offset —
+`par_fi_cmplp+4` needs no map lookup by the reader, and a stall report is read far more often
+than it is written.
+
+### 42a. ★★★★ `lfs` is NOT a global in MAME's Lua — it is only reachable via `require`
+
+Reading symbols from a map moves the staleness one file along: `lwasm` without `--map` leaves the
+old map beside a new `.bin` and every symbol is wrong again with nothing to say so. So the harness
+must check the map is at least as new as the binary — which needs file mtimes, which needs `lfs`.
+
+```
+lfs        = nil            <-- the GLOBAL does not exist
+require    = true
+attributes = function: ...  <-- but require("lfs") works
+```
+
+★★★★★ **A freshness guard written against the global `lfs` is inert.** It reads nil, falls through
+to whatever fallback its author wrote, and passes a deliberately stalened map — an assertion that
+cannot fire, which is the same defect class it was written to prevent, one file along. Use:
+
+```lua
+local lfs = select(2, pcall(require, "lfs"))
+local t = lfs and lfs.attributes(path, "modification")
+```
+
+★★★ **And break it before believing it.** The inert version was indistinguishable from the working
+one on a good run; it was caught only by touching the binary five minutes into the future and
+checking the guard actually refused. Two-sided: it must fire on a stale map AND on a missing one,
+and it must not fire on a fresh pair.
+
+### 42b. ★★★ A literal is right when it names a DECLARED CONTRACT, not an interior symbol
+
+Sweeping the other 24 Lua harnesses found 37 literals in the guest's code region and **none of them
+was this defect.** They name `equ` handshake and staging addresses — the DP blocks at
+`$0080`–`$009F` (`vm_probe.s`, `cel_probe.s`, `res_probe.s`, `pic_probe.s`), the `$2000` load
+address, buffer bases — which are fixed by design and do not move when the source grows. ★★ Those
+are the *right* thing to write as literals. `vm_sweep.lua` reads `icguard` at `0x008D` on one line
+and `SYM.vm_icguard` (`$21DE`) three lines away, which reads as exactly this bug and is not: the
+first is the probe's handshake slot, the second is the engine variable it mirrors. **Two addresses,
+two things, both correct.**
