@@ -22,6 +22,12 @@ param(
   # parameter of that name is bound to a PipelineReader and the script dies on a cast error
   # before it runs a line. Caught by running it, which is the only way this one shows up.
   [switch]$WithInput,
+  # ★★★★ -Headless: the SAME build, symbols and staging, driven by p3b_run.lua with no display.
+  # ★★★ It shares the whole preamble deliberately (§2F). The eye gate and the headless integration
+  # run differ in exactly two things -- which Lua drives it, and whether MAME gets a screen -- and
+  # duplicating the build/stage into a second script is how the two would drift into testing
+  # different programs. ★★ Headless also gets -nothrottle (§2U); the eye gate never does (§2U.2).
+  [switch]$Headless,
   [double]$Hold   = 3.0
 )
 $ErrorActionPreference = "Stop"
@@ -73,7 +79,41 @@ $env:P3B_STAGE = $stage
 $env:P3B_SYMBOLS = "build\p3b\symbols.txt"
 $env:P3B_CYCLES = "$Cycles"
 $env:P3B_HOLD = "$Hold"
-$env:P3B_OUT = "build\p3b_eye"
+$env:P3B_OUT = if ($Headless) { "build\p3b_headless" } else { "build\p3b_eye" }
+
+if ($Headless) {
+  # ═══════════════════════════════════════════════════════════════════════════════════════
+  # ★★★★ THE HEADLESS INTEGRATION RUN. p3b_run.lua directly -- no display script, so no room
+  # jump and no palette assertion from the host: the guest on its own, five subsystems, one
+  # machine. This is the arm that says whether the probe is HEALTHY, and it had no recorded
+  # invocation at all; every run of it in T-P0-060 was a hand-typed MAME line.
+  # ★★★ -seconds_to_run is a SESSION budget and therefore a clock charged to the whole run
+  # [idiom 43a's neighbour; gate_budget_check.sh measures the class]. 900 against a 160-cycle
+  # run that spends ~85 emulated seconds in a populated room is ~10x headroom, and the figure
+  # is stated here rather than left as a number nobody has weighed.
+  # ★★ -nothrottle: nothing in this arm is a human judgement (§2U); the eye-gate arm below
+  # never gets it (§2U.2).
+  $secs = if ($env:P3B_SECONDS) { $env:P3B_SECONDS } else { "900" }
+  C:\mame\mame.exe coco3 -video none -sound none -window -nomaximize -skip_gameinfo -nothrottle `
+    -seconds_to_run $secs `
+    -rompath C:/mame/roms -cfg_directory harness\mame-cfg `
+    -autoboot_script C:/Projects/coco_agi/harness/tools/p3b_run.lua -autoboot_delay 0 | Out-Null
+
+  # ★★★★★ ADJUDICATE, DO NOT JUST LAUNCH. run_gates.sh's own header: "a sweep that exits 0
+  # having written 90 .bin files looks exactly like a gate that passed." The run's own log is
+  # the adjudicator here -- a STUCK line, a non-zero err, or a missing completion line is a
+  # failure, and the exit code carries it so a caller can chain on it.
+  $log = "$($env:P3B_OUT)\run.log"
+  if (-not (Test-Path $log)) { "★★★ p3b: no run.log -- the launch produced nothing"; exit 1 }
+  $stuck = Select-String -Path $log -Pattern '★★★ STUCK|â˜…â˜…â˜… STUCK' -Quiet
+  $done  = Select-String -Path $log -Pattern 'cycles complete|cycles in ' -Quiet
+  Select-String -Path $log -Pattern 'OK prompt|program \d+ bytes|vocabulary |par_vocab written|COMMAND TYPED|STUCK|cycles in|final room' |
+    ForEach-Object { $_.Line }
+  if ($stuck) { "★★★ p3b FAILED -- the watchdog fired"; exit 1 }
+  if (-not $done) { "★★★ p3b FAILED -- no completion line; the run did not reach $Cycles cycles"; exit 1 }
+  "★ p3b headless: $Cycles cycles, no stall"
+  exit 0
+}
 
 # â˜…â˜…â˜…â˜…â˜… NO -nothrottle. Â§2U.2: "an eye gate nobody can watch at 2869% is not an eye gate", and
 # p3b_show.lua carries the same standing note. RGB, screen_config=1, per Â§4's monitor rule.

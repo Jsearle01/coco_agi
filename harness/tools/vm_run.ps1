@@ -24,7 +24,27 @@ $CFG    = if ($env:VM_MAME_CFG)   { $env:VM_MAME_CFG }   else { "harness\mame-cf
 $VM_GATE_TITLES = @("Kingquest1","Kingquest2","Kingquest3",
                     "SpaceQuest-1","SpaceQuest-2","PoliceQuest1",
                     "larry1","BlackCauldron","MixedUpMotherGoose")
-$TITLES = if ($env:VM_TITLES) { $env:VM_TITLES -split "," } else { $VM_GATE_TITLES }
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ THE PARSER ARM HAS ITS OWN TITLE SET, AND IT IS DECLARED HERE RATHER THAN TYPED.
+# T-P0-060's AC-4 ran three titles and the choice lived on a command line -- which is the exact
+# defect the block above is about, freshly minted one task later: "the scope of a gate is part of
+# its definition and it kept living in an environment variable."
+# ★★★★ WHY THESE THREE AND NOT THE NINE. Kingquest3 is EXCLUDED and the reason is a measurement:
+# fed a line, the REFERENCE raises on `restart.game`, which dispatch.py declines to implement
+# because it re-enters the whole game loop and would silently restart the state diff mid-run.
+# Kingquest1 also reaches `save.game` ($7D) and `restore.game` ($7E) on other lines.
+# ★★★ **Without input an AGI game sits in attract mode and never takes those branches**, so the
+# nine-title gate has never executed them. The parser is the door to a part of the command space
+# no gate has covered -- an open item (T-P0-060 §7.4), not a reason to hide the titles.
+# ★★ The remaining five are simply not yet measured with input; widening this list is T-P0-060
+# §8.5 and should be done by RUNNING them, not by assuming they behave like these three.
+$VM_PARSER_TITLES = @("Kingquest1","Kingquest2","SpaceQuest-1")
+$TITLES = if ($env:VM_TITLES) { $env:VM_TITLES -split "," }
+          elseif ($env:VM_INPUT) { $VM_PARSER_TITLES }
+          else { $VM_GATE_TITLES }
+if ($env:VM_INPUT -and -not $env:VM_TITLES) {
+  "★ parser arm: $($VM_PARSER_TITLES -join ', ')  (Kingquest3 excluded -- the reference raises on restart.game when fed)"
+}
 $CYCLES = if ($env:VM_CYCLES) { $env:VM_CYCLES } else { "600" }
 
 $ASMARGS = @("--format=raw","--output=build/vm_probe.bin","--list=build/vm_probe.lst",
