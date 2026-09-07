@@ -312,9 +312,32 @@ we do not do, and ours includes counters theirs did not have (§3.A).
    cheap** — render those two pictures under `pic_nc_pk` and compare directly.
 3. ★★★★ **My tap's multiplicity is unexplained.** `pic_render_at` fires 704 times for two renders.
    Until that is understood, the fetch/render split is a SHAPE and not a measurement (§3.C).
-4. ★★★ **T2 depends on a room JUMP**, not on the game reaching a room itself. Kingquest1 never
-   leaves room 83 in 300 cycles. **A player would not see room 1 at 17.9 s; they would see the
-   title screen and then whatever the game does next**, which is unmeasured.
+4. ★★★★★ **T2 depends on a room JUMP — and the jump is a faithful stand-in, which is the OPPOSITE
+   of what this flag first said.** ★★★★ **CORRECTED after Jay challenged it** (*"p3b jumps from the
+   title screen to the next room"*). The first version read `p3b_room.lua`'s recorded fact —
+   Kingquest1 never leaves room 83 in 300 cycles — as "the game does not advance, so a player would
+   not see room 1 at 17.9 s". **I took the observation and never asked WHY it sits there.**
+
+   ★★★★ **Measured on the reference, 300 cycles, no input fed:**
+
+   ```
+   rooms visited (var 0 -> cycles): {0: 1, 83: 299}
+      test $0C  controller          3600      (12 per cycle)
+      test $0D  have.key             300      (exactly ONE per cycle)
+      test $0E  said                 600      (2 per cycle)
+   VAR_KEY (var 19) at end : 0       flag 2 ENTERED_CLI : False
+   ```
+
+   ★★★★★ **Room 83 is not stuck — it is POLLING FOR INPUT every cycle and getting none.**
+   `have.key` exactly once per cycle is a wait-for-key loop, the same signature as Kingquest3's
+   logic 102 [P6.6 §3.E], and `controller` twelve times per cycle is the menu path AD-134's Alt
+   would drive. **All three answer false forever because there is no input source** — which is
+   P6.6 §7.1's opcode door seen from the other side.
+
+   ★★★ **So the jump substitutes for the keypress a player would make**, and T2's second half —
+   the 9.9 s room render — is the machine's time and is real. ★★ **What is not the machine's is
+   the gap before it:** a player presses a key when they choose. **T2's 17.94 s should be read as
+   "t0 plus a keypress at cycle 8", not as an elapsed time a player would sit through.**
 5. ★★ **The gate rows were cited, not re-run** — no gated file is touched by this task, but that is
    weaker than P6.5's fresh run [§2T.3].
 6. **Carried:** `CP_CEL`'s overrun — ★★★ **and p3b now has 3 bytes free, so its trigger ("before
@@ -328,7 +351,10 @@ we do not do, and ours includes counters theirs did not have (§3.A).
 2. ★★★★ **Pair the render measurement** (§7.2) — two pictures, both builds, direct.
 3. ★★★ **Explain the read-tap multiplicity** or retire the tap for anything but shape (§7.3).
 4. ★★★ **`CP_CEL` / p3b's 3 free bytes** — the next p3b code change cannot happen without it.
-5. ★★ **What the game does after the title screen on its own**, for a T2 a player would recognise.
+5. ★★★ **Re-time T2 once the input path exists** (P6.6's task). §7.4 measured that room 83 polls
+   `have.key` once and `controller` twelve times per cycle, so the game is waiting for a key —
+   **the jump already substitutes for it faithfully**, and a real keypress would only change WHEN
+   the 9.9 s render starts, not what it costs.
 
 ---
 
