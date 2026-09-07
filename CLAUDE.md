@@ -55,7 +55,7 @@ machine-and-methodology discipline that took thirteen amendments to arrive at, a
 precedent that a rewrite would lose. **Five sections changed and seven were added.** §2 is rewritten for a
 reimplementation oracle; §2K inverts to 512 KB with its reasoning preserved verbatim; §2I becomes
 behavioural correctness; §2G becomes two siblings under a synchronised HAL; **§2M–§2S are new.** Design
-authority is `agi-coco3-design-v0.3.md`.
+authority is `docs/project/agi-coco3-design-v1.2.md`.
 
 ★ **Read §2M and §2N before touching any HAL or engine file.** They are the two rules whose earlier
 versions were wrong three times, and the corrected versions constrain day-one work.
