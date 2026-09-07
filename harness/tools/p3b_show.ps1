@@ -1,16 +1,16 @@
-﻿# harness/tools/p3b_show.ps1 -- Â§4A's EYE GATE, with a recorded invocation. [T-P0-060 AC-1]
+# harness/tools/p3b_show.ps1 -- §4A's EYE GATE, with a recorded invocation. [T-P0-060 AC-1]
 #
-# â˜…â˜…â˜…â˜…â˜… THIS RUNNER DID NOT EXIST, AND THE EYE GATE IS THE GATE THAT DECIDES DELIVERY.
+# ★★★★★ THIS RUNNER DID NOT EXIST, AND THE EYE GATE IS THE GATE THAT DECIDES DELIVERY.
 # p3b_show.lua reads P3B_PROG, P3B_STAGE and P3B_SYMBOLS from the environment, and
 # build/p3b/symbols.txt was produced by a hand-typed vm_symbols.py line that is in no file. That
-# is the L-45 defect on the one gate whose result is a human's judgement -- and Â§2U.2 excludes
+# is the L-45 defect on the one gate whose result is a human's judgement -- and §2U.2 excludes
 # this gate from -nothrottle precisely because a person has to watch it, so it is also the gate
 # that costs the most to re-run from a guess.
-# â˜…â˜…â˜… Same disease this project has now named five times (res 74-vs-1,264, cel 1-title-vs-6, pic
+# ★★★ Same disease this project has now named five times (res 74-vs-1,264, cel 1-title-vs-6, pic
 # without picgate, the VM's nine titles in an env var, and this). **The scope and the invocation
 # of a gate are part of its definition.**
 #
-# â˜…â˜…â˜…â˜… IT DELIBERATELY DOES NOT PASS -nothrottle [Â§2U.2]. An eye gate nobody can watch at 2869%
+# ★★★★ IT DELIBERATELY DOES NOT PASS -nothrottle [§2U.2]. An eye gate nobody can watch at 2869%
 # is not an eye gate.
 #
 # usage:
@@ -18,7 +18,7 @@
 param(
   [string]$Title  = $(if ($env:P3B_TITLE)  { $env:P3B_TITLE }  else { "Kingquest1" }),
   [int]   $Cycles = $(if ($env:P3B_NCYC)   { [int]$env:P3B_NCYC } else { 120 }),
-  # â˜… NOT -Input. `$Input` is a PowerShell AUTOMATIC VARIABLE (the pipeline enumerator), so a
+  # ★ NOT -Input. `$Input` is a PowerShell AUTOMATIC VARIABLE (the pipeline enumerator), so a
   # parameter of that name is bound to a PipelineReader and the script dies on a cast error
   # before it runs a line. Caught by running it, which is the only way this one shows up.
   [switch]$WithInput,
@@ -37,7 +37,7 @@ $GAMES = if ($env:VM_GAMES_ROOT) { $env:VM_GAMES_ROOT } else { "C:\Projects\agi-
 $stage = "build\vm_stage\$Title"
 $LW    = "C:\WIN_LWTools\lwasm.exe"
 
-# â˜…â˜… THE FLAG SET IS gates.manifest's p3b ROW, NOT A GUESS. PLANE_WIN_MMU comes from the SOURCE
+# ★★ THE FLAG SET IS gates.manifest's p3b ROW, NOT A GUESS. PLANE_WIN_MMU comes from the SOURCE
 # (p3b_probe.s:65) and passing it here is a multiply-defined error [gates.manifest].
 $FLAGS = @("-DHAL_GFX_MODE_SERVICE","-DHAL_SYS_FAST_CLOCK","-DPLANE_WINDOWED","-DPRI_PACKED")
 & $LW --format=raw --output=build/p3b_probe_pk_fresh.bin --map=build/p3b_probe_pk.map -I. @FLAGS src/harness/p3b_probe.s
@@ -45,19 +45,19 @@ if ($LASTEXITCODE -ne 0) { throw "p3b assemble failed" }
 "p3b_probe: $((Get-Item build\p3b_probe_pk_fresh.bin).Length) bytes"
 "  [source-tree $(& python harness\tools\gate_audit.py --hash src/harness/p3b_probe.s)]"
 
-# â˜…â˜…â˜… SYMBOLS FROM THE BUILD'S MAP. P3_INBUF is an INTERIOR address -- it follows parser.s
+# ★★★ SYMBOLS FROM THE BUILD'S MAP. P3_INBUF is an INTERIOR address -- it follows parser.s
 # inside MAP_RESERVED and moves whenever either grows -- so p3b_run.lua refuses to stage input
-# without it rather than falling back to a literal [P6.3 Â§3.F.2].
+# without it rather than falling back to a literal [P6.3 §3.F.2].
 New-Item -ItemType Directory -Force build\p3b | Out-Null
 $WANT = @("res_volbase","res_slicebase","res_curblk","vm_quit","vm_badop","vm_cycle","vm_tdelay",
           "res_err","ph_blk_fb","ph_blk_pri","par_vocab","P3_INBUF","P3_FEED","P3_VOCAB_BAD","P3_VOCAB","P3_VOCAB_END","P3_CODE_END","P3_PARSER_BASE","P3_PARSER_TOTAL")
 python harness\tools\vm_symbols.py build\p3b_probe_pk.map --out build\p3b\symbols.txt --want @WANT
 if ($LASTEXITCODE -ne 0) { throw "symbols missing" }
 
-# â˜…â˜…â˜…â˜… THE SAME TWO FILES THE BYTE GATE READS. vm_stage.py writes words.tok and input.txt into
+# ★★★★ THE SAME TWO FILES THE BYTE GATE READS. vm_stage.py writes words.tok and input.txt into
 # the stage directory from the game and from vm_input_script.py; nothing here synthesises text,
-# so what Jay watches and what vm_diff.py compares cannot drift apart (Â§2O.1, applied to input).
-# â˜…â˜… Cleared first [L-92]: a script left behind by another title would feed the WRONG game's
+# so what Jay watches and what vm_diff.py compares cannot drift apart (§2O.1, applied to input).
+# ★★ Cleared first [L-92]: a script left behind by another title would feed the WRONG game's
 # words into this one, and the screen would be wrong for a reason nobody would look for here.
 Remove-Item -Force -ErrorAction SilentlyContinue "$stage\input.txt", "$stage\words.tok", "$stage\input.gen.txt"
 $stageArgs = @((Join-Path $GAMES $Title), "--out", $stage, "--cycles", "$Cycles")
@@ -105,7 +105,7 @@ if ($Headless) {
   # failure, and the exit code carries it so a caller can chain on it.
   $log = "$($env:P3B_OUT)\run.log"
   if (-not (Test-Path $log)) { "★★★ p3b: no run.log -- the launch produced nothing"; exit 1 }
-  $stuck = Select-String -Path $log -Pattern '★★★ STUCK|â˜…â˜…â˜… STUCK' -Quiet
+  $stuck = Select-String -Path $log -Pattern '★★★ STUCK|★★★ STUCK' -Quiet
   $done  = Select-String -Path $log -Pattern 'cycles complete|cycles in ' -Quiet
   Select-String -Path $log -Pattern 'OK prompt|program \d+ bytes|vocabulary |par_vocab written|COMMAND TYPED|STUCK|cycles in|final room' |
     ForEach-Object { $_.Line }
@@ -115,8 +115,8 @@ if ($Headless) {
   exit 0
 }
 
-# â˜…â˜…â˜…â˜…â˜… NO -nothrottle. Â§2U.2: "an eye gate nobody can watch at 2869% is not an eye gate", and
-# p3b_show.lua carries the same standing note. RGB, screen_config=1, per Â§4's monitor rule.
+# ★★★★★ NO -nothrottle. §2U.2: "an eye gate nobody can watch at 2869% is not an eye gate", and
+# p3b_show.lua carries the same standing note. RGB, screen_config=1, per §4's monitor rule.
 C:\mame\mame.exe coco3 -window -nomaximize -skip_gameinfo `
   -rompath C:/mame/roms -cfg_directory harness\mame-cfg `
   -autoboot_script C:/Projects/coco_agi/harness/tools/p3b_show.lua -autoboot_delay 0

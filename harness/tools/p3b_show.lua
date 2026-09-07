@@ -1,14 +1,14 @@
-﻿-- harness/tools/p3b_show.lua -- POINT THE DISPLAY AT WHAT THE GUEST ALREADY COMPOSITED.
+-- harness/tools/p3b_show.lua -- POINT THE DISPLAY AT WHAT THE GUEST ALREADY COMPOSITED.
 --
--- â˜…â˜…â˜…â˜…â˜… WHAT THIS IS AND, MORE IMPORTANTLY, WHAT IT IS NOT.
+-- ★★★★★ WHAT THIS IS AND, MORE IMPORTANTLY, WHAT IT IS NOT.
 -- It does NOT give the port a present path. The port still cannot display anything on its own, and
--- AD-110 Â§3.F's finding stands unchanged. This is the HARNESS pointing the GIME at the planes the
+-- AD-110 §3.F's finding stands unchanged. This is the HARNESS pointing the GIME at the planes the
 -- guest wrote, so a human can watch the compositing that the byte gates already proved correct.
--- â˜…â˜…â˜…â˜… The distinction matters and must survive into the report: **the pixels are the guest's, the
+-- ★★★★ The distinction matters and must survive into the report: **the pixels are the guest's, the
 -- decision to display them is ours.** A real CoCo3 running this port standalone would still show
 -- nothing.
 --
--- â˜…â˜…â˜…â˜…â˜… WHY THE HARNESS AND NOT THE PROBE. T-P0-050's AC-2 asks for HAL_gfx_swap, and measurement
+-- ★★★★★ WHY THE HARNESS AND NOT THE PROBE. T-P0-050's AC-2 asks for HAL_gfx_swap, and measurement
 -- says it cannot serve here:
 --   * p3b allocates ph_blk_pri=0 (blocks 0-1) and ph_blk_fb=2 (blocks 2-5) [p3b_probe.s:179-181].
 --   * HAL_gfx_swap writes VOFFSET GFX_DB_A_VOFF/$4000 or B/$5000 -> physical $20000/$28000, i.e.
@@ -17,16 +17,16 @@
 --     under the phase discipline [gfx.s:576-582 vs mmu_phase.s:49-56].
 --   * And the mode/palette half lives in HAL_gfx_set_mode, which maps buffer A to $8000 --
 --     MAP_ARENA_WIN, where p3b keeps the LOGIC it is interpreting [memmap.inc, gfx.s:469-478].
--- â˜…â˜…â˜… Each of those is a change to shared HAL or to the phase map, which is T-P0-050 trigger 1 and
+-- ★★★ Each of those is a change to shared HAL or to the phase map, which is T-P0-050 trigger 1 and
 -- trigger 3 and belongs to a dispatch that gates it. **This file changes neither.**
 --
--- â˜…â˜… WHAT IT WRITES, and every value is read from the project rather than chosen here:
+-- ★★ WHAT IT WRITES, and every value is read from the project rather than chosen here:
 --   $FF98=$80 VMODE, $FF99=$3E VRES   mode 2, from gfx_mode_table [hal_globals.s:124-129]
 --   $FFB0-$FFBF                        the guest's OWN gfx_pal16, read out of its memory
 --   $FF9D/$FF9E VOFFSET                ph_blk_fb * 1024, read out of the guest's own allocator byte
--- â˜…â˜…â˜… Mode BEFORE palette is a documented constraint, not a preference: palette writes do not latch
+-- ★★★ Mode BEFORE palette is a documented constraint, not a preference: palette writes do not latch
 -- until the video mode is final [gfx.s:145-148, Constraint B].
--- â˜… Re-asserted every frame rather than once, so a guest write cannot silently undo the display.
+-- ★ Re-asserted every frame rather than once, so a guest write cannot silently undo the display.
 --
 -- usage:  P3B_ROOM=1 SHOW_SNAP=1 mame ... -autoboot_script harness/tools/p3b_show.lua
 
@@ -49,8 +49,8 @@ local m    = manager.machine
 local cpu  = m.devices[":maincpu"]
 local prog = cpu.spaces["program"]
 
--- â˜… Monitor type -> RGB. Same idiom as pic_sweep.lua:67-76; the AGI palette is undefined on
--- composite (Â§11l, design Â§2.2), so a capture taken there would be a picture of the wrong machine.
+-- ★ Monitor type -> RGB. Same idiom as pic_sweep.lua:67-76; the AGI palette is undefined on
+-- composite (§11l, design §2.2), so a capture taken there would be a picture of the wrong machine.
 pcall(function()
     local port = m.ioport.ports[":screen_config"]
     if port then
@@ -61,7 +61,7 @@ pcall(function()
     end
 end)
 
--- â˜…â˜… Symbols from the build's own map, never hardcoded: ph_blk_fb is an ALLOCATED block and
+-- ★★ Symbols from the build's own map, never hardcoded: ph_blk_fb is an ALLOCATED block and
 -- gfx_pal16's address moves with the binary [mmu_phase.s:29-31 -- a hard-coded block is the P3.10
 -- defect].
 local function sym(name)
@@ -152,7 +152,7 @@ local shots, armed, last_snap_cycle = 0, -1, -1
 
 _G._show = emu.add_machine_frame_notifier(function()
     local n = prog:read_u8(CYCLE) * 256 + prog:read_u8(CYCLE + 1)
-    -- â˜… Same guard as p3b_room.lua: RAM before the probe zeroes it reads as 65535, and acting on
+    -- ★ Same guard as p3b_room.lua: RAM before the probe zeroes it reads as 65535, and acting on
     -- that once cost a run that reported a successful room jump and never changed room.
     if n < 2 or n > 4096 then return end
 
@@ -180,7 +180,7 @@ _G._show = emu.add_machine_frame_notifier(function()
         local voff = blk * 1024
         prog:write_u8(0xFF9D, (voff >> 8) & 0xFF)
         prog:write_u8(0xFF9E, voff & 0xFF)
-        -- â˜…â˜…â˜… REPORT EVERY CHANGE, NOT JUST THE FIRST. The first version printed once and latched,
+        -- ★★★ REPORT EVERY CHANGE, NOT JUST THE FIRST. The first version printed once and latched,
         -- and its one line said ph_blk_fb=0 -- read before the guest's allocator had run, which
         -- would have pointed the display at block 0, the PRIORITY plane, and been indistinguishable
         -- from a correct capture to anyone not reading the log [L-37].
