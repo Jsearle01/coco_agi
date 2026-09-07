@@ -71,6 +71,28 @@ VM_OBJ          equ     $4240           ; 255 entries x 32 bytes
 VM_OBJ_MAX      equ     255
 VM_OBJ_END      equ     VM_OBJ+VM_OBJ_MAX*32            ; $6220 -- 255 x 32 from $4240
 
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ VM_OBJ_SCAN -- THE ABLATION BOUND FOR P6.10's AC-2/AC-3/AC-4. MEASUREMENT ONLY.
+* vm_check_all_motions and vm_update_objs both open `ldx #VM_OBJ / ldb #VM_OBJ_MAX` and walk
+* EVERY ONE OF THE 255 SLOTS on every cycle, testing a flag and skipping the inactive ones. So
+* their traversal is a CONSTANT and only their bodies are per-object -- which makes "O(active
+* objects)" true of the cost and false of the loop.
+* ★★★★ WHY A BOUND AND NOT AN `ifdef` ROUND THE CALLS. Skipping either call outright stops
+* objects moving and updating, which changes the VM's whole trajectory: a later cycle interprets
+* different bytecode, opcount moves, and the arm has changed several variables at once [L-73 --
+* an ablation can exonerate the wrong component when both arms move the same harness variable].
+* ★★★★★ LOWERING THE BOUND MOVES EXACTLY ONE THING: how many EMPTY slots are walked. AGI's ego
+* is object 0 and a room's objects are low-numbered, so with every active object below the bound
+* the two arms must be BYTE-IDENTICAL on the 288-byte state diff -- and that identity is the
+* proof the ablation changed no behaviour, rather than an assumption that it did not.
+* ★★★ It is therefore its own check: if the diff moves, the bound cut a live object and the
+* timing figure from that arm is void. **The gate says whether the measurement is admissible.**
+* ★★ Default is VM_OBJ_MAX, so an ordinary build is HEAD's build exactly. Recon only -- §2 of
+* T-P0-066 does not authorise changing the shipped bound, and this does not change it.
+                ifndef  VM_OBJ_SCAN
+VM_OBJ_SCAN     equ     VM_OBJ_MAX
+                endc
+
 * ★★ AC-5 COVERAGE: one byte per command opcode, incremented on dispatch. Above VM_OBJ, which
 * ends at $9220 -- NOT $9200, an arithmetic slip that cost a debugging session when a trace
 * buffer was placed there and the object table wrote through it.

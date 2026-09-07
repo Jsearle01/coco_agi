@@ -452,7 +452,7 @@ VM_MOT_ACTIVE_L equ     fAnimated+fUpdate+fDrawn        ; $51 -- all three bits 
 
 vm_check_all_motions:
                 ldx     #VM_OBJ
-                ldb     #VM_OBJ_MAX
+                ldb     #VM_OBJ_SCAN            ; ★ = VM_OBJ_MAX unless ablated [vm_state.s]
 vm_cam_lp:      pshs    b
                 lda     VMO_FLAGS+1,x
                 anda    #VM_MOT_ACTIVE_L

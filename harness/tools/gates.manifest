@@ -36,6 +36,19 @@ res	src/harness/res_probe.s	build/res_probe.bin	-DHAL_GFX_MODE_SERVICE	purpose=c
 cel	src/harness/cel_probe.s	build/cel_probe.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK	purpose=correctness
 comp	src/harness/comp_probe.s	build/comp_probe.bin	purpose=correctness
 vm	src/harness/vm_probe.s	build/vm_probe.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK	purpose=correctness
+# ★★★★★ AD-140 SAID THE `vm` ROW IS purpose=correctness WHILE THE HEADLINE VM TIMING FIGURE COMES
+# FROM IT. The premise is right and FLIPPING THE ROW WOULD BE WRONG: the 9/9 state diff genuinely
+# is a correctness gate, and flag_diff.py deliberately exempts those from EXPECTED_ON because "the
+# clock cannot change a byte and the counters cannot" (line 121). Flipping it would raise a false
+# alarm on the gate and still not describe the timing build.
+# ★★★★ THE DEFECT IS A MISSING ROW, NOT A WRONG FIELD. The timing figure comes from a DIFFERENT
+# build of the same source -- the VM_TIMED free-run, which the manifest did not list at all, so
+# HAL_SYS_FAST_CLOCK was never asserted for it. That is exactly the absence AD-100 cost a task to.
+# ★★★ VM_NOCOUNT is deliberately NOT expected-on here: it is measured at 1.44% [P3b.2] and 3.40%
+# [P4.6], which is the ablation class, not PIC_NOCOUNT's 2.16x "your figure is not comparable"
+# class. ★★ A P6.10 figure quoted from this row therefore carries counters, and carries a stated
+# 1.4-3.4% instrumentation share rather than a silent one.
+vm_timed	src/harness/vm_probe.s	build/vm_probe.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK	VM_TIMED=N free-run; P6.10: 67.802 ms/cycle room 83 (0 obj), 113.495 room 1 (4 obj), counters IN	purpose=timing
 # ★★★★★ T-P0-054 AC-3: p3b WAS THE ONE PROBE THIS FILE DID NOT LIST, and it is the integration
 # probe -- 48,537 bytes of source and sixteen p3_* routines built by no gate at all. Every defect
 # of the last four tasks lived here (p3_clear_planes' 2-byte clear, the shadow buffer, the byte in

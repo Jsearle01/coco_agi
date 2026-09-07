@@ -52,6 +52,13 @@ $CYCLES = if ($env:VM_CYCLES) { $env:VM_CYCLES } else { "600" }
 $ASMARGS = @("--format=raw","--output=build/vm_probe.bin","--list=build/vm_probe.lst",
              "--map=build/vm_probe.map","-I.","-DHAL_GFX_MODE_SERVICE","-DHAL_SYS_FAST_CLOCK")
 if ($env:VM_TRACE) { $ASMARGS += "-DVM_TRACE" }
+# ★★★★★ P6.10 AC-2/AC-3/AC-4: the object-scan ablation bound. vm_check_all_motions and
+# vm_update_objs walk all 255 SLOTS every cycle; VM_OBJ_SCAN=<n> walks n instead. ★★★★ It moves
+# exactly one variable -- how many EMPTY slots are traversed -- so with every active object below
+# the bound the state diff must stay BYTE-IDENTICAL, and that identity is what makes the timing
+# figure admissible rather than assumed [L-73]. ★★★ If the diff moves, the bound cut a live
+# object and that arm's number is void. Default unset = VM_OBJ_MAX = HEAD's build.
+if ($env:VM_OBJ_SCAN) { $ASMARGS += "-DVM_OBJ_SCAN=$($env:VM_OBJ_SCAN)"; "★ OBJECT-SCAN ABLATION: VM_OBJ_SCAN=$($env:VM_OBJ_SCAN) (default 255) -- state diff must stay byte-identical or the arm is void" }
 # ★★★★★ THE VBL CLOCK ARM [Jay's ruling AD-138]. VM_VBLCLOCK=1 runs VAR_SECONDS off the CoCo3's
 # real 59.92 Hz vertical-sync interrupt instead of the cycle-derived virtual counter. Unset,
 # nothing changes and the nine-title gate is HEAD's gate exactly -- which is the arm L-79 requires
@@ -85,7 +92,11 @@ $WANT = @("res_volbase","res_slicebase","res_curblk","vm_icguard","res_depth","r
           "vm_exitall","vm_quit","res_err","vm_curlogic","vm_badop","vm_badlogic","vm_seed","vm_acc","vm_rndmax","vm_rndlo","vm_divisor","vm_gfxmode",
           # ★★★ T-P0-060: the parser's own addresses. par_vocab is what makes the port live;
           # the three counters are the wiring's coverage. From the MAP, never a literal.
-          "par_vocab","vm_saidn","vm_saidm","vm_fedn")
+          "par_vocab","vm_saidn","vm_saidm","vm_fedn",
+          # ★★★★★ P6.10 AC-3: the MEASURED object count. vm_update_objs increments vm_changecnt
+          # once per ACTIVE object every cycle, so it is the scaling curve's x-axis -- and reading
+          # it is what stops "room 1 has four objects" being an assumption carried into a graph.
+          "vm_changecnt")
 if ($env:VM_TRACE) { $WANT += @("vmtr_buf","vmtr_idx","vmtr_from","vmtr_logic","vmtr_seen") }
 python harness\tools\vm_symbols.py build\vm_probe.map --out build\vm_stage\symbols.txt --want @WANT
 if ($LASTEXITCODE -ne 0) { throw "symbols missing" }

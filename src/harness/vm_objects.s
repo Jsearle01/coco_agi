@@ -41,7 +41,7 @@ vm_dir_dy       equ     VMT_DIR_DY
 vm_update_objs:
                 clr     vm_changecnt
                 ldx     #VM_OBJ
-                ldb     #VM_OBJ_MAX
+                ldb     #VM_OBJ_SCAN            ; ★ = VM_OBJ_MAX unless ablated [vm_state.s]
 vm_uo_lp:       pshs    b
                 lda     VMO_FLAGS+1,x
                 anda    #VM_ACTIVE_L

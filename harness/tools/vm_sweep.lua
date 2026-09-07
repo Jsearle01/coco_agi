@@ -371,6 +371,25 @@ _G._n = emu.add_machine_frame_notifier(function()
         if timed_t0 == nil then
             timed_t0 = m.time:as_double()
             park_t = nil
+            -- ═══════════════════════════════════════════════════════════════════════════════
+            -- ★★★★★ THE ROOM JUMP MUST HAPPEN HERE TOO, AND ITS ABSENCE SILENTLY VOIDED AN ARM.
+            -- The jump below at `if ROOM and n == ROOM_AT` is keyed to the PACED cycle counter,
+            -- and a free-run never advances it -- so VM_ROOM did nothing in a VM_TIMED run and
+            -- the probe stayed in attract mode. **P6.10's first sweep reported room 83 and room 1
+            -- as 67.802 ms/cycle, opcount 2950, 13.628296 s -- IDENTICAL TO SIX DECIMAL PLACES**,
+            -- which is the only reason it was caught: two rooms cannot agree that exactly.
+            -- ★★★★ A scaling measurement whose independent variable never moved would have
+            -- reported "the cost is flat in object count" -- a clean, plausible, completely false
+            -- finding, and one that fits the per-slot loop structure well enough to be believed
+            -- [§2W: the arm must be shown to do the thing it is named for].
+            -- ★★★ The jump is applied BEFORE the free-run is released, so the whole timed bracket
+            -- runs in the target room rather than jumping partway through it.
+            if ROOM then
+                prog:write_u8(VM_VARS + 0, ROOM)
+                local b = prog:read_u8(VM_FLAGS + 0)             -- flag 5 = byte 0, bit 5
+                prog:write_u8(VM_FLAGS + 0, b | 0x20)
+                w("  ★ room jump BEFORE free-run: var0 <- %d, flag 5 set", ROOM)
+            end
             prog:write_u8(FREE, math.floor(TIMED / 256))
             prog:write_u8(FREE + 1, TIMED % 256)
             prog:write_u8(GO, 1)            -- release the park; the free-run follows
@@ -439,6 +458,14 @@ _G._n = emu.add_machine_frame_notifier(function()
         w("    opcount=%d  (%.2f commands/cycle)   vm_cycle=%d of %d expected%s",
           timed_op, timed_op / cycles, timed_cy, cycles,
           timed_cy == cycles and "" or "  ★★★ MISMATCH")
+        -- ★★★★★ THE MEASURED OBJECT COUNT [P6.10 AC-3]. vm_update_objs sets vm_changecnt to the
+        -- number of ACTIVE objects it processed on the last cycle. Printing it makes the scaling
+        -- curve's x-axis a measurement rather than a claim about which room holds what -- and it
+        -- is the check that a room jump actually landed somewhere with objects in it.
+        if SYM.vm_changecnt then
+            w("    active objects (vm_changecnt, last cycle) = %d",
+              prog:read_u8(SYM.vm_changecnt))
+        end
         m:exit()
         return
     end
