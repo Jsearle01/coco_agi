@@ -2585,3 +2585,140 @@ are the *right* thing to write as literals. `vm_sweep.lua` reads `icguard` at `0
 and `SYM.vm_icguard` (`$21DE`) three lines away, which reads as exactly this bug and is not: the
 first is the probe's handshake slot, the second is the engine variable it mirrors. **Two addresses,
 two things, both correct.**
+
+
+---
+
+## 43. Taking a CoCo3 over from DECB, and the five ways P6.4 got it wrong (P6.4)
+
+★★★★★ **The integration probe is poked, not `LOADM`ed, and every gotcha below is about the seam
+between "MAME is running a CoCo3" and "the guest is ours". All five cost a run each; two were found
+by Jay watching the screen rather than by any gate, and NONE of them could have been found by a
+byte gate — they live in the glue between subsystems that are each independently gated (§4A.1).**
+
+### 43a. ★★★★★ WAIT FOR DECB'S `OK` PROMPT — a frame count is a guess, not a reading
+
+`p3b_run.lua` poked the image and set PC at **frame 4**, while DECB was still booting. Jay: *"you
+need to wait for the basic prompt 'ok'."* This is idiom **14d** one level along — *poll for the
+state, don't settle-and-hope* — applied to the takeover rather than to a `LOADM`.
+
+★★★★★ **AND THE OBVIOUS DETECTOR IS WRONG IN THE DANGEROUS DIRECTION.** Scanning all 512 bytes of
+the text screen for any adjacent `$4F,$4B` reported ready at **frame 28** — before the banner is
+even on screen. It was matching **uninitialised RAM**. A readiness check that fires early is worse
+than none: it hands you a machine that is not ready and the failure surfaces somewhere else.
+
+**Measured on this target, `mame coco3` with no `-ext fdc`:**
+
+```
+frame  60  banner up; PC=$A7D7          |DISK EXTENDED COLOR BASIC 2.1   |
+frame 300  PC=$A7D5                     |OK                              |   <- row 5, column 0
+```
+
+★★★★ **Require TWO independent signals, sustained ~3 frames:**
+
+```lua
+-- 1. "OK" at the START OF A ROW of the 32x16 VDG text screen at $0400.
+--    Screen codes are not ASCII (idiom 14f): uppercase $40-$5F is stored as-is, so O,K = $4F,$4B.
+for row = 0, 15 do
+    local b = 0x0400 + row * 32
+    if prog:read_u8(b) == 0x4F and prog:read_u8(b + 1) == 0x4B then seen = true; break end
+end
+-- 2. the CPU parked in DECB's prompt poll -- idiom 14a records $A7D7/$D7D5; measured $A7D5/$A7D7
+local pc = cpu.state["PC"].value
+local parked = (pc >= 0xA7D0 and pc <= 0xA7E0)
+if seen and parked then ok_streak = ok_streak + 1 else ok_streak = 0 end
+return ok_streak >= 3
+```
+
+★★ **Bound it and report the bound.** A machine that never prints `OK` is a broken launch and must
+say so rather than hanging with no output. ★ Ready at **frame 30** on this target.
+
+### 43b. ★★★★ SHOW THE BOOT, HOLD IT, *THEN* BLANK — "black after the load" means AFTER
+
+`p3b_show.lua` asserted mode 2, a 16-entry black palette and `VOFFSET` **at script load**, before
+DECB had printed anything — so the display left the text screen before the boot was on it and there
+was never a prompt to see. Jay's earlier instruction was *"black as soon as possible **after the
+load**"*, and this ran before.
+
+★★★ **Jay's ruling: show DECB boot to `OK`, HOLD it (~120 frames) so it can be confirmed by eye,
+then blank and take over.** A wait that appears only in the log proves readiness to the log. The
+blanking is now a function (`_G._p3b_blank`) that the takeover calls, so the *ordering* lives in one
+place and the display script still owns *what* blanking means.
+
+### 43c. ★★★★★ A WRITE TAP MUST **RECORD**, NOT **LOG**
+
+Chasing a pointer that read `$0000`, a write tap was installed on it that called the harness's
+logging helper. **The run ended at cycle 8 with no tap output at all** — which reads as *"nothing
+wrote it"*, the most misleading answer available.
+
+★★★ A tap fires on the store, on the hot path. Append to a table and print it later:
+
+```lua
+_G._pv = {}
+_G._pvtap = prog:install_write_tap(addr, addr + 1, "name", function(offset, data, mask)
+    if #_G._pv < 24 then _G._pv[#_G._pv+1] = { offset, data % 256, cpu.state["PC"].value, n } end
+end)
+```
+
+★★ **And an EMPTY recording is itself the answer.** No guest instruction ever stored to the
+pointer, which is what moved the search off the 6809 and onto the host — and then onto a region
+collision. Same GC rule as every other tap: keep it in `_G` (idiom 31).
+
+### 43d. ★★★★★ `lwasm --format=raw` EMITS NO PADDING FOR AN `org` — the image is bytes, not a map
+
+Not MAME, but it breaks the poke path, so it lives here (the §14g precedent). A forward `org` moves
+the assembler's location counter and writes **nothing** to the file: the relocated section's bytes
+follow the previous section's immediately. A single poke at the load address therefore lands
+everything after the `org` **low by the size of the gap** — here 36 bytes — while the symbol map,
+the listing and the assembly all stay self-consistent.
+
+★★★★ **The symptom is badly aimed:** control enters the relocated code mid-instruction and the
+watchdog's PC census pointed into the **flood-fill seed stack**. ★★★ **A hang whose PC sits in a
+DATA region is an entered-at-the-wrong-address signature, not a runaway loop** — it moves the search
+from the code to the layout immediately.
+
+★★★ **The one-line check, and it should be an assertion:**
+
+```
+image size  ==  last symbol - load address        13890 vs 13930 -> short by exactly the gap
+```
+
+★★ **Two fixes, and they are not equivalent.** Pad explicitly (`fill 0,TARGET-*`) while the gap is
+small — the image stays self-describing. When the section later moved to `$E000`, padding would
+have put ~36 KB of zeros in the image, so the **host pokes two segments** with the split read from
+the map (`P3_CODE_END`, `P3_PARSER_BASE`) — never a literal, or it goes stale the moment either
+section grows.
+
+### 43e. ★★★★ A REGION NAMED FOR A SUBSYSTEM MAY ALREADY HOLD ANOTHER — check the declarations
+
+Two placements in one task, both made from a written claim, both wrong, both silent until a
+specific input made the second occupant run.
+
+| placed on | the claim | the fact |
+|---|---|---|
+| `MAP_STATUS+32` | `p3b_probe.s:88` — *"left free for a palette readback"* | `CNT_VERT` has been there since the renderer landed. Drawing a room with vertical lines armed the parser's feed flag. |
+| `MAP_RESERVED` (`$5300`) | `memmap.inc:105` — *"3,328 B, parser + sound"* | `CP_CEL equ MAP_RESERVED` — the decoded-cel buffer, **4,784 B**, which already overruns the region. The first cel decode zeroed `par_vocab`. |
+
+★★★★★ **The second one presents as `$0000`.** With the base pointer zeroed, the dictionary walk ran
+from address 0 through the HAL's direct page and the seed stack looking for a terminator. Jay, from
+the outside: *"if youre placing anything at $0000 you are overwriting the DP and probably the
+stack"* — the correct read of a null base pointer.
+
+★★★★ **Neither was visible in the opening room.** Room 83 has no vertical lines worth speaking of
+and **zero sprites**; the collisions need a room with each. **A collision found only in the second
+room of the second title is indistinguishable, at first, from a defect in whichever subsystem
+noticed.**
+
+★★★ **Enumerate the declarations mechanically before placing anything** — a sorted list of every
+`equ <BASE>+n` in the file takes seconds and cannot be fooled by prose — **and then assert the
+adjacency at build time**, in the direction that can fail. `p3b_probe.s` had no assertion covering
+its status block at all; it has two now, plus one keeping `CP_CEL` clear of the parser.
+
+★★ **A stale comment claiming a byte is free is worse than no comment**, because it answers the
+question you were about to ask. The line is kept struck-through rather than deleted — a comment
+that was believed is evidence.
+
+*Candidates:* `2026-09-06-a-raw-image-is-bytes-not-an-address-space`,
+`2026-09-06-a-region-reserved-for-one-thing-may-already-hold-another` (pool `ad5943b`).
+*Established:* P6.4 2026-09-06, `harness/tools/p3b_run.lua`, `p3b_show.lua`, `p3b_show.ps1`,
+`src/harness/p3b_probe.s`.

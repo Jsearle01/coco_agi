@@ -42,6 +42,14 @@ vm	src/harness/vm_probe.s	build/vm_probe.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FA
 # the instruction stream), which is precisely the code the eight rows above never assembled.
 # â˜…â˜…â˜…â˜… THE FLAGS WERE RECOVERED BY BYTE-MATCH, not from memory: this line reproduces the shipped
 # build/p3b_probe_pk_fresh.bin at 12,859 bytes IDENTICAL. Six other plausible flag sets were tried
+# ★★★★ THE 12,859 IS T-P0-054's AND IS NOW HISTORY, NOT A CHECK. P6.4 wired the parser into this
+# probe: the image is **13,890 bytes** = 13,020 of code ($2000..P3_CODE_END $52DC) + 870 of
+# src/engine/parser.s, which is `org`'d to $E000 and poked as a SECOND SEGMENT [idiom 43d].
+# ★★★ So the byte-match that RECOVERED this row's flags cannot be repeated against 12,859, and a
+# reader who tries it will conclude the flag set is wrong. The flags are unchanged and are still
+# the row below; the size moved because the program did. **A recorded number whose producer has
+# changed is the defect this file exists to prevent** [AD-95, and the cel gate's 6,782 fossil].
+# ★★ To re-derive the flags today, byte-match against 13,890 with the parser included.
 # and none did.
 # â˜…â˜…â˜…â˜…â˜… AND THE ROW LOOKS WRONG UNTIL YOU KNOW WHY. **PLANE_WIN_MMU is absent from this line and
 # p3b IS windowed through the MMU**: `PLANE_WIN_MMU equ 1` is set UNCONDITIONALLY IN THE SOURCE
