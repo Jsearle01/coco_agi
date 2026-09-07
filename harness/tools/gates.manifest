@@ -1,54 +1,54 @@
-# harness/tools/gates.manifest -- ONE HOME for how each gate artifact is built (CLAUDE.md 2F).
+﻿# harness/tools/gates.manifest -- ONE HOME for how each gate artifact is built (CLAUDE.md 2F).
 #
-# ★★★★ WHY THIS FILE EXISTS. The four gate probes were built with four DIFFERENT flag sets, and
+# â˜…â˜…â˜…â˜… WHY THIS FILE EXISTS. The four gate probes were built with four DIFFERENT flag sets, and
 # that fact lived in four different places (res_run.ps1, vm_run.ps1, build_comp.sh, and for pic
 # and cel: NOWHERE AT ALL). Recovering pic's and cel's flags took a brute-force size-match against
 # the shipped artifact, because no file in the tree recorded them. **A build line that exists only
 # in a shell history is the L-45 defect applied to the assemble step** -- run_gates.sh already
 # fixed it for the LAUNCH step and left the BUILD step exactly as it was.
 #
-# ★★★ It is also what lets gate_audit.py PROVE staleness instead of inferring it. An mtime says
+# â˜…â˜…â˜… It is also what lets gate_audit.py PROVE staleness instead of inferring it. An mtime says
 # "the source tree moved"; it does not say the artifact is wrong. pic_probe.bin was a full day
 # stale by mtime and byte-identical to a fresh build -- the renderer gate's 45/45 was never
 # invalidated. With the flags recorded here the audit can rebuild and COMPARE BYTES, which is
 # the question that actually matters.
 #
 # format:  name <TAB> source <TAB> artifact <TAB> flags (space-separated, may be empty)
-# ★ Flags are load-bearing: comp built with -DHAL_GFX_MODE_SERVICE is 1,373 bytes, not 967, and
+# â˜… Flags are load-bearing: comp built with -DHAL_GFX_MODE_SERVICE is 1,373 bytes, not 967, and
 # is a different program from the one the compositing numbers were established against.
-# ★★★★★ AD-96: THE pic GATE HAS FOUR CONFIGURATIONS AND THIS FILE RECORDED ONE.
+# â˜…â˜…â˜…â˜…â˜… AD-96: THE pic GATE HAS FOUR CONFIGURATIONS AND THIS FILE RECORDED ONE.
 # The `pic` row builds the artifact the 45/45 CORRECTNESS gate runs -- unpacked, counters in,
 # 2,642 B, median 5.9349 s. **Every published room-render TIMING figure comes from a different
 # program**: 2.746 s is -DPIC_NOCOUNT unpacked (2,512 B) and 2.832 s is -DPIC_NOCOUNT -DPRI_PACKED
 # (2,971 B). Both were reproduced to the millisecond at T-P0-041, so neither figure is wrong --
 # **they simply describe binaries this manifest did not build.**
-# ★★★★ WHICH FIGURE IS CURRENT FOR THE ROOM RENDER: **2.832 s**, the packed nocount build.
+# â˜…â˜…â˜…â˜… WHICH FIGURE IS CURRENT FOR THE ROOM RENDER: **2.832 s**, the packed nocount build.
 # Packing is load-bearing (P3b.3: without it the draw phase does not integrate), so the packed
 # configuration is the one the design plans against; the unpacked 2.746 s is its control, and the
 # counted 5.9349 s is the correctness gate and is NOT a performance figure -- counters cost 2.16x.
-# ★★★ The timing rows are marked `timing` in column 5 so a reader cannot take a median from a row
+# â˜…â˜…â˜… The timing rows are marked `timing` in column 5 so a reader cannot take a median from a row
 # built for correctness, which is exactly the substitution AD-96 records.
-pic	src/harness/pic_probe.s	build/pic_probe.bin	-DHAL_GFX_MODE_SERVICE	correctness 45/45, median 5.9349 s (counters in -- not a perf figure)
-pic_nc	src/harness/pic_probe.s	build/pic_nc_unpacked.bin	-DHAL_GFX_MODE_SERVICE -DPIC_NOCOUNT	timing 2.7456 s median (unpacked control)
-pic_nc_pk	src/harness/pic_probe.s	build/pic_nc_packed.bin	-DHAL_GFX_MODE_SERVICE -DPIC_NOCOUNT -DPRI_PACKED	timing 2.8319 s median -- ★ THE CURRENT ROOM-RENDER FIGURE
-pic_win	src/harness/pic_probe.s	build/pic_v_windowed_nocount.bin	-DHAL_GFX_MODE_SERVICE -DPLANE_WINDOWED -DPIC_NOCOUNT	timing 2.9204 s median (+6.4%, windowed per-pixel class)
-res	src/harness/res_probe.s	build/res_probe.bin	-DHAL_GFX_MODE_SERVICE
-cel	src/harness/cel_probe.s	build/cel_probe.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK
-comp	src/harness/comp_probe.s	build/comp_probe.bin
-vm	src/harness/vm_probe.s	build/vm_probe.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK
-# ★★★★★ T-P0-054 AC-3: p3b WAS THE ONE PROBE THIS FILE DID NOT LIST, and it is the integration
+pic	src/harness/pic_probe.s	build/pic_probe.bin	-DHAL_GFX_MODE_SERVICE	correctness 45/45, median 5.9349 s (counters in -- not a perf figure)	purpose=correctness
+pic_nc	src/harness/pic_probe.s	build/pic_nc_unpacked.bin	-DHAL_GFX_MODE_SERVICE -DPIC_NOCOUNT	timing 2.7456 s median (unpacked control)	purpose=timing
+pic_nc_pk	src/harness/pic_probe.s	build/pic_nc_packed.bin	-DHAL_GFX_MODE_SERVICE -DPIC_NOCOUNT -DPRI_PACKED	timing 2.8319 s median -- â˜… THE CURRENT ROOM-RENDER FIGURE	purpose=timing
+pic_win	src/harness/pic_probe.s	build/pic_v_windowed_nocount.bin	-DHAL_GFX_MODE_SERVICE -DPLANE_WINDOWED -DPIC_NOCOUNT	timing 2.9204 s median (+6.4%, windowed per-pixel class)	purpose=timing
+res	src/harness/res_probe.s	build/res_probe.bin	-DHAL_GFX_MODE_SERVICE	purpose=correctness
+cel	src/harness/cel_probe.s	build/cel_probe.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK	purpose=correctness
+comp	src/harness/comp_probe.s	build/comp_probe.bin	purpose=correctness
+vm	src/harness/vm_probe.s	build/vm_probe.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK	purpose=correctness
+# â˜…â˜…â˜…â˜…â˜… T-P0-054 AC-3: p3b WAS THE ONE PROBE THIS FILE DID NOT LIST, and it is the integration
 # probe -- 48,537 bytes of source and sixteen p3_* routines built by no gate at all. Every defect
 # of the last four tasks lived here (p3_clear_planes' 2-byte clear, the shadow buffer, the byte in
 # the instruction stream), which is precisely the code the eight rows above never assembled.
-# ★★★★ THE FLAGS WERE RECOVERED BY BYTE-MATCH, not from memory: this line reproduces the shipped
+# â˜…â˜…â˜…â˜… THE FLAGS WERE RECOVERED BY BYTE-MATCH, not from memory: this line reproduces the shipped
 # build/p3b_probe_pk_fresh.bin at 12,859 bytes IDENTICAL. Six other plausible flag sets were tried
 # and none did.
-# ★★★★★ AND THE ROW LOOKS WRONG UNTIL YOU KNOW WHY. **PLANE_WIN_MMU is absent from this line and
+# â˜…â˜…â˜…â˜…â˜… AND THE ROW LOOKS WRONG UNTIL YOU KNOW WHY. **PLANE_WIN_MMU is absent from this line and
 # p3b IS windowed through the MMU**: `PLANE_WIN_MMU equ 1` is set UNCONDITIONALLY IN THE SOURCE
 # [p3b_probe.s:65], so passing it on the command line is a Multiply-defined-symbol error and every
-# build that tries FAILS TO ASSEMBLE. ★★★ Do not "fix" this row by adding it. The reading it
+# build that tries FAILS TO ASSEMBLE. â˜…â˜…â˜… Do not "fix" this row by adding it. The reading it
 # invites -- "no PLANE_WIN_MMU, so p3b does not window" -- is the exact inverse of the truth, and
 # is the same inert-flag confusion that made three of P3b.15/16's results meaningless [AD-119].
-# ★★ Contrast the pic_win row above, which passes -DPLANE_WINDOWED and NOT -DPLANE_WIN_MMU and
+# â˜…â˜… Contrast the pic_win row above, which passes -DPLANE_WINDOWED and NOT -DPLANE_WIN_MMU and
 # therefore genuinely does NOT window: the same two symbols mean opposite things in the two files.
-p3b	src/harness/p3b_probe.s	build/p3b_probe_pk_fresh.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED	integration probe -- PLANE_WIN_MMU comes from the SOURCE (line 65), never the command line
+p3b	src/harness/p3b_probe.s	build/p3b_probe_pk_fresh.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED	integration probe -- PLANE_WIN_MMU comes from the SOURCE (line 65), never the command line	purpose=timing

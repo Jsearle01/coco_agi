@@ -85,6 +85,17 @@ class Vm:
         self.vocab = None            # parser.Vocabulary, or None
         self.ego_words = []          # word NUMBERS only, bounded at parser.MAX_WORDS
         self.said_trace = None       # list of tuples when the gate wants a trace
+        # ★★★★ T-P0-060: THE SCRIPTED INPUT PATH. {cycle_nr: text}; feed_input() is called in
+        # run() immediately before interpret_cycle() for that cycle, so the row the trace emits
+        # at the top of that cycle already carries the input's flags. **The 6809 leg must feed
+        # at the same seam or the two disagree by one cycle**, and a one-cycle shift in a flag
+        # is exactly the shape P4.x spent a task on (the park was above vm_pace).
+        # ★★ None = no input, which is what every existing gate run passes. The nine-title VM
+        # gate is bit-for-bit unmoved by this file [verified, T-P0-060 §5].
+        self.input_script = None
+        self.said_seen = 0           # said() evaluations, for the wiring's own coverage number
+        self.said_matched = 0        # ... and how many returned True
+        self.input_fed = 0
         self.modelled_calls = {}
         self.motion_modes_seen = {}
         self.instruction_counter = 0
@@ -256,6 +267,12 @@ class Vm:
             st.get_flag(VM_FLAG_SAID_ACCEPTED_INPUT),
             st.get_flag(VM_FLAG_ENTERED_CLI))
         st.set_flag(VM_FLAG_SAID_ACCEPTED_INPUT, accepted)
+        # ★★ COVERAGE FOR THE WIRING ITSELF. "The state diff is clean" is worth nothing if said()
+        # was never reached -- that is the same claim the stub satisfied. These two counters are
+        # what let the report say the path was EXERCISED and not merely present [§2W].
+        self.said_seen += 1
+        if result:
+            self.said_matched += 1
         if self.said_trace is not None:
             self.said_trace.append((self.cycle_nr, st.cur_logic_nr, n, operands,
                                     list(self.ego_words),
@@ -417,6 +434,17 @@ class Vm:
 
             if passed >= time_delay:
                 passed = 0
+                # ★★★★★ THE SEAM. Feeding here -- after the pacing gate, after the previous
+                # cycle's four resets, before the cycle body -- is what a keystroke arriving
+                # between two cycles does. interpret_cycle() emits the trace row at its top, so
+                # cycle N's row shows the input's ENTERED_CLI. The 6809 probe feeds at the
+                # matching point (after vm_pace, before it publishes and parks) so that "cycle N"
+                # means the same thing on both sides [vm_probe.s vp_feed].
+                if self.input_script:
+                    text = self.input_script.get(self.cycle_nr)
+                    if text is not None:
+                        self.feed_input(text)
+                        self.input_fed += 1
                 self.interpret_cycle()
                 st = self.state
                 st.set_flag(VM_FLAG_ENTERED_CLI, False)

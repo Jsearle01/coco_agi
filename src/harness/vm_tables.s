@@ -105,6 +105,7 @@ VMT_LOOP_TABLE_4        fcb     $04,$03,$00,$00,$00,$02,$01,$01,$01
 
 * ── VMOP_ARGS: argument bytes per command opcode ──────────────────
 * ★ ScummVM: parameterSize = strlen(parameters). Every parameter is one byte.
+VMOP_MAX        equ     183
 VMOP_ARGS:
                 fcb     $00,$01,$01,$02,$02,$02,$02,$02,$02,$02,$02,$02,$01,$01,$01,$01        ; 00-0F
                 fcb     $01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$00,$01,$01,$00,$01,$01        ; 10-1F
@@ -117,11 +118,7 @@ VMOP_ARGS:
                 fcb     $00,$01,$03,$00,$00,$01,$01,$00,$00,$00,$00,$00,$00,$00,$01,$01        ; 80-8F
                 fcb     $01,$00,$00,$03,$03,$00,$03,$04,$04,$01,$05,$02,$01,$02,$00,$01        ; 90-9F
                 fcb     $01,$00,$01,$00,$00,$02,$02,$02,$02,$00,$01,$00,$00,$00,$01,$01        ; A0-AF
-                fcb     $00,$01,$00,$04,$02,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00        ; B0-BF
-                fcb     $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00        ; C0-CF
-                fcb     $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00        ; D0-DF
-                fcb     $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00        ; E0-EF
-                fcb     $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00        ; F0-FF
+                fcb     $00,$01,$00,$04,$02,$00,$00        ; B0-B6
 
 * -- VMTEST_ARGS: operand bytes per TEST opcode --------------------
 * * vm_skip_instruction steps ip by this after a test runs. Duplicating
@@ -318,79 +315,6 @@ VMOP_TAB:
                 fdb     vm_op_modelled          ; B4 get.mse.posn(vv)  [modelled]
                 fdb     vm_op_modelled          ; B5 release.key()  [modelled]
                 fdb     vm_op_modelled          ; B6 adj.ego.move.to.x.y()  [modelled]
-                fdb     vm_op_unimpl            ; B7 --
-                fdb     vm_op_unimpl            ; B8 --
-                fdb     vm_op_unimpl            ; B9 --
-                fdb     vm_op_unimpl            ; BA --
-                fdb     vm_op_unimpl            ; BB --
-                fdb     vm_op_unimpl            ; BC --
-                fdb     vm_op_unimpl            ; BD --
-                fdb     vm_op_unimpl            ; BE --
-                fdb     vm_op_unimpl            ; BF --
-                fdb     vm_op_unimpl            ; C0 --
-                fdb     vm_op_unimpl            ; C1 --
-                fdb     vm_op_unimpl            ; C2 --
-                fdb     vm_op_unimpl            ; C3 --
-                fdb     vm_op_unimpl            ; C4 --
-                fdb     vm_op_unimpl            ; C5 --
-                fdb     vm_op_unimpl            ; C6 --
-                fdb     vm_op_unimpl            ; C7 --
-                fdb     vm_op_unimpl            ; C8 --
-                fdb     vm_op_unimpl            ; C9 --
-                fdb     vm_op_unimpl            ; CA --
-                fdb     vm_op_unimpl            ; CB --
-                fdb     vm_op_unimpl            ; CC --
-                fdb     vm_op_unimpl            ; CD --
-                fdb     vm_op_unimpl            ; CE --
-                fdb     vm_op_unimpl            ; CF --
-                fdb     vm_op_unimpl            ; D0 --
-                fdb     vm_op_unimpl            ; D1 --
-                fdb     vm_op_unimpl            ; D2 --
-                fdb     vm_op_unimpl            ; D3 --
-                fdb     vm_op_unimpl            ; D4 --
-                fdb     vm_op_unimpl            ; D5 --
-                fdb     vm_op_unimpl            ; D6 --
-                fdb     vm_op_unimpl            ; D7 --
-                fdb     vm_op_unimpl            ; D8 --
-                fdb     vm_op_unimpl            ; D9 --
-                fdb     vm_op_unimpl            ; DA --
-                fdb     vm_op_unimpl            ; DB --
-                fdb     vm_op_unimpl            ; DC --
-                fdb     vm_op_unimpl            ; DD --
-                fdb     vm_op_unimpl            ; DE --
-                fdb     vm_op_unimpl            ; DF --
-                fdb     vm_op_unimpl            ; E0 --
-                fdb     vm_op_unimpl            ; E1 --
-                fdb     vm_op_unimpl            ; E2 --
-                fdb     vm_op_unimpl            ; E3 --
-                fdb     vm_op_unimpl            ; E4 --
-                fdb     vm_op_unimpl            ; E5 --
-                fdb     vm_op_unimpl            ; E6 --
-                fdb     vm_op_unimpl            ; E7 --
-                fdb     vm_op_unimpl            ; E8 --
-                fdb     vm_op_unimpl            ; E9 --
-                fdb     vm_op_unimpl            ; EA --
-                fdb     vm_op_unimpl            ; EB --
-                fdb     vm_op_unimpl            ; EC --
-                fdb     vm_op_unimpl            ; ED --
-                fdb     vm_op_unimpl            ; EE --
-                fdb     vm_op_unimpl            ; EF --
-                fdb     vm_op_unimpl            ; F0 --
-                fdb     vm_op_unimpl            ; F1 --
-                fdb     vm_op_unimpl            ; F2 --
-                fdb     vm_op_unimpl            ; F3 --
-                fdb     vm_op_unimpl            ; F4 --
-                fdb     vm_op_unimpl            ; F5 --
-                fdb     vm_op_unimpl            ; F6 --
-                fdb     vm_op_unimpl            ; F7 --
-                fdb     vm_op_unimpl            ; F8 --
-                fdb     vm_op_unimpl            ; F9 --
-                fdb     vm_op_unimpl            ; FA --
-                fdb     vm_op_unimpl            ; FB --
-                fdb     vm_op_unimpl            ; FC --
-                fdb     vm_op_unimpl            ; FD --
-                fdb     vm_op_unimpl            ; FE --
-                fdb     vm_op_unimpl            ; FF --
 
 * ── VMTEST_TAB: handler per test opcode ───────────────────────────
 VMTEST_MAX      equ     20

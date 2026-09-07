@@ -137,6 +137,24 @@ vm_rl_loop:
 * ★★ A push has to be placed against the LAST WRITE to the register, not against the place the
 * value is wanted; `tfr a,b` reads A and `clra` two lines later kills it.
                 pshs    a                       ; ★ survives both the index maths and the callee
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★ M-48: THE RANGE CHECK THAT REPLACES 146 BYTES OF TABLE PADDING, and it is the SAME
+* change VMTEST_TAB and VMTEST_ARGS already carry (see the test dispatch below, and
+* gen_vm_tables.py's note on VMTEST_ARGS). VMOP_TAB held 256 entries so this could index with a
+* raw opcode byte and never test the range; entries 183-255 were every one of them
+* vm_op_unimpl. The generator now sizes it to the v2 command space (VMOP_MAX = 183).
+* ★★★★★ BEHAVIOUR IS IDENTICAL AND THAT IS THE POINT, NOT A HOPE: an opcode >= VMOP_MAX reached
+* vm_op_unimpl through the padding before and reaches THE SAME HANDLER through this branch now.
+* The nine-title state diff, byte-identical on every compared cycle, is what checks it.
+* ★★ `blo` is the UNSIGNED branch: vm_op is a byte and opcodes above $7F must compare as large,
+* not negative [L-40, the signed-index lesson this file already carries three times].
+* ★ It loads X and FALLS INTO the same `jsr ,x`, so everything downstream -- the opcount, the
+* stacked opcode, the arg advance, vm_exitall -- runs identically for an unimplemented command.
+                cmpa    #VMOP_MAX
+                blo     vm_rl_inrange
+                ldx     #vm_op_unimpl
+                bra     vm_rl_dispatch
+vm_rl_inrange:
                 ldx     #VMOP_TAB
                 tfr     a,b
                 clra
@@ -144,6 +162,7 @@ vm_rl_loop:
                 rola
                 leax    d,x
                 ldx     ,x                      ; X = handler
+vm_rl_dispatch:
                 ldy     vm_opcount
                 leay    1,y
                 sty     vm_opcount
@@ -161,12 +180,23 @@ vm_rl_loop:
 * ★ advance by the ARGUMENT COUNT, after the handler, exactly as the reference does. A wrong
 * count here desynchronises the stream and every later opcode is garbage -- which is why
 * VMOP_ARGS is generated rather than typed.
+* ★★★ AND THE SAME BOUND ON THE ARGUMENT TABLE -- M-48's other 73 bytes. Entries 183-255 were
+* all $00, so an out-of-range opcode advanced ip by nothing; `clrb` here is that same nothing.
+* ★★ It cannot be skipped as unreachable just because vm_op_unimpl halts: the halt sets vm_quit
+* and RETURNS, so this line runs on the way out. **"The handler halts so the tail cannot matter"
+* is the reasoning that leaves a real divergence in a build**, and the tail is two bytes.
+                cmpa    #VMOP_MAX
+                blo     vm_rl_args
+                clrb
+                bra     vm_rl_haveargs
+vm_rl_args:
                 ldx     #VMOP_ARGS
                 tfr     a,b
                 clra
                 leax    d,x                     ; ★ D-offset: UNSIGNED for 0..255
-                clra
                 ldb     ,x
+vm_rl_haveargs:
+                clra
                 addd    vm_ip
                 std     vm_ip
                 lda     vm_exitall

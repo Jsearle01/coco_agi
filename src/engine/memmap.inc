@@ -138,6 +138,43 @@ MAP_ARENA_WIN_E equ     $A000           ; 16,384 B >= 10,964 max resource
 MAP_PRI_SLICE   equ     $A000
 MAP_PRI_SLICE_E equ     $C000           ; 8,192 B aperture; plane is 13,440 B = 2 slices
 
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ AND IN THE VM PHASE THIS SLOT HOLDS THE VOCABULARY [T-P0-060 AC-6].
+*
+* ★★★★ THE MEASUREMENT DECIDES IT, AND IT IS SETTLED: the largest WORDS.TOK in the twelve-title
+* corpus is **SpaceQuest-2 at 6,828 bytes** [T-P0-059 §3.E, re-measured independently], with
+* PQ1 6,737, larry1 6,597, GoldRush 6,110, KQ3 5,657, SQ1 4,793, KQ2 3,516, KQ1 3,144 and four
+* under 300. **All twelve fit one 8,192 B window with 1,364 B of headroom on the largest.**
+* Unlike AD-78's arena, where the largest LOGIC exceeded a window and forced two slots, this
+* needs ONE -- and the slot is the one the phase table above already leaves idle.
+*
+* ★★★★★ WHY SLOT 5 AND NOT SLOT 6. Slot 6 is the volume window in the VM phase, and a resource
+* FETCH happens in the VM phase -- so a vocabulary there would collide with the thing it shares
+* the phase with. Slot 5 is "-- nothing mapped --" for the whole VM phase (see the table at the
+* head of this file) and becomes the priority slice only in a DRAW phase. §3.4's disjointness is
+* exactly what makes this legal, and it is the second place in this map where that property is
+* load-bearing rather than incidental.
+*
+* ★★★★ ONLY par_parse NEEDS IT MAPPED, NOT par_said, AND THAT IS A REAL NARROWING. par_said
+* reads par_ego, par_egon and the operand stream; it never touches par_vocab [src/engine/
+* parser.s]. So the window is required only while a line is being TOKENISED -- once per typed
+* command -- and not on any of the said() evaluations that follow it. A game evaluating fifteen
+* said() patterns a cycle needs the vocabulary mapped for none of them.
+*
+* ★★★ THE PARSER'S CODE AND STATE ARE NOT HERE. They are 954 B in MAP_RESERVED (870 code+state
+* plus two 42-byte input buffers); this is the RESOURCE, and §2P/§2V.2 put a resource in a
+* window rather than in the image.
+* ★★ THE HARNESS DOES NOT USE THIS ADDRESS AND MUST NOT BE READ AS DOING SO. p3b_probe.s stages
+* its vocabulary at $E3BA because slot 5 is that probe's PRIORITY slice, live in every draw
+* phase, and vm_probe.s uses $E000 for its own map's reasons. Per this file's header the harness
+* keeps its own addresses; **this line is the ENGINE's decision and the probes are evidence for
+* it, not instances of it.**
+MAP_VOCAB       equ     MAP_PRI_SLICE   ; VM phase only: WORDS.TOK, read in place
+MAP_VOCAB_E     equ     MAP_PRI_SLICE_E ; 8,192 B >= 6,828 (SpaceQuest-2, the corpus max)
+                ifgt    6828-(MAP_VOCAB_E-MAP_VOCAB)
+                error   "the vocabulary window is smaller than the largest corpus WORDS.TOK (6,828 B)"
+                endc
+
 * ── slot 6: the phase-switched window ────────────────────────────────────────────
 * ★★ ONE SLOT, TWO USES, NEVER AT THE SAME TIME. The volume window is live only while a
 * resource is being fetched, which happens in the VM phase; the framebuffer slice is live only

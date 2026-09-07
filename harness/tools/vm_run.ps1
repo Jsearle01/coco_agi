@@ -34,6 +34,10 @@ if ($env:VM_TRACE) { $ASMARGS += "-DVM_TRACE" }
 # fail. A gate that has never failed is an assertion about the harness, not about the VM.
 if ($env:VM_FAULT) { $ASMARGS += "-DVM_FAULT"; "FAULT INJECTED (-DVM_FAULT) -- this build is EXPECTED to fail AC-2" }
 if ($env:VM_PACEONLY) { $ASMARGS += "-DVM_PACEONLY"; "PACE-ONLY build (AC-7 split): interpret_cycle is not called" }
+# ★★★★ T-P0-060 AC-5: the WIRING's own fault. said() evaluated but its side effect not published,
+# so every later said() in the same cycle passes a guard that should have rejected it. This
+# build is EXPECTED to fail the state diff on any title whose script makes a line match.
+if ($env:VM_FAULT_SAID_PURE) { $ASMARGS += "-DVM_FAULT_SAID_PURE"; "★★★ FAULT INJECTED (-DVM_FAULT_SAID_PURE): said() treated as PURE -- this build is EXPECTED to FAIL" }
 & C:\WIN_LWTools\lwasm.exe @ASMARGS src/harness/vm_probe.s
 if ($LASTEXITCODE -ne 0) { throw "assemble failed" }
 "vm_probe: $((Get-Item build\vm_probe.bin).Length) bytes"
@@ -49,7 +53,10 @@ New-Item -ItemType Directory -Force build\vm_stage | Out-Null
 # layer rather than at the scraper. vm_symbols.py reads the symbol table itself.
 "symbols:"
 $WANT = @("res_volbase","res_slicebase","res_curblk","vm_icguard","res_depth","res_top",
-          "vm_exitall","vm_quit","res_err","vm_curlogic","vm_badop","vm_badlogic","vm_seed","vm_acc","vm_rndmax","vm_rndlo","vm_divisor","vm_gfxmode")
+          "vm_exitall","vm_quit","res_err","vm_curlogic","vm_badop","vm_badlogic","vm_seed","vm_acc","vm_rndmax","vm_rndlo","vm_divisor","vm_gfxmode",
+          # ★★★ T-P0-060: the parser's own addresses. par_vocab is what makes the port live;
+          # the three counters are the wiring's coverage. From the MAP, never a literal.
+          "par_vocab","vm_saidn","vm_saidm","vm_fedn")
 if ($env:VM_TRACE) { $WANT += @("vmtr_buf","vmtr_idx","vmtr_from","vmtr_logic","vmtr_seen") }
 python harness\tools\vm_symbols.py build\vm_probe.map --out build\vm_stage\symbols.txt --want @WANT
 if ($LASTEXITCODE -ne 0) { throw "symbols missing" }
@@ -60,7 +67,24 @@ foreach ($t in $TITLES) {
   $sweep = "build\vm_sweep\$t"
   New-Item -ItemType Directory -Force $stage, $sweep | Out-Null
 
-  python harness\tools\vm_stage.py (Join-Path $GAMES $t) --out $stage --cycles $CYCLES | Out-Null
+  # ═══════════════════════════════════════════════════════════════════════════════════════
+  # ★★★★ T-P0-060 AC-4: THE SCRIPTED INPUT ARM. VM_INPUT=1 derives a script from THIS title's
+  # own said() census, stages it, and feeds both legs from it. Unset, nothing here changes and
+  # the nine-title gate runs exactly as before -- which is the arm L-79 requires to exist.
+  # ★★★ The script is REGENERATED per run rather than kept beside the fixture: a script file
+  # that outlives the game or the reference is the stale-symbols defect wearing a new hat
+  # [P1.3, P6.3 §3.F.2]. It costs one reference run, which vm_stage.py does anyway.
+  # ★★ Stale scripts from a previous title/run are removed first [L-92, §2W.2]: input.txt and
+  # words.tok are what make the parser live, and one left behind would feed the WRONG game's
+  # words into this one -- a divergence that points at parser.s.
+  Remove-Item -Force -ErrorAction SilentlyContinue "$stage\input.txt", "$stage\words.tok"
+  $stageArgs = @((Join-Path $GAMES $t), "--out", $stage, "--cycles", $CYCLES)
+  if ($env:VM_INPUT) {
+    python harness\tools\vm_input_script.py (Join-Path $GAMES $t) --out "$stage\input.gen.txt" --cycles $CYCLES
+    if ($LASTEXITCODE -ne 0) { "★★★ $t : no verified input lines -- running WITHOUT input"; }
+    else { $stageArgs += @("--input", "$stage\input.gen.txt") }
+  }
+  python harness\tools\vm_stage.py @stageArgs | Out-Null
   if ($LASTEXITCODE -ne 0) { "★★★ $t : staging did not fit"; continue }
 
   $env:VM_OUT = $sweep; $env:VM_STAGE = $stage; $env:VM_PROG = "build\vm_probe.bin"

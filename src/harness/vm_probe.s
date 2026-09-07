@@ -50,7 +50,54 @@ VP_CAL          equ     $0092           ; ★ 2 bytes: clock-calibration blocks,
 * reported 1.5379 MHz for a 1.789772 MHz machine. ★★★ A marker written either side of the
 * blocks and read through a write tap gives one-instruction resolution -- P3b.12's pattern.
 VP_MARK         equ     $0094           ; 1 = calibration opens, 2 = calibration closes
+* ── T-P0-060: the scripted input path ────────────────────────────────────────────
+* ★★ The host writes the text into VP_INBUF and sets VP_FEED while the guest is parked; the
+* guest feeds it after vm_pace and BEFORE it publishes and parks again. See vp_feed.
+VP_FEED         equ     $0096           ; host: 1 = parse VP_INBUF before the next park
+VP_VOCAB_BAD    equ     $0097           ; 2 bytes: first vocab-window address that failed, 0 = ok
+* ★★ THE said() COVERAGE COUNTERS ARE BUILD SYMBOLS (vm_saidn / vm_saidm / vm_fedn in
+* vm_tests.s), NOT handshake addresses. The host reads them through build/vm_stage/symbols.txt
+* like every other interior value here -- "symbols come from the BUILD, never from a copy beside
+* the fixture" [vm_sweep.lua:102, P1.3]. A fifth hard-coded address in this block would be the
+* thing P6.3 §3.F.2 cost hours to.
 VP_HW_STACK     equ     $0700
+
+* ═══════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE INPUT BUFFERS ARE 42 BYTES, MEASURED AT THE PIN, NOT ESTIMATED [T-P0-060 AC-7].
+* T-P0-059 §7.3 supplied 256 B each and flagged the figure as an unmeasured guess. The oracle:
+*     text.h:170    byte _prompt[42];                     <- the buffer parseUsingDictionary gets
+*     text.cpp:778  _vm->_words->parseUsingDictionary((char *)&_prompt);
+*     text.h:74     #define TEXT_STRING_MAX_SIZE  40      <- the prompt's own clamp
+*     text.cpp:745  maxChars = TEXT_STRING_MAX_SIZE - strlen(string 0)   [-1 if the cursor moved]
+*     cycle.cpp:663 setVar(VM_VAR_MAX_INPUT_CHARACTERS, 38)
+* ★★★ 42 is the ARRAY and 40 is the CLAMP; a game may raise var 24 but text.cpp:751 takes the
+* MINIMUM, so nothing above 40 characters can reach the parser. 42 holds 40 + NUL with a byte
+* spare, which is the oracle's own margin and is kept rather than re-derived.
+* ★★ THE CLEANED BUFFER IS THE SAME SIZE BECAUSE par_clean CANNOT GROW ITS INPUT: it copies or
+* drops characters and collapses each separator run to exactly one space, so |out| <= |in|.
+* ★ They sit in the 224-byte gap between VM_OBJ_END ($6220) and VM_TESTSEEN ($6300); the
+* assertions at the foot of this file are what keep that true as the map moves.
+VP_INBUF        equ     $6220           ; 42 B, host-written, NUL-terminated
+VP_CLNBUF       equ     $6250           ; 42 B, par_clean's output
+VP_BUF_END      equ     VP_CLNBUF+42
+
+* ═══════════════════════════════════════════════════════════════════════════════════
+* ★★★★ THE VOCABULARY WINDOW. WORDS.TOK is a RESOURCE and lives in a window, not in the code
+* image (§2V.2's residency row). The largest in the twelve-title corpus is SpaceQuest-2 at
+* **6,828 bytes** [T-P0-059 §3.E, re-measured], so ONE window holds any of them.
+* ★★★ $E000-$FEFF is 7,936 bytes and is the only contiguous free window in THIS PROBE's map --
+* $C000-$DFFF is res_core's VOL window and the arena runs $6B00-$C000. It is reachable only
+* because vm_probe.s writes $FFDF itself (SAM TY=1, above). ★★ The ENGINE's answer is a
+* different address and is deliberately so: memmap.inc puts the vocabulary in slot 5
+* ($A000-$BFFF), which is unmapped for the whole VM phase, and that file's own header forbids it
+* from moving the harness. Two maps, one decision each, both written down.
+* ★★★★★ AND IT IS TESTED, NOT ASSUMED. vm_state.s records two tasks of a wrong mechanism read
+* out of a host readback -- "MAME cannot see it" and "it is not RAM" are indistinguishable from
+* the host. The guest writes a walking pattern here and reads it back ITSELF, exactly as the
+* arena self-test does, and reports the first address that does not hold what was written.
+VP_VOCAB        equ     $E000
+VP_VOCAB_END    equ     $FF00           ; $FF00-$FFFF is the I/O page and is not ours
+VP_VOCAB_MAX    equ     VP_VOCAB_END-VP_VOCAB           ; 7,936 >= 6,828
 
                 org     $0700
 vm_probe_entry:
@@ -116,6 +163,51 @@ vp_at_rd:       tfr     x,d
 vp_at_bad:      leax    -1,x
                 tfr     x,d
 vp_at_done:     std     VP_ARENA_BAD
+
+* ═══════════════════════════════════════════════════════════════════════════════════
+* ★★★★ THE SAME TEST FOR THE VOCABULARY WINDOW, AND FOR THE SAME REASON.
+* $E000-$FEFF is above $8000, which is the range vm_state.s spent two tasks holding a wrong
+* mechanism about: a host readback there cannot distinguish "MAME cannot see it" from "it is not
+* RAM", and the answer that matters is the GUEST's. So the guest writes and reads it back
+* itself, before anything stages a vocabulary into it.
+* ★★★ Run BEFORE the host stages, or the test would destroy what it is meant to protect -- and
+* the host cannot stage before HAL_sys_init anyway (the MMU is not live until then).
+* ★★ A non-zero VP_VOCAB_BAD means the window is not usable and the parser must not be trusted;
+* vm_sweep.lua refuses the run rather than staging into it [§2W: a check that cannot refuse is
+* not a check].
+                ldx     #VP_VOCAB
+vp_vt_wr:       tfr     x,d
+                eora    #$5A
+                eorb    #$A5
+                stb     ,x+
+                cmpx    #VP_VOCAB_END
+                blo     vp_vt_wr
+                ldx     #VP_VOCAB
+vp_vt_rd:       tfr     x,d
+                eora    #$5A
+                eorb    #$A5
+                cmpb    ,x+
+                bne     vp_vt_bad
+                cmpx    #VP_VOCAB_END
+                blo     vp_vt_rd
+                ldd     #0
+                bra     vp_vt_done
+vp_vt_bad:      leax    -1,x
+                tfr     x,d
+vp_vt_done:     std     VP_VOCAB_BAD
+* ★ The parser's three pointers. par_vocab stays 0 until the host stages a vocabulary; par_said's
+* guard makes the whole path inert while it is (see vm_tests.s), so this is the "no parser"
+* default cycle.py:83 describes, expressed as an address.
+                ldd     #0
+                std     par_vocab
+                std     vm_saidn
+                std     vm_saidm
+                clr     vm_fedn
+                clr     VP_FEED
+                ldx     #VP_INBUF
+                stx     par_inbuf
+                ldx     #VP_CLNBUF
+                stx     par_clnbuf
 
 * ★★★ CLEARED, BECAUSE NOTHING ELSE DOES. VP_FREE is host-settable and the host only writes it
 * when it wants a timed run -- so on every other run it held cold-boot RAM, which is not zero,
@@ -192,6 +284,26 @@ vp_nocal:
                 bra     vp_loop
 vp_paced:
                 jsr     vm_pace                 ; advance the clock until a cycle is due
+* ═══════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ FEED HERE -- AFTER THE PACING GATE, BEFORE THE PUBLISH AND THE PARK.
+* cycle.py:418-427 feeds immediately before interpret_cycle(), which emits the trace row at its
+* top, so the reference's row for cycle N already carries ENTERED_CLI. The host samples THIS
+* probe at the park below, i.e. also before the cycle body -- so feeding here, and not after the
+* park, is what makes "cycle N" mean the same thing on both sides.
+* ★★★★ THE HOST THEREFORE ARMS ONE PARK EARLY: at the park where VP_CYCLE reads K it writes the
+* text and sets VP_FEED for cycle K+1, because the guest passes this point once more before it
+* parks again. That off-by-one is real, it is the host's to hold, and vm_sweep.lua says so at
+* the site rather than here. ★★★ A one-cycle shift in a flag is precisely the defect P4.x spent
+* a task on when the park sat above vm_pace, and it presents as a clock bug rather than a
+* wiring bug -- so the seam is stated on both sides and checked by the diff.
+* ★★ vm_post_cycle has already cleared ENTERED_CLI / SAID_ACCEPTED / WORD_NOT_FOUND for the
+* cycle that just ran, and cycle.py does the same before its next iteration, so the feed lands
+* on a cleared state in both. Order: interpret -> reset -> pace -> FEED -> sample.
+                lda     VP_FEED
+                beq     vp_nofeed
+                clr     VP_FEED
+                jsr     vp_feed
+vp_nofeed:
 * ---- THE SAMPLE POINT ---------------------------------------------------------
 * ★★★ PACE, THEN PARK. The park was ABOVE vm_pace, so the host sampled before the clock ticks
 * that lead to this cycle -- while the oracle's Recorder fires inside interpret_cycle, i.e.
@@ -265,6 +377,41 @@ vp_halted:      lda     #1
 vp_ok:          clr     VP_STATUS
                 lbra    vp_loop
 
+* ═══════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ vp_feed -- what pressing Enter does. words.cpp:326 parseUsingDictionary, via
+* parser.py parse_using_dictionary, via par_parse.
+*
+* ★★★★ THE THREE SIDE EFFECTS ARE THE CALLER'S, NOT par_parse's, AND cycle.py PUTS THEM IN THE
+* SAME PLACE [cycle.py feed_input]:
+*     st.set_flag(VM_FLAG_ENTERED_CLI, entered)
+*     st.set_flag(VM_FLAG_SAID_ACCEPTED_INPUT, False)
+*     if not_found: self.set_var(VM_VAR_WORD_NOT_FOUND, not_found)
+* ★★★ THE `if not_found` IS LOAD-BEARING AND IS EASY TO DROP. The reference writes the variable
+* only when a word was NOT found; writing 0 unconditionally would be a different program on
+* every cycle where a line parses cleanly, and vm_post_cycle is what zeroes it afterwards.
+* ★★ par_cli / par_accepted are read back out of parser.s here and published into VM_FLAGS,
+* which is the home of record (§2F) and the half of the state the AC-2 diff actually compares.
+vp_feed:
+                ldx     #VP_INBUF
+                stx     par_inbuf
+                ldx     #VP_CLNBUF
+                stx     par_clnbuf
+                jsr     par_parse
+                lda     #FLAG_ENTERED_CLI
+                ldb     par_cli
+                jsr     vm_setflag
+                lda     #FLAG_SAID_ACCEPTED
+                clrb
+                jsr     vm_setflag
+                lda     par_notfound
+                beq     vp_feed_nonf            ; ★ ONLY when a word was not found
+                ldb     par_notfound
+                lda     #VAR_WORD_NOT_FOUND
+                jsr     vm_setvar
+vp_feed_nonf:
+                inc     vm_fedn
+                rts
+
                 include "src/harness/vm_tables.s"
                 include "src/harness/vm_state.s"
                 include "src/harness/vm_core.s"
@@ -274,6 +421,11 @@ vp_ok:          clr     VP_STATUS
                 include "src/harness/vm_objects.s"
                 include "src/harness/vm_cycle.s"
                 include "src/harness/res_core.s"
+* ★★★★ THE ENGINE'S PARSER, UNCHANGED, INCLUDED BY THE HARNESS. src/engine/parser.s is gated at
+* 23,328 cases across five titles [T-P0-059] and is not touched by this task -- if it were, that
+* gate would be a claim about a different file. The wiring is vm_tests.s's vmtest_said and
+* vp_feed above, both of which are new code in the HARNESS.
+                include "src/engine/parser.s"
 
                 include "src/hal/coco3-dsk/hal_globals.s"
                 include "src/hal/coco3-dsk/sys.s"
@@ -305,6 +457,27 @@ VM_CODE_END     equ     *
 * ═══════════════════════════════════════════════════════════════════════════════════
                 ifgt    VM_OBJ_END-VM_TESTSEEN
                 error   "VM_OBJ overlaps VM_TESTSEEN"
+                endc
+* ★★★ T-P0-060's THREE NEW REGIONS, each checked in the direction that can fail. The input
+* buffers live in the 224-byte gap between the object table and the coverage tables, which is a
+* gap only as long as neither neighbour moves -- and both have moved before (vm_state.s's own
+* header is about exactly that).
+                ifgt    VM_OBJ_END-VP_INBUF
+                error   "VM_OBJ overlaps VP_INBUF -- the object table would eat the input line"
+                endc
+                ifgt    VP_INBUF+42-VP_CLNBUF
+                error   "VP_INBUF overlaps VP_CLNBUF"
+                endc
+                ifgt    VP_BUF_END-VM_TESTSEEN
+                error   "the input buffers overlap VM_TESTSEEN"
+                endc
+* ★★ And the vocabulary window must hold the corpus. 6,828 is SpaceQuest-2's WORDS.TOK, the
+* largest of the twelve [T-P0-059 §3.E]. An assertion, not a table a human reads [AD-78].
+                ifgt    6828-VP_VOCAB_MAX
+                error   "the vocabulary window is smaller than the largest corpus WORDS.TOK (6,828 B)"
+                endc
+                ifgt    RES_ARENA_END-VP_VOCAB
+                error   "RES_ARENA runs into the vocabulary window"
                 endc
                 ifgt    VM_TESTSEEN+256-VM_OPSEEN
                 error   "VM_TESTSEEN overlaps VM_OPSEEN"

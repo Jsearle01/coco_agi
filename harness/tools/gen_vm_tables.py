@@ -127,8 +127,14 @@ def build(implemented, status):
     # ── argument counts ────────────────────────────────────────────────────────────────
     out.append("\n* ── VMOP_ARGS: argument bytes per command opcode ──────────────────")
     out.append("* ★ ScummVM: parameterSize = strlen(parameters). Every parameter is one byte.")
+    # ★★★★ SIZED TO THE OPCODE SPACE [M-48's 73 bytes]. Entries 183-255 were every one of them
+    # $00, and vm_core.s's new `cmpa #VMOP_MAX / blo` path advances ip by a `clrb` -- the same
+    # nothing. **The two paths were already identical; only the 73 bytes differed.**
+    # ★★★ VMOP_MAX is emitted here rather than typed in the assembly, for the reason the whole
+    # file exists: a bound that disagrees with the table it bounds reads the table's neighbour.
+    out.append("VMOP_MAX        equ     %d" % len(cmds))
     out.append("VMOP_ARGS:")
-    args = [0] * 256
+    args = [0] * len(cmds)
     # ★★★ THE INDEX *IS* THE OPCODE. dispatch.py: `self.commands[i] = Opcode(i, ...)`.
     # ★ The first draft of this generator used args[i+1] and cmds[i-1], which would have wired
     # EVERY handler to the wrong opcode and every argument count one place off -- silently, and
@@ -137,10 +143,9 @@ def build(implemented, status):
     # what verify_against_dispatch() below now does.
     for i, (name, params, _h) in enumerate(cmds):
         args[i] = len(params)
-    for row in range(0, 256, 16):
-        vals = " ".join("$%02X" % a for a in args[row:row + 16])
+    for row in range(0, len(args), 16):
         out.append("                fcb     " + ",".join("$%02X" % a for a in args[row:row + 16])
-                   + "        ; %02X-%02X" % (row, row + 15))
+                   + "        ; %02X-%02X" % (row, min(row + 15, len(args) - 1)))
 
     # -- test argument counts ---------------------------------------------------------
     out.append("")
@@ -167,9 +172,12 @@ def build(implemented, status):
     out.append("* ★★ Unimplemented entries point at vm_op_unimpl, which HALTS with the opcode")
     out.append("* number. AC-5 forbids a silent no-op: it would desynchronise nothing and")
     out.append("* diverge everything, so the diff would name a symptom, never the cause.")
+    # ★★★★ AND THE HANDLER TABLE, M-48's other 146 bytes -- 73 entries x 2. Out-of-range now
+    # takes vm_core.s's `ldx #vm_op_unimpl` branch, which is THE SAME HANDLER the padding
+    # pointed at, so the change is a layout change and not a behaviour change.
     out.append("VMOP_TAB:")
     miss_cmd = []
-    for i in range(256):
+    for i in range(len(cmds)):
         if i == 0:
             out.append("                fdb     vm_op_return            ; 00 return")
             continue

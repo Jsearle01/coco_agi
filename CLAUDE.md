@@ -1,7 +1,20 @@
 # CLAUDE.md — AGI Interpreter → CoCo3 Project (Clyde standing rules)
-## Working Agreement v1.6 (forked from POP3_port CLAUDE.md v1.1)
-**Version:** 1.6
+## Working Agreement v1.8 (forked from POP3_port CLAUDE.md v1.1)
+**Version:** 1.8
 **Instantiates:** CODM v0.7. Where this doc and v0.7 overlap, v0.7 governs; this doc adds AGI invariants.
+
+**Changelog v1.7 → v1.8 (2026-09-06, Jay).** ★★★★★ **§2W ADDED — an instrument must be shown able to
+FAIL before its output is believed.** Five instruments have now testified rather than measured: a stale
+binary [AD-90], a blind counter [AD-102], a comparison reading one plane of two [AD-122], an adjudicator
+reading a previous run's outputs [AD-131], and — ★★★★★ **a guard added to prevent a recurrence that could
+not fire, because it read an `lfs` global MAME's Lua does not define** [P6.3]. No other rule changed.
+
+**Changelog v1.6 → v1.7 (2026-09-06, Jay).** ★★★ **§2U ADDED — MAME-based gates run `-nothrottle`.**
+Measured: the renderer gate **312.7 s → 16.5 s, 19×**, 45/45 PASS with every per-picture hash identical;
+the full suite **403.7 s → 74.8 s** [AD-130]. ★★★★ **§2V ADDED — the offline reference is written in
+Python, and its DATA STRUCTURES AND ALGORITHMS must be ones a 6809 can hold.** Three of this project's
+lessons came from the Python shape and the target shape disagreeing [L-66, L-67, AD-88]. No other rule
+changed.
 
 **Changelog v1.5 → v1.6 (2026-09-06, Jay).** ★★★★★ **§4A ADDED — on INTEGRATION tasks the eye gate runs
 FIRST and the byte gates confirm it.** Three defects in two runs were found by a human watching a screen
@@ -760,6 +773,156 @@ Then the after-build output in full, and the comparison.
 
 ★ **If you cite and the after-build differs, say plainly whether you believe the CHANGE caused it or the
 BASELINE was stale — and if there is any doubt, rebuild the before side and report both.**
+
+---
+
+## 2U. ★★★ MAME-based gates run `-nothrottle`
+
+**MAME paces to real time by default — 1.79 MHz emulated means 1.79 MHz — so a gate spends its wall
+clock waiting rather than working.**
+
+★★★★ **Measured** [AD-130]: **the renderer gate took 312.7 s at 99.98% speed; unthrottled it takes 16.5 s
+at 2869% — 19×, with 45/45 PASS and EVERY per-picture hash identical.** ★★★ **Verified the same way for
+cel, comp and p3b before being made the default. Full suite: 403.7 s → 74.8 s.**
+
+### 2U.1 What it does not change
+
+★★★★ **Nothing a gate MEASURES.** ★★★ **Cycle counts are clock-independent, and this project measures
+cycles.** ★★ **`VP_MARK` closes calibration intervals at the guest's own instruction precisely so a
+host-side interval is never the instrument** [L-78, AD-100].
+
+★★★ **But confirm rather than assume:** ★★ **before enabling it on a new gate, check nothing in that
+sweep derives timing from wall clock.** ★ **If something does, that is a defect in the gate, not a reason
+to throttle it.**
+
+### 2U.2 ★★★ The exception, and it is not a compromise
+
+★★★★★ **Jay's visual gate is EXCLUDED, by instruction and by what it is for.** ★★★ **An eye gate nobody
+can watch at 2869% is not an eye gate**, and `p3b_show.lua` carries a standing note saying so.
+
+★★ **Any gate whose output is a human judgement runs at normal speed.** ★ **Every gate whose output is a
+byte comparison does not.**
+
+### 2U.3 ★★ Why a fast suite is a correctness matter
+
+★★★ **The suite is run on every task.** ★★★★ **A slow suite is a suite people run less often** — ★★ **and
+three of the last five findings were things a gate should have caught and did not.**
+
+---
+
+## 2V. ★★★★ The offline reference is Python; its structures must transfer
+
+**Every subsystem is built first as a Python reference, gated against the oracle, then ported. That order
+is right and it stays.**
+
+> ★★★★★ **But Python can express what AGI DOES and not what the CoCo3 COSTS. No windows, no banking, free
+> allocation, free copies.**
+
+### 2V.1 Three lessons came from exactly this
+
+| | |
+|---|---|
+| ★★★ **L-66** | **The reference caches LOGIC in a dict for free, so the port re-copied it 3.01 times per cycle** — ★★★★ **Python's cost model hid a 56% cost.** |
+| ★★★ **L-67** | **Clearing a Python dict leaves the held object intact; on the 6809 the BYTES ARE THE STORAGE.** ★★★ **The same invalidation policy halted nine titles at cycle 0.** |
+| ★★★★ **AD-88** | **`tools/agivm` and `picrender` use FLAT ARRAYS**, so the port assumed flat addressing and wrapped `$C000 + 26,879` into its own code — ★★★★★ **and that assumption survived into a SECOND defect** [AD-121]. |
+
+### 2V.2 ★★★★ The rule
+
+★★★★★ **When the reference commits to a data structure or an algorithm, name the 6809 form it will take
+and its cost — in the source, at the point of the decision.**
+
+★★★ **The four that reliably diverge:**
+
+- ★★★★ **Strings.** ★★ **The 6809 has bytes and no allocation.** ★ **A fixed buffer, not a list of Python
+  strings.**
+- ★★★★ **Residency.** ★★★ **A resource is in BANKED MEMORY, not a dict** — ★★ **and if it exceeds 8,192
+  bytes it needs more than one window** [AD-78's arena did].
+- ★★★ **Lookup.** ★★ **A dict is O(1) and free; on the 6809 it is a SEARCH.** ★ **Say what shape.**
+- ★★ **Unbounded containers.** ★★★ **A Python list grows; a 6809 array does not.** ★ **State the maximum.**
+
+### 2V.3 ★★★ What this does not ask for
+
+★★★★ **Do not write 6809 code in the reference task.** ★★★ **Offline first is still right** — ★★ **every
+subsystem that followed that order arrived correct, and the two ported first needed dependencies found by
+measurement afterwards** [X-51, X-55].
+
+★★★ **Do not optimise the Python.** ★★ **It is the oracle and clarity serves it.** ★ **What is wanted is
+that the SHAPE it commits to is one a 6809 can hold.**
+
+★★★★ **And if a portable structure would make the reference materially harder to verify against the
+oracle, choose the VERIFIABLE one and record the divergence** — ★★ **the reference's job is to be right
+first.**
+
+### 2V.4 ★★★★ The artifact, and it is checkable
+
+★★★ **One row per structure: what it is in Python, what it becomes on the 6809, what the port will
+cost.** ★★★★★ **Then, at port time, a second column: what it actually cost.**
+
+★★ **`tools/agivm/parser.py`'s header is the first instance** — ★★★ **and its central point was confirmed
+and was not stylistic: the temptation was a `{word: id}` dict, and it would have been BOTH unportable AND
+semantically wrong.** ★ **The portability constraint caught a correctness issue.**
+
+---
+
+## 2W. ★★★★★ An instrument must be shown able to FAIL before its output is believed
+
+> ★★★★★ **A green check is evidence only if the same check has been seen to go red. Until then it is an
+> unexercised assertion wearing a measurement's clothes.**
+
+★★★★ **This is not a counsel of perfection. It is the single most expensive class of defect this project
+has produced, five times, each by a different mechanism:**
+
+| | the instrument | what it did instead |
+|---|---|---|
+| **AD-90** | the resource gate | ★★★ **never assembled its source** — two tasks' results came from a pre-cache binary |
+| **AD-102** | `opcount`, the work-invariance check | ★★★ **constant across every arm, including one that should zero it** |
+| **AD-122** | the divergence comparison | ★★★★ **read one plane of two** — six published figures, each a real number about the wrong artifact |
+| **AD-131** | the cel adjudicator | ★★★★ **graded the previous run's directories** — the pass survived the gate not running |
+| ★★★★★ **P6.3** | **a guard added to PREVENT a recurrence** | ★★★★★ **could not fire — it read an `lfs` global MAME's Lua does not define, and passed a map deliberately stalened** |
+
+★★★ **In all five the adjudication was correct and its INPUTS were not.**
+
+### 2W.1 ★★★★ The requirement
+
+★★★★★ **Before an instrument's output is quoted in a report, run the case that should make it FAIL, and
+show that it did.**
+
+- ★★★★ **A work-invariance counter: run the arm that does no work. It must reach zero** [L-79].
+- ★★★★ **A gate: inject the fault. It must catch it, on THIS build and THIS corpus** [L-62] — ★★
+  **fault-detectability does not survive either changing.**
+- ★★★★★ **A guard: break it on purpose in BOTH directions before believing it.** ★★★ **P6.3's guard was
+  tested only against the case it was meant to allow.**
+- ★★★ **A comparison: count the artifacts the run produces against the artifacts the comparison reads.**
+  ★★ **If the second number is smaller, it is scoped by accident** [L-88].
+
+### 2W.2 ★★★ Corollaries that have each cost a task
+
+★★★★ **An arm proven for one question is not proven for another** [L-82]. ★★★ **`VM_PACEONLY` drives
+`opcount` to zero and cannot price the harness floor, because it silently changes how much pacing
+happens.**
+
+★★★★ **An ablation can exonerate the wrong component when both arms move the same harness variable**
+[L-73]. ★★★ **Name every variable a toggle moves, not only the intended one.**
+
+★★★ **A fixed sample that always passes is evidence about the sample first** [L-86]. ★★ **Picture 80 was
+clean for eleven tasks because it is the minimum-fill picture in the set.**
+
+★★ **Clear the output directory as part of the run** [L-92]. ★ **An adjudicator that CAN read a previous
+run's artifacts WILL.**
+
+### 2W.3 ★★★★ What a diagnostic must never do
+
+★★★★★ **A diagnostic that cannot be wrong does not measure — it testifies.**
+
+★★★ **P6.3's stall dump printed `fpos=33849` — an offset of 33,849 into a 34-byte string — from three
+hard-coded symbol addresses that had gone stale by two bytes.** ★★★★ **Not a plausible wrong answer but
+the single most incriminating one the situation could produce**, and it accused four titles that were
+working.
+
+★★ **So: a diagnostic that reads symbol addresses resolves them; one that reports a position bounds-checks
+it; and one that labels a side names the side it actually has.** ★★★ **`said_gate.py --results` printed
+the 6809 side under the label `oracle`, and every port run that task made asserted a provenance it did not
+have.**
 
 ---
 

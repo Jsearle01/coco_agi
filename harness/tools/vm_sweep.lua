@@ -46,6 +46,16 @@ local VM_VARS   = 0x4000
 local GO, STATUS, BADOP, BADLOGIC, CYCLE = 0x0080, 0x0081, 0x0082, 0x0083, 0x0084
 local FREE      = 0x0090                                     -- VP_FREE, the AC-7 free-run counter
 local CALADDR   = 0x0092                                     -- VP_CAL, the calibration block count
+-- ★★★★ T-P0-060: the scripted input path. VP_FEED and VP_VOCAB_BAD are handshake slots and are
+-- declared in vm_probe.s beside the rest of that block; the parser's own addresses (par_vocab,
+-- vm_saidn, vm_saidm, vm_fedn) come from the SYMBOL MAP, never from a literal here [P6.3 §3.F.2
+-- -- three hard-coded addresses in a diagnostic, every one two bytes stale, printed fpos=33849].
+local FEED      = 0x0096                                     -- VP_FEED
+local VOCAB_BAD = 0x0097                                     -- VP_VOCAB_BAD, 2 bytes
+local INBUF     = 0x6220                                     -- VP_INBUF, 42 B (text.h:170)
+local INBUF_MAX = 42
+local VOCAB     = 0xE000                                     -- VP_VOCAB
+local VOCAB_MAX = 0xFF00 - 0xE000                            -- 7,936 >= 6,828 (SpaceQuest-2)
 
 local m    = manager.machine
 local cpu  = m.devices[":maincpu"]
@@ -124,6 +134,28 @@ if VMTR then
       VMTR_BUF, VMTR_IDX, VMTR_LOG, VMTR_FROM, VMTR_FROM + 384)
 end
 
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+-- ★★★★ THE SCRIPTED INPUT [T-P0-060 AC-4]. Both legs read THE SAME TWO FILES out of the stage
+-- directory -- words.tok and input.txt, written there by vm_stage.py from the game and from
+-- vm_input_script.py. ★★★ One producer, two consumers: if the host synthesised its own text
+-- here, the reference and the guest could be fed different lines and the diff would report a
+-- parser defect. §2O.1's rule, applied to the INPUT rather than to the baseline.
+-- ★★ Absent = no parser, and that is every existing gate invocation.
+local words = slurp(STAGE .. "/words.tok")
+local script = {}
+do
+    local f = io.open(STAGE .. "/input.txt", "r")
+    if f then
+        for line in f:lines() do
+            if line ~= "" and line:sub(1, 1) ~= "#" then
+                local c, t = line:match("^(%d+)%s(.*)$")
+                if c then script[tonumber(c)] = t end
+            end
+        end
+        f:close()
+    end
+end
+
 local function stage()
     for _, e in ipairs(vols) do
         local vnr, base = e[1], e[2]
@@ -160,12 +192,76 @@ local function stage()
     prog:write_u8(SYM.res_slicebase, 0)
     prog:write_u8(SYM.res_slicebase + 1, 0)
     prog:write_u8(SYM.res_curblk, 0xFF)
+
+    -- ═══════════════════════════════════════════════════════════════════════════════════
+    -- ★★★★★ THE VOCABULARY [T-P0-060]. WORDS.TOK is a RESOURCE: it is staged into a window and
+    -- read in place, and no index is built (§2V.2's residency row; parser.s's header).
+    -- ★★★★ REFUSE IF THE GUEST'S OWN SELF-TEST FAILED. $E000-$FEFF is above $8000, and
+    -- vm_state.s records two tasks spent on a wrong mechanism read out of a HOST readback up
+    -- there -- "MAME cannot see it" and "it is not RAM" look identical from here. The guest
+    -- writes a walking pattern and reads it back itself; a non-zero VP_VOCAB_BAD means the
+    -- window is not usable and staging into it would produce a parser that reads noise and a
+    -- divergence that points at parser.s. **A check that cannot refuse is not a check** [§2W].
+    if words then
+        local vb = prog:read_u8(VOCAB_BAD) * 256 + prog:read_u8(VOCAB_BAD + 1)
+        if vb ~= 0 then
+            w("★★★ vocabulary window self-test FAILED at $%04X -- the guest cannot hold "
+              .. "WORDS.TOK there. NOT staging; the parser would read noise.", vb)
+            return false
+        end
+        if #words > VOCAB_MAX then
+            w("★★★ WORDS.TOK is %d bytes, past the %d-byte window", #words, VOCAB_MAX)
+            return false
+        end
+        for i = 1, #words do prog:write_u8(VOCAB + i - 1, words:byte(i)) end
+        -- ═══════════════════════════════════════════════════════════════════════════════
+        -- ★★★★★ READ BACK A SAMPLE, NOT THE FIRST BYTE. The first version compared byte 1 only
+        -- and printed "readback $00 vs $00 OK" -- and WORDS.TOK's first byte IS zero (the 'a'
+        -- bucket's head offset, high half), so **that check passes on RAM nothing was written
+        -- to**. It was written to verify staging and could not fail on the case it was written
+        -- for [§2W: an instrument must be shown able to FAIL].
+        -- ★★★ Caught by reading my own output rather than by a run going wrong, which is the
+        -- cheap way to find this class and the only way that does not cost a task first. The
+        -- volume staging above has the same shape and is NOT changed here -- a second change
+        -- riding on this one [L-54]; it is reported instead.
+        -- ★★ 33 points spread across the file plus the last byte: enough that an all-zero or
+        -- unwritten window cannot match a real dictionary, cheap enough to be unconditional.
+        local bad, checked = 0, 0
+        for k = 0, 32 do
+            local off = math.floor((#words - 1) * k / 32)
+            checked = checked + 1
+            if prog:read_u8(VOCAB + off) ~= words:byte(off + 1) then bad = bad + 1 end
+        end
+        local nz = 0
+        for k = 1, math.min(#words, 64) do if words:byte(k) ~= 0 then nz = nz + 1 end end
+        w("  vocabulary %d bytes -> $%04X; window self-test clean; readback %d/%d sample points "
+          .. "match (%d non-zero in the first 64) %s",
+          #words, VOCAB, checked - bad, checked, nz, bad == 0 and "OK" or "★★★ MISMATCH")
+        if bad ~= 0 then return false end
+        -- ★★ par_vocab is what makes the parser live. Until it is set the port is inert by
+        -- construction and vmtest_said returns false on testSaid's own guard -- which is what
+        -- every run without an input script gets, and why the nine-title gate is unmoved.
+        prog:write_u8(SYM.par_vocab, math.floor(VOCAB / 256))
+        prog:write_u8(SYM.par_vocab + 1, VOCAB % 256)
+    end
     if VMTR then
         prog:write_u8(SYM.vmtr_from, math.floor(VMTR_FROM / 256))
         prog:write_u8(SYM.vmtr_from + 1, VMTR_FROM % 256)
         prog:write_u8(SYM.vmtr_logic, VMTR_LOG)
     end
     return true
+end
+
+-- ★★★★ THE WIRING'S COVERAGE, FROM THE GUEST'S OWN COUNTERS. vm_stage.py prints the same three
+-- numbers for the reference; printing them side by side is what makes "the state diff is clean"
+-- evidence ABOUT said() rather than evidence that said() was never reached -- which is exactly
+-- what the stub also produced [§2W: an instrument must be shown able to fail].
+-- ★ Symbols, not literals. A build without them prints nothing rather than reading $0000.
+local function report_parser()
+    if not (SYM.vm_saidn and SYM.vm_saidm and SYM.vm_fedn) then return end
+    local function u16(a) return prog:read_u8(a) * 256 + prog:read_u8(a + 1) end
+    w("    said(): evaluated %d, matched %d;  inputs fed %d   [6809 side]",
+      u16(SYM.vm_saidn), u16(SYM.vm_saidm), prog:read_u8(SYM.vm_fedn))
 end
 
 local out = io.open(OUT .. "/guest.bin", "wb")
@@ -309,8 +405,17 @@ _G._n = emu.add_machine_frame_notifier(function()
         idx:write(string.format("%d,%d,%d,%d\n", n - 1, st,
                                 prog:read_u8(BADOP), prog:read_u8(BADLOGIC)))
         if st ~= 0 then
-            w("★★★ guest HALTED at cycle %d: opcode $%02X in logic %d",
-              n - 1, prog:read_u8(BADOP), prog:read_u8(BADLOGIC))
+            -- ★★★★ WITH A SCRIPT FED, A "HALT" MAY BE THE GAME QUITTING. vm_probe.s sets
+            -- VP_STATUS from vm_quit as well as from a bad opcode, and a said() branch that
+            -- reaches quit is the wiring WORKING [T-P0-060: Kingquest1 runs 600 cycles with no
+            -- input and 140 with the script]. badop=0 with quit set is that case; the reference
+            -- must stop at the same cycle or vm_diff.py fails on the length.
+            w("★★★ guest HALTED at cycle %d: opcode $%02X in logic %d%s",
+              n - 1, prog:read_u8(BADOP), prog:read_u8(BADLOGIC),
+              (prog:read_u8(BADOP) == 0 and prog:read_u8(SYM.vm_quit or 0) ~= 0)
+                and "   ★ badop=0 and quit set -- this is the GAME QUITTING, not a bad opcode"
+                or "")
+            report_parser()
             w("    codelen=%d ip=%d lastop=$%02X opcount=%d icguard=%d",
               prog:read_u8(0x0086)*256 + prog:read_u8(0x0087),
               prog:read_u8(0x0088)*256 + prog:read_u8(0x0089),
@@ -370,6 +475,7 @@ _G._n = emu.add_machine_frame_notifier(function()
     if n >= NCYC then
         out:close(); idx:close()
         w("★ %d cycles complete", n)
+        report_parser()
         w("    ego x=%d y=%d  var0=%d var109=%d  icguard=%d  resdepth=%d restop=%04X",
           prog:read_u8(0x4240), prog:read_u8(0x4241), prog:read_u8(0x4000),
           prog:read_u8(0x406D), prog:read_u8(SYM.vm_icguard or 0),
@@ -447,6 +553,33 @@ _G._n = emu.add_machine_frame_notifier(function()
     for i = 0, 31 do buf[#buf + 1] = string.char(prog:read_u8(VM_FLAGS + i)) end
     for i = 0, 255 do buf[#buf + 1] = string.char(prog:read_u8(VM_VARS + i)) end
     out:write(table.concat(buf))
+
+    -- ═══════════════════════════════════════════════════════════════════════════════════
+    -- ★★★★★ ARM THE FEED ONE PARK EARLY, AND THE OFF-BY-ONE IS DELIBERATE.
+    -- This park is where cycle `n` is sampled; the release below runs cycle n's BODY. The guest
+    -- then does vm_post_cycle, vm_pace, and THEN checks VP_FEED -- before it parks again for
+    -- cycle n+1. So a feed armed here lands before the body of cycle n+1, and cycle n+1's
+    -- sampled row carries its ENTERED_CLI.
+    -- ★★★★ cycle.py feeds immediately before interpret_cycle() for that cycle, and
+    -- interpret_cycle() emits its trace row at the top -- so the reference's row for cycle n+1
+    -- carries it too. **"Cycle N" means the same thing on both sides**, which is the invariant
+    -- this file's header is about and the one a shifted park already broke once.
+    -- ★★ The text is written NUL-terminated and bounded at 42, the oracle's own _prompt[42]
+    -- [text.h:170]. A longer line is refused rather than truncated: a truncated line still
+    -- parses, into something nobody asked for.
+    local feed = script[n + 1]
+    if feed then
+        if #feed >= INBUF_MAX then
+            w("★★★ input for cycle %d is %d chars, past the oracle's %d-byte input line -- "
+              .. "NOT fed", n + 1, #feed, INBUF_MAX)
+        else
+            for i = 1, #feed do prog:write_u8(INBUF + i - 1, feed:byte(i)) end
+            prog:write_u8(INBUF + #feed, 0)
+            prog:write_u8(FEED, 1)
+            -- ★ §2P: the CYCLE and the LENGTH, never the text. It is the game's dictionary.
+            w("  ★ input armed for cycle %d (%d chars)", n + 1, #feed)
+        end
+    end
 
     n = n + 1
     prog:write_u8(GO, 1)

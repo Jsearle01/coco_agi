@@ -91,6 +91,36 @@ for line in io.lines(LIST) do
 end
 logf("program %d bytes; %d pictures to render; planes=%s", #blob, #names, tostring(PLANES))
 
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+-- ★★★★★ CLEAR WHAT THIS RUN IS ABOUT TO WRITE, BEFORE IT WRITES IT [L-92, CLAUDE.md §2W.2].
+-- This sweep writes ONE PAIR OF FILES PER PICTURE and picgate.py drives from the manifest, so
+-- a picture this run never rendered is graded from the file the LAST run left behind.
+-- ★★★★ MEASURED, NOT ARGUED (T-P0-060 §3.A): the session was cut at 59 emulated seconds, the
+-- sweep rendered EIGHT pictures -- its own timing.csv says so -- and picgate.py reported
+--     per-picture: 45 PASS, 0 FAIL, 0 with no output   (of 45)
+-- and exited 0. **The renderer gate reported 45/45 on a run that rendered 8.** That is AD-131's
+-- mechanism (the cel adjudicator graded the previous run's directories) in the gate whose
+-- "45/45" is cited by number in every report since P4.
+-- ★★★ AND THE TRUNCATION VECTOR IS NOT HYPOTHETICAL. -seconds_to_run bounds the whole SESSION
+-- and all 45 pictures run inside one; the gate spends 308 of its 900 emulated seconds, i.e.
+-- ~6.8 s per picture, so the budget covers about 131. The corpus is under active pressure to
+-- widen [AD-113: a 71.5% divergence on a picture OUTSIDE the 45] and widening it past ~131 cuts
+-- the session with no diagnostic at all -- quieter than parser_gate's stall, which at least
+-- printed something [P6.3 §3.C].
+-- ★★ THE LIST IS THE RUN'S OWN WORK LIST, not a glob. Deleting `*.bin` would reach files this
+-- sweep does not own; deleting exactly what it is about to write cannot.
+-- ★ After this, a truncated run leaves the file MISSING and picgate.py's existing "NO OUTPUT"
+-- path fires and exits 1. The adjudicator was already right; it was being fed stale inputs.
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+do
+    local nrm = 0
+    for i = 1, #names do
+        if os.remove(OUTDIR .. "/" .. names[i] .. ".fb.bin") then nrm = nrm + 1 end
+        if os.remove(OUTDIR .. "/" .. names[i] .. ".pri.bin") then nrm = nrm + 1 end
+    end
+    logf("cleared %d stale plane file(s) for the %d pictures this run will write", nrm, #names)
+end
+
 -- ★★ THE TIMING TAP. Kept in _G: a tap that is garbage-collected stops firing and reports
 -- nothing, which reads as "the render took no time" rather than as an error.
 _G._t = {}

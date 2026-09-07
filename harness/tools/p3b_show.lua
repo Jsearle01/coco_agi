@@ -220,6 +220,18 @@ end)
 -- ★ The guest blacks its own visible plane at init as well [p3b_probe.s p3_black_visible], so
 -- the port does not depend on this script for the same effect -- this covers only the window
 -- before the guest is running at all.
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+-- ★★★★★ IT IS A FUNCTION NOW, AND p3b_run.lua CALLS IT AFTER THE OK PROMPT [Jay, T-P0-060].
+-- ★★★★ These four writes ran AT SCRIPT LOAD, i.e. before DECB had printed anything -- so the
+-- display left the text screen before the boot was on it and Jay never saw a BASIC prompt:
+-- "you still are not getting to the basic prompt". The takeover was also happening at frame 4,
+-- before the machine was ready, and both halves looked the same from the outside.
+-- ★★★ THE ORDER JAY ASKED FOR: show DECB boot to OK, HOLD it long enough to confirm by eye,
+-- then blank and take the machine over. That is what "black as soon as possible AFTER THE LOAD"
+-- meant [T-P0-056b] -- after, not before, and this ran before.
+-- ★★ The hook is optional on p3b_run.lua's side, so p3b_run.lua still runs standalone (headless,
+-- no display to assert about) with nothing here defined.
+_G._p3b_blank = function()
 prog:write_u8(0xFF98, 0x80)
 prog:write_u8(0xFF99, 0x3E)
 for i = 0, 15 do prog:write_u8(0xFFB0 + i, 0x00) end
@@ -237,8 +249,9 @@ for i = 0, 15 do prog:write_u8(0xFFB0 + i, 0x00) end
 local BLK_VISIBLE = 40
 prog:write_u8(0xFF9D, ((BLK_VISIBLE * 1024) >> 8) & 0xFF)
 prog:write_u8(0xFF9E, (BLK_VISIBLE * 1024) & 0xFF)
-print(string.format("display: mode 2 + 16 black palette entries + VOFFSET=$%04X asserted BEFORE staging",
+print(string.format("display: mode 2 + 16 black palette entries + VOFFSET=$%04X asserted at TAKEOVER",
                     BLK_VISIBLE * 1024))
+end
 -- ═══════════════════════════════════════════════════════════════════════════════════════════
 
 dofile("harness/tools/p3b_room.lua")

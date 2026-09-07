@@ -85,7 +85,12 @@ P3_T_COMP       equ     MAP_STATUS+16
 P3_T_FETCH      equ     MAP_STATUS+20
 P3_T_RENDER     equ     MAP_STATUS+24
 P3_REMAPS       equ     MAP_STATUS+28   ; 2 B: MMU writes this cycle -- AC-6
-* ★ MAP_STATUS+32 is left free for a palette readback if this probe ever has room for one; see
+* ★★★★ STALE, AND IT COST T-P0-060 THE EYE GATE'S FIRST TWO RUNS. MAP_STATUS+32 is NOT free --
+* CNT_VERT is there (see the counter block below) -- and P3_FEED was placed at +32 on the
+* strength of this line. Kept, struck through in words, because a comment that was believed is
+* worth more as evidence than as a deletion [§2H's third check, which is mechanical and which I
+* did not run on my own file].
+* ★ SUPERSEDED: MAP_STATUS+32 is left free for a palette readback if this probe ever has room for one; see
 * the note beside the agi_pal_load call. The status block is 224 B [memmap.inc].
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ P3_PHASE — THE TIMING MARKER, AND AC-5 CANNOT BE ANSWERED WITHOUT IT.
@@ -101,6 +106,30 @@ P3_REMAPS       equ     MAP_STATUS+28   ; 2 B: MMU writes this cycle -- AC-6
 * render), 7/8 composite. The host pairs them; an unpaired marker is a stage that did not
 * return, which is itself the finding.
 P3_PHASE        equ     MAP_STATUS+30
+* ── T-P0-060: the scripted input path, for §4A's eye gate ────────────────────────
+* ★★ The host writes the line into P3_INBUF and sets P3_FEED while the guest is parked at
+* p3_loop; the guest feeds it after vm_pace and before the cycle body, which is the same seam
+* vm_probe.s uses so the two probes cannot disagree about when a keystroke lands.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ +88, AND THE FIRST VERSION SAID +32 BECAUSE A COMMENT IN THIS FILE SAID +32 WAS FREE.
+* Line 88 above reads "MAP_STATUS+32 is left free for a palette readback if this probe ever has
+* room for one". **It is not free: CNT_VERT has been at MAP_STATUS+32 since the renderer landed**
+* (see the counter block below). The comment describes an intention that a later change
+* overtook, and nothing checked it.
+* ★★★★ THE FAILURE WAS EXACTLY WHAT §2F PROMISES. The renderer's vertical-line counter shares a
+* byte with the feed flag, so drawing a room with vertical lines SET P3_FEED -- and the guest
+* dutifully parsed an input line nobody had staged, against a vocabulary that was not there.
+* par_fi_char's walk then had no terminator to find and ran away: the eye gate reported STUCK in
+* the room-jump cycle with 105 hits on six consecutive PCs inside the bucket walk.
+* ★★★★★ AND IT REPRODUCED WITH NO INPUT AND NO VOCABULARY STAGED, which is what proved it was a
+* collision rather than a parser defect -- an ablation, not a reading [L-73].
+* ★★★ THE LESSON IS §8's, and it is the one I skipped: **read the constants back from the file
+* rather than from a comment about them.** A stale comment claiming a byte is free is worse than
+* no comment, because it answers the question you were about to ask.
+* ★★ +88 is past CP_CTRLSTEP's four bytes (+84..+87), the highest offset this probe declares,
+* and the assertion at the foot of this file is what keeps that true rather than this sentence.
+P3_FEED         equ     MAP_STATUS+88
+P3_VOCAB_BAD    equ     MAP_STATUS+89   ; 2 B: first vocabulary-window address that failed
 
 * ── the subsystems' instrumentation, which is NOT optional ───────────────────────
 * ★★★ EVERY ONE OF THESE IS REQUIRED TO ASSEMBLE. pic_draw.s does `ldd CNT_VERT / addd #1 /
@@ -234,6 +263,42 @@ P3_BLK_VISIBLE  equ     40              ; what the display shows and sprites com
 * Index 0 is $00 [content/agi_palette.s], so a zeroed plane is black under the real palette too --
 * the screen never stops being black, and the transition is invisible rather than merely brief.
 * ═══════════════════════════════════════════════════════════════════════════════════════════
+* ═══════════════════════════════════════════════════════════════════════════════════
+* ★★★★ THE VOCABULARY WINDOW, TESTED BY THE GUEST BEFORE ANYTHING IS STAGED INTO IT.
+* $E000-$FEFF is above $8000 and vm_state.s records two tasks spent on a wrong mechanism read
+* out of a HOST readback up there -- from the host, "MAME cannot see it" and "it is not RAM" are
+* the same observation. The guest writes a walking pattern and reads it back ITSELF.
+* ★★★ Run here, before the palette and before any staging, for the same reason vm_probe.s runs
+* its arena test first: a test that runs after the thing it protects has been written is a test
+* of the writing, not of the memory.
+* ★★ It does not disturb either plane -- $E000-$FEFF is MAP_TABLES' region and neither plane
+* lives there -- and p3_clear_planes / agi_pal_load follow it unchanged.
+                ldx     #P3_VOCAB
+p3_vt_wr:       tfr     x,d
+                eora    #$5A
+                eorb    #$A5
+                stb     ,x+
+                cmpx    #P3_VOCAB_END
+                blo     p3_vt_wr
+                ldx     #P3_VOCAB
+p3_vt_rd:       tfr     x,d
+                eora    #$5A
+                eorb    #$A5
+                cmpb    ,x+
+                bne     p3_vt_bad
+                cmpx    #P3_VOCAB_END
+                blo     p3_vt_rd
+                ldd     #0
+                bra     p3_vt_done
+p3_vt_bad:      leax    -1,x
+                tfr     x,d
+p3_vt_done:     std     P3_VOCAB_BAD
+* ★ par_vocab stays 0 until the host stages a dictionary; until then par_said's own guard makes
+* the whole path inert, which is what every p3b run before this task effectively had.
+                ldd     #0
+                std     par_vocab
+                clr     P3_FEED
+
                 lda     #P3_BLK_VISIBLE
                 sta     ph_blk_fb
 * ★★★ CLEAR THE VISIBLE PLANE ONCE, HERE. Blocks 40-43 have never been written, so without this
@@ -395,6 +460,16 @@ p3_run_vm:
                 lda     #1
                 sta     P3_PHASE
                 jsr     vm_pace                 ; BUSY-WAIT to the game's requested rate
+* ★★★★ THE FEED, AT THE SAME SEAM AS vm_probe.s's vp_feed: after the pacing gate, after the
+* previous cycle's vm_post_cycle resets, before the cycle body. cycle.py feeds immediately
+* before interpret_cycle() for the same reason. ★★ Two probes, one seam -- if this one fed after
+* the cycle instead, the eye gate and the byte gate would be testing different programs and only
+* one of them would be the one that was gated.
+                lda     P3_FEED
+                beq     p3_nofeed
+                clr     P3_FEED
+                jsr     p3_feed
+p3_nofeed:
                 lda     #2
                 sta     P3_PHASE
                 lda     #3
@@ -408,6 +483,34 @@ p3_run_vm:
                 jsr     vm_post_cycle
                 lda     #4
                 sta     P3_PHASE
+                rts
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★ p3_feed -- the same three side effects vp_feed publishes, and the same reason they are
+* the CALLER's: cycle.py feed_input() sets ENTERED_CLI from the word count, always clears
+* SAID_ACCEPTED, and writes VAR_WORD_NOT_FOUND **only when a word was not found**.
+* ★★★ Duplicated from vm_probe.s rather than shared, and that is a cost worth naming: the two
+* probes have disjoint maps (§2F is about addresses, and these are eleven instructions against
+* two different buffer pairs). ★★ If a third client appears this belongs in src/engine/ beside
+* parser.s -- recorded so the second instance does not quietly become three.
+p3_feed:
+                ldx     #P3_INBUF
+                stx     par_inbuf
+                ldx     #P3_CLNBUF
+                stx     par_clnbuf
+                jsr     par_parse
+                lda     #FLAG_ENTERED_CLI
+                ldb     par_cli
+                jsr     vm_setflag
+                lda     #FLAG_SAID_ACCEPTED
+                clrb
+                jsr     vm_setflag
+                lda     par_notfound
+                beq     p3_feed_nonf
+                ldb     par_notfound
+                lda     #VAR_WORD_NOT_FOUND
+                jsr     vm_setvar
+p3_feed_nonf:
                 rts
 
 * ── p3_room_check — fetch and render the room's PICTURE when the room changes ────
@@ -811,6 +914,113 @@ phase_draw_enter:
 P3_CODE_END     equ     *
                 ifgt    P3_CODE_END-MAP_CODE_END
                 error   "P3b code overruns the map's code region -- see the .map for the size"
+                endc
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE STATUS BLOCK'S OCCUPANCY, ASSERTED. This file's own comment said MAP_STATUS+32 was
+* free while CNT_VERT sat there, and P3_FEED was placed on top of it -- so the renderer's
+* vertical-line counter armed the parser's feed flag and the eye gate hung in the bucket walk.
+* ★★★★ **An overlap claim checked by a human reading a table is the state these assertions exist
+* to end** [AD-78, memmap.inc's own words]. The status block had no assertion at all; it has two
+* now, and they are the only reason the next offset added here is safe.
+* ★★★ CP_CTRLSTEP is the highest declared offset and it is four bytes wide, so anything new must
+* start at or above +88. ★★ And the whole block is 224 B [memmap.inc's MAP_SEEDSTACK check].
+                ifgt    CP_CTRLSTEP+4-P3_FEED
+                error   "P3_FEED overlaps the compositing counters -- the status block is full up to CP_CTRLSTEP+4"
+                endc
+                ifgt    P3_VOCAB_BAD+2-(MAP_STATUS+224)
+                error   "the status block overruns its 224 bytes into the seed stack"
+                endc
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE PARSER GOES IN MAP_RESERVED, WHICH IS THE REGION RESERVED FOR IT [T-P0-060 AC-9].
+*
+* ★★★★ memmap.inc:105 reads `MAP_RESERVED_END equ $6000 ; 3,328 B, parser + sound`. This is the
+* parser. Placing it here is that reservation being SPENT ON ITS STATED PURPOSE, and the
+* boundaries do not move: MAP_RESERVED stays $5300, MAP_RESERVED_END stays $6000, 3,328 B, and
+* MAP_RESERVED_MIN's floor assertion is untouched. **The dispatch's "MAP_RESERVED is not
+* touched" is satisfied by not moving it, not by not using it.**
+* ★★★ WHY THIS AND NOT MORE CODE-REGION SQUEEZING. p3b had FOUR bytes left [T-P0-059 §7.6] and
+* M-48's range checks returned 203 of them -- real, and 203 against the parser's 870. Squeezing
+* another 670 out of the code region to avoid using a region that exists for this is the shape
+* of decision memmap.inc:72-95 spent three tasks regretting: each step small, each justified,
+* and the reservation down 12.5% with the parser not yet built to argue for itself.
+* ★★ THE `org` COSTS THE GAP IN THE IMAGE, and the gap is what M-48 freed: P3_CODE_END to $5300
+* is padded with zeros in the raw image and poked with it. It is bytes on disk and in the poke,
+* not bytes of RAM pressure -- the region is reserved either way.
+* ★ src/engine/parser.s is UNCHANGED by this task. It is gated at 23,328 cases across five
+* titles [T-P0-059]; including it from a second probe is not a change to it.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ PAD THE GAP EXPLICITLY. `org` ALONE PRODUCES A RAW IMAGE THAT LIES ABOUT ITS OWN
+* ADDRESSES, and this cost the eye gate its first run.
+* ★★★★ lwasm --format=raw emits BYTES, not an address space: a forward `org` moves the assembler's
+* location counter and writes NO PADDING, so the parser's bytes follow P3_CODE_END's immediately
+* in the file. The host pokes the blob at MAP_CODE, so every byte after the org lands
+* (MAP_RESERVED - P3_CODE_END) = 36 bytes BELOW the address its symbol claims. **The image was
+* 13,890 bytes when $566A-$2000 is 13,930 -- short by exactly the gap.**
+* ★★★★ THE SYMPTOM WAS NOT SUBTLE AND IT WAS NOT INFORMATIVE EITHER: `jsr par_parse` entered the
+* parser 36 bytes off, and p3b's watchdog reported STUCK in the feed cycle with PC $0109 x1800 --
+* the guest executing the flood-fill seed stack. ★★★ A hang whose PC is in a DATA region is an
+* entered-at-the-wrong-address signature, and the watchdog naming the PC is what made it one
+* look rather than a session [L-59; and the watchdog is correctly charged per CYCLE, so it fired
+* on the right cycle -- the one the command was fed].
+* ★★★ THE BYTE GATE COULD NOT HAVE CAUGHT THIS. vm_probe.s includes parser.s inline with no org,
+* so it has no gap and the nine-title diff is byte-identical either way. **The defect lives only
+* in the integration probe, in the glue between two things that are each gated** -- §4A.1's exact
+* claim, and the eye gate found it on its first run, before any byte gate was reported.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ AND IT IS NOT IN MAP_RESERVED IN *THIS PROBE*, BECAUSE SOMETHING IS ALREADY THERE.
+* ★★★★★ `CP_CEL equ MAP_RESERVED` (line 174 of this file): p3b's DECODED CEL STAGING lives at
+* $5300 and is **4,784 bytes** -- which already overruns the 3,328 B region into the arena
+* window, and this file's own §8-trigger block reports that rather than patching it. So the
+* parser's first byte, par_vocab, was also the cel buffer's first byte.
+* ★★★★★ THE SYMPTOM WAS A ROOM AWAY FROM THE CAUSE, WHICH IS WHY ONLY THE EYE GATE FOUND IT.
+* Room 83 has ZERO sprites: nothing decodes, and the parser ran 160 cycles with both commands
+* fed, clean. Room 1 has four, and the first cel decode zeroed par_vocab -- so par_find computed
+* `vocab + letter*2` from ADDRESS ZERO and walked the HAL's direct page and the flood-fill seed
+* stack looking for a terminator that is not there. Jay, watching from the outside: *"if youre
+* placing anything at $0000 you are overwriting the DP and probably the stack"* -- which is
+* exactly what a null base pointer reads as.
+* ★★★★ THE ENGINE'S ANSWER IS UNCHANGED AND IS STILL MAP_RESERVED [AC-6, memmap.inc]. This is a
+* HARNESS address, and memmap.inc's header is explicit that the harness keeps its own map.
+* **The probe cannot host the parser where the engine will, because the probe put something else
+* there first** -- a fact about p3b's over-subscribed map, not about the placement decision.
+*
+* ★★★ NO `fill` HERE, AND THAT IS DELIBERATE. A fill to $E000 would put ~36 KB of zeros in the
+* raw image and in the poke. Instead the HOST pokes TWO SEGMENTS -- the code at MAP_CODE and the
+* parser at P3_PARSER_BASE -- with the split read from the map [p3b_run.lua]. ★★ The version
+* above DID fill, to $5300, because without it the parser landed 36 bytes below its own symbols.
+* **The raw image is bytes, not an address space, and somebody has to say where each run goes**;
+* the fill said it one way and the two-segment poke says it the other.
+P3_PARSER_BASE  equ     $E000
+                org     P3_PARSER_BASE
+                include "src/engine/parser.s"
+P3_PARSER_END   equ     *
+
+* ★★★ THE INPUT BUFFERS, 42 BYTES EACH, MEASURED AT THE PIN [text.h:170 `byte _prompt[42]`;
+* TEXT_STRING_MAX_SIZE 40; cycle.cpp:663 var 24 = 38]. They follow the parser, and the
+* vocabulary window follows them, so the whole parser subsystem is one contiguous run and its
+* total is one number.
+P3_INBUF        equ     P3_PARSER_END
+P3_CLNBUF       equ     P3_INBUF+42
+P3_PARSER_TOTAL equ     P3_CLNBUF+42-P3_PARSER_BASE
+
+* ★★★★ THE VOCABULARY WINDOW, AFTER THEM. WORDS.TOK is a RESOURCE read in place from a window
+* (§2V.2 residency; parser.s's header). memmap.inc's slot 5 -- $A000-$BFFF, "nothing mapped" for
+* the whole VM phase -- is the ENGINE's answer and is recorded there [AC-6]. **This probe cannot
+* use it**: slot 5 is p3b's PRIORITY slice, live in every draw phase.
+P3_VOCAB        equ     P3_CLNBUF+42
+P3_VOCAB_END    equ     $FF00           ; ★ $FF00-$FFFF is the I/O page and is not ours
+                ifgt    6828-(P3_VOCAB_END-P3_VOCAB)
+                error   "the vocabulary window is smaller than the largest corpus WORDS.TOK (6,828 B)"
+                endc
+* ★★★★ AND THE ASSERTION THAT WOULD HAVE CAUGHT THE COLLISION. CP_CEL is 4,784 B from
+* MAP_RESERVED; the parser must start above where it ends. An overlap claim checked by a human
+* reading a table is the state these exist to end [AD-78] -- and this file had no assertion
+* covering CP_CEL against anything at all.
+CP_CEL_END      equ     CP_CEL+4784
+                ifgt    CP_CEL_END-P3_PARSER_BASE
+                error   "the decoded-cel buffer runs into the parser -- CP_CEL is 4,784 B from MAP_RESERVED"
                 endc
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════

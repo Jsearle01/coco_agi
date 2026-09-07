@@ -615,4 +615,8 @@ it, and the recurrence is recorded here in §3.H for the reconciler.
 
 ### 11 — Commit
 
-<filled at push>
+`63cd6c9` — *P6.3 the parser ported to 6809: 23,328 cases, five titles, zero divergence*
+(pushed to `origin/wip` before this report).
+
+★ AC-3's widened five-title run (§7.1) lands after this commit and will be pushed as a follow-up
+with its own hash, so that what the Orchestrator fetches is never ahead of what this report claims.

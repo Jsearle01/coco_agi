@@ -19,6 +19,25 @@ are marked EXPECTED-ON because their absence is silent and costly:
   HAL_SYS_FAST_CLOCK -- the machine runs at half speed and no error is raised [AD-100]
   PIC_NOCOUNT        -- counters cost 2.16x and a timing figure taken with them is not comparable
 
+★★★★★ AND BOTH OF THOSE ARE STATEMENTS ABOUT A *TIMING* FIGURE, WHICH IS WHY THIS TOOL
+OVER-REPORTED FOR SIX TASKS [T-P0-060 AC-8]. EXPECTED_ON was applied to every manifest row
+alike, and most rows are CORRECTNESS gates: `res` compares fetched bytes, `comp` compares two
+planes, `pic` is the 45/45 diff. **A clock at half speed cannot change a byte comparison, and
+counters cannot change a rendered plane** -- so three of the four alarms it raised were about
+flags those gates have no use for.
+
+★★★★ THAT IS NOT A COSMETIC FAULT. This file's own header says it: "a checklist that cries wolf
+on six of eight rows trains its reader to skip it." A gate-flag checker that is 75% false is one
+a reader learns to scroll past, and it was carried openly across six tasks in that state.
+
+★★★ THE FIX IS A DECLARATION, NOT A HEURISTIC. gates.manifest now carries `purpose=timing` or
+`purpose=correctness` on every row, and EXPECTED_ON is applied ONLY to timing rows. ★★ It is a
+declared field and not the leading word of the free-text note, because "read the constant back
+from the file rather than from a comment about it" is the lesson this task learned twice the
+hard way. ★ A row with no purpose is an ERROR rather than a default: a default would let the
+next row added slip through unclassified, which is the shape of every scope defect in this
+harness's history [res 74-vs-1,264, cel 1-title-vs-6, the VM's nine titles in an env var].
+
 ★ Guards that only select an ABLATION (ABL_*, *_FAULT) are expected OFF and are listed separately
 so they do not drown the signal.
 
@@ -66,7 +85,10 @@ def guards_of(src):
     return g
 
 
-def report(name, src, flags):
+PURPOSE = re.compile(r"\bpurpose=(timing|correctness)\b")
+
+
+def report(name, src, flags, purpose="timing"):
     defined = set(re.findall(r"-D([A-Za-z_][A-Za-z0-9_]*)", flags))
     # ★ Guards a source sets itself with `equ` are defined too -- p3b sets PLANE_WIN_MMU that way,
     # and treating it as absent would be exactly the false alarm this tool must not raise.
@@ -78,7 +100,7 @@ def report(name, src, flags):
     off_abl = sorted(x for x in g - defined if ABLATION.match(x))
     on = sorted(g & defined)
 
-    print(f"── {name}  ({src}) ──")
+    print(f"── {name}  ({src})  [{purpose}] ──")
     print(f"   ON  ({len(on)}): {' '.join(on) if on else '-'}")
     print(f"   OFF ({len(off)}): {' '.join(off) if off else '-'}")
     # ★★★★ THE FAST CLOCK CAN ALSO BE REACHED WITHOUT THE FLAG, AND THE FIRST VERSION OF THIS
@@ -95,6 +117,16 @@ def report(name, src, flags):
     calls_set_mode = bool(re.search(r"jsr\s+HAL_gfx_set_mode",
                                     (ROOT / src).read_text(errors="replace")))
     bad = []
+    # ★★★★★ EXPECTED_ON IS ABOUT TIMING FIGURES AND IS APPLIED ONLY TO TIMING ROWS [AC-8].
+    # A correctness gate compares bytes: the clock cannot change a byte and the counters cannot
+    # change a rendered plane. Reporting them there is what made this tool 75% false.
+    # ★★ The absences are still PRINTED for every row -- they are in the OFF list above, which is
+    # the whole point of the tool. What is suppressed is the ALARM, not the information.
+    if purpose != "timing":
+        if off_abl:
+            print(f"   (ablations, expected off: {' '.join(off_abl)})")
+        print()
+        return []
     for k, why in EXPECTED_ON.items():
         if k not in g or k in defined:
             continue
@@ -127,7 +159,20 @@ def main():
             p = line.split("\t")
             if len(p) < 3:
                 continue
-            bad += report(p[0].strip(), p[1].strip(), p[3] if len(p) > 3 else "")
+            # ★★★ NO PURPOSE = AN ERROR, NOT A DEFAULT. A default would let the next row added
+            # slip through unclassified, and "the scope of a gate lived in an environment
+            # variable" is a defect this harness has produced four times.
+            mp = PURPOSE.search(line)
+            if not mp:
+                print(f"── {p[0].strip()} ──")
+                print("   ★★★ NO purpose= FIELD. Add `purpose=timing` or `purpose=correctness` "
+                      "to this row in gates.manifest.")
+                print("       EXPECTED-ON guards are about TIMING figures; a correctness gate "
+                      "compares bytes and the clock cannot change one.")
+                print()
+                bad.append(p[0].strip())
+                continue
+            bad += report(p[0].strip(), p[1].strip(), p[3] if len(p) > 3 else "", mp.group(1))
     else:
         bad = report(a.name, a.src, a.flags)
 

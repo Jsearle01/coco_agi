@@ -190,13 +190,39 @@ def build_synonyms(game_dir):
     return vocab, cases, wid, len(spellings)
 
 
-def emit(cases, workdir):
+def emit(cases, workdir, limit=None):
     out = []
     for pat, text in cases:
         out.append("%s\t%s" % (",".join(str(x) for x in pat), text))
     p = pathlib.Path(workdir) / "oracle_parser_cases.txt"
     p.write_text("\n".join(out) + "\n", encoding="ascii")
+    # ═══════════════════════════════════════════════════════════════════════════════════════
+    # ★★★★★ RECORD THE LIMIT, BECAUSE IT DEFINES THE CORPUS AND LIVED ONLY ON A COMMAND LINE.
+    # --check REGENERATES the cases rather than reading the file the oracle consumed, so its
+    # --limit must match the --emit run's or it compares a different corpus. T-P0-059's widened
+    # tokeniser run used --limit 1000; T-P0-060 came to check it and the default 400 produced
+    # 6,210 cases against the oracle's 12,435 on Kingquest3.
+    # ★★★★ THE COUNT CHECK CAUGHT IT AND SAID SO -- "case count 6210 vs oracle 12435" -- which
+    # is the instrument behaving correctly: it refused rather than diffing the wrong corpus.
+    # **The defect is not that it failed, it is that the number needed to make it pass existed
+    # nowhere on disk** and had to be recovered by bisection. Same class as the VM gate's nine
+    # titles living in an environment variable: the SCOPE of a gate is part of its definition.
+    # ★★ Written beside the cases, so the corpus and the parameter that produced it travel
+    # together and a workdir is self-describing.
+    if limit is not None:
+        (pathlib.Path(workdir) / "cases.limit").write_text("%d\n" % limit, encoding="ascii")
     return p, len(cases)
+
+
+def emitted_limit(workdir, fallback):
+    """The --limit that produced this workdir's cases, if it was recorded."""
+    p = pathlib.Path(workdir) / "cases.limit"
+    if p.exists():
+        try:
+            return int(p.read_text(encoding="ascii").strip())
+        except ValueError:
+            pass
+    return fallback
 
 
 def ours(vocab, cases):
@@ -259,10 +285,16 @@ def main():
         print("★★★ FAULT INJECTED: findWordInDictionary keeps the FIRST match, not the last")
 
     if a.tokenise:
-        vocab, cases = build_tokenise(a.game_dir, a.limit)
+        # ★★★ ON --check, THE LIMIT COMES FROM THE WORKDIR IF IT WAS RECORDED. The corpus is
+        # defined by the emit run, not by whatever the checker was invoked with; an explicit
+        # --limit on the command line still wins, so a deliberate re-scope is still possible.
+        lim = a.limit if a.emit or a.limit != 400 else emitted_limit(a.workdir, a.limit)
+        if lim != a.limit:
+            print("limit             : %d, from %s/cases.limit (the emit run's)" % (lim, a.workdir))
+        vocab, cases = build_tokenise(a.game_dir, lim)
         if a.emit:
-            p, n = emit(cases, a.workdir)
-            print("wrote %s  (AC-4: %d tokeniser cases)" % (p, n))
+            p, n = emit(cases, a.workdir, lim)
+            print("wrote %s  (AC-4: %d tokeniser cases, limit %d)" % (p, n, lim))
             return 0
         mine = ours(vocab, cases)
         theirs = read_oracle(a.workdir, a.results)
