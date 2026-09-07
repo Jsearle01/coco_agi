@@ -1,44 +1,44 @@
-﻿#!/bin/sh
-# harness/tools/run_gates.sh -- the four gates, in one place.
+#!/bin/sh
+# harness/tools/run_gates.sh -- ALL FIVE gates, in one place.
 #
-# â˜…â˜…â˜… THIRD SCRIPT WRITTEN FOR THE L-45 REASON, and by now the pattern is the finding rather
+# ★★★ THIRD SCRIPT WRITTEN FOR THE L-45 REASON, and by now the pattern is the finding rather
 # than the incident. T-P0-030 wrote build_comp.sh and run_comp_sweep.sh because the assemble
 # and launch lines lived only in a shell history. **The four GATE invocations were in the same
 # state** -- the renderer, resource, VM and cel gates are the project's primary evidence, cited
 # by number in every report since P4, and the commands that produce those numbers were not on
 # disk anywhere.
 #
-# â˜…â˜… A gate whose invocation is unrecorded cannot be re-run by a reader, which means every
+# ★★ A gate whose invocation is unrecorded cannot be re-run by a reader, which means every
 # "45/45" in the report history is a claim about a command nobody can inspect. That is the
 # same defect as an unsaved analysis script and it sits on more load-bearing numbers.
 #
 # usage:  sh harness/tools/run_gates.sh [pic|res|cel|comp|p3b|all]
 #
-# â˜… Each gate is headless MAME driving its probe through a handshake. -seconds_to_run is
+# ★ Each gate is headless MAME driving its probe through a handshake. -seconds_to_run is
 # EMULATED seconds, not wall clock. Expected results, for comparison:
 #     pic   45/45 pictures, both planes      res   1,264/1,264 fetches (10 volumes)
-#     cel   9,193/9,193 cels, 6 titles       comp  20/20 SpaceQuest-1, 80/80 gameplay
+#     cel   9,193/9,193 cels, 6 titles       comp  124/124 frames, 6 corpora [T-P0-061]
 #     p3b   160 cycles, no stall, err 0      [T-P0-060: a HEALTH gate, not a byte gate]
 #
-# â˜…â˜…â˜…â˜…â˜… AND -seconds_to_run IS A CLOCK CHARGED TO THE WHOLE BATCH, WHICH THE LINE BELOW USED TO
+# ★★★★★ AND -seconds_to_run IS A CLOCK CHARGED TO THE WHOLE BATCH, WHICH THE LINE BELOW USED TO
 # CALL "a safety net rather than a budget that is always spent". T-P0-060 MEASURED it: the pic
 # gate spends **308 of its 900 emulated seconds** for 45 pictures, ~6.8 s each, so the budget
 # covers about 131 -- and the corpus is under pressure to widen [AD-113]. Past that the session
 # is cut mid-sweep with no diagnostic at all, which is quieter than the stall detector that
-# started the sweep [P6.3 Â§3.C]. â˜…â˜…â˜… harness/tools/gate_budget_check.sh is the instrument that
+# started the sweep [P6.3 §3.C]. ★★★ harness/tools/gate_budget_check.sh is the instrument that
 # measures the headroom AND proves the gate notices a cut session, in both directions.
 #
-# â˜…â˜…â˜…â˜…â˜… ONLY `pic` IS DRIVEN FROM THIS FILE, AND THE OTHER THREE LINES USED TO PRETEND TO BE.
+# ★★★★★ ONLY `pic` IS DRIVEN FROM THIS FILE, AND THE OTHER THREE LINES USED TO PRETEND TO BE.
 # Every sweep .lua drives exactly ONE stage. This script launched each of them once, against its
 # default stage, and printed the partial result with exit 0 -- `res` reported "74 fetches
 # complete" under a header claiming 1,264. **A successful-looking run of the wrong scope reads
 # exactly like a pass.** So res and cel now delegate to the drivers that actually loop, and comp
 # requires its stage arguments rather than silently using one title's leftovers.
 #
-# â˜…â˜…â˜… AND THE cel NUMBER IN THAT HEADER WAS A FOSSIL. Aggregating the six staged titles gives
+# ★★★ AND THE cel NUMBER IN THAT HEADER WAS A FOSSIL. Aggregating the six staged titles gives
 # 9,193, not 6,782 -- and 9,193 less PoliceQuest1's 2,411 is exactly 6,782. PoliceQuest1 was
 # staged after the figure was written and the figure was never updated, so the gate had been
-# covering more than it claimed. â˜…â˜… The error was benign in direction and total in kind: the
+# covering more than it claimed. ★★ The error was benign in direction and total in kind: the
 # published number could not be reproduced by any command, including the one printed beside it.
 set -e
 MAME=${MAME:-/c/mame/mame.exe}
@@ -46,61 +46,61 @@ WHICH=${1:-all}
 
 LWASM=${LWASM:-/c/WIN_LWTools/lwasm.exe}
 
-# â˜…â˜…â˜…â˜…â˜… BUILD WHAT WE TEST, AND STAMP THE RESULT. THIS SCRIPT NAMED NO ARTIFACT AT ALL AND WAS
+# ★★★★★ BUILD WHAT WE TEST, AND STAMP THE RESULT. THIS SCRIPT NAMED NO ARTIFACT AT ALL AND WAS
 # THEREFORE INVISIBLE TO A FIRST AUDIT PASS -- but every driver it launches has a DEFAULT:
 # pic_sweep.lua falls back to build/pic_probe.bin, res_sweep.lua to build/res_probe.bin, and so
 # on. **A runner that supplies no program silently runs whatever is on disk**, which is how the
 # resource gate reported on a pre-cache binary for two tasks [L-70].
-# â˜…â˜…â˜… build/pic_probe.bin was a FULL DAY stale when this was written (assembled 08-29 21:38
+# ★★★ build/pic_probe.bin was a FULL DAY stale when this was written (assembled 08-29 21:38
 # against a source tree last touched 08-30 18:03).
-# â˜…â˜… The stamp is a hash of the source's whole include tree, printed beside the verdict, so a
+# ★★ The stamp is a hash of the source's whole include tree, printed beside the verdict, so a
 # future result carries the identity of the code that produced it. A stamp on the BINARY would
 # not have helped -- the binary was fine, it was just old.
-# â˜…â˜…â˜…â˜…â˜… EACH GATE HAS ITS OWN FLAG SET AND THEY ARE ALL DIFFERENT. The first version of this fix
+# ★★★★★ EACH GATE HAS ITS OWN FLAG SET AND THEY ARE ALL DIFFERENT. The first version of this fix
 # passed one blanket -DHAL_GFX_MODE_SERVICE to all four, which would have built comp at 1,373
 # bytes instead of 967 and cel at 1,432 instead of 1,436 -- **a DIFFERENT PROGRAM from the one
 # each gate's numbers were established against.** The repair for "testing a stale binary" was one
 # step from introducing "testing the wrong binary": the same error class, freshly minted.
-# â˜…â˜…â˜… The flag sets below were not chosen, they were RECOVERED, by rebuilding each probe under
+# ★★★ The flag sets below were not chosen, they were RECOVERED, by rebuilding each probe under
 # every candidate combination and matching the byte size of the shipped artifact:
 #     pic 2642 = MODE_SERVICE            res 1969 = MODE_SERVICE   [matches res_run.ps1]
 #     cel 1436 = MODE_SERVICE+FAST_CLOCK comp 967 = no flags       [matches build_comp.sh]
-# â˜…â˜… res and comp corroborate against their existing runners' documented lines; pic and cel had
+# ★★ res and comp corroborate against their existing runners' documented lines; pic and cel had
 # NO recorded build line anywhere in the tree, so size-matching is the only evidence for them and
 # it is evidence about FLAGS, not about currency -- pic matched at 2642 while a full day stale.
 build_and_stamp() {   # build_and_stamp <src> <out> [flags...]
     src="$1"; out="$2"; shift 2
     "$LWASM" --raw -I. "$@" -o "$out" "$src" || {
-        echo "â˜…â˜…â˜… assemble FAILED for $src"; return 1; }
+        echo "★★★ assemble FAILED for $src"; return 1; }
     printf '  built %s from %s  [source-tree %s]\n' \
         "$out" "$src" "$(python harness/tools/gate_audit.py --hash "$src")"
 }
 
 run() {   # run <name> <script> <seconds> <src> <out> [flags...]
-    echo "â•â•â• $1 â•â•â•"
+    echo "═══ $1 ═══"
     name="$1"; script="$2"; secs="$3"; shift 3
-    build_and_stamp "$@" || { echo "â˜…â˜…â˜… $name SKIPPED -- could not build"; echo; return 1; }
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-    # â˜…â˜…â˜…â˜…â˜… -nothrottle: MEASURED, NOT ASSUMED [T-P0-058]. MAME paces to emulated real time by
+    build_and_stamp "$@" || { echo "★★★ $name SKIPPED -- could not build"; echo; return 1; }
+    # ═══════════════════════════════════════════════════════════════════════════════════════
+    # ★★★★★ -nothrottle: MEASURED, NOT ASSUMED [T-P0-058]. MAME paces to emulated real time by
     # default, so a gate that emulates 308 seconds took 308 seconds of Jay's day.
     #     pic gate  THROTTLED  312.7 s at 99.98%     UNTHROTTLED  16.5 s at 2869%   -- 19x
     # **45/45 PASS both ways, every per-picture hash identical**, and the same held for cel
     # (9,193/9,193 with all six per-title counts unchanged), comp (9 corpora x 20/20) and p3b
     # (pictures 22/1/3/83 at 0.0% on both planes).
-    # â˜…â˜…â˜…â˜… WHY IT CANNOT CHANGE A RESULT HERE, which is the part worth writing down: emulation is
+    # ★★★★ WHY IT CANNOT CHANGE A RESULT HERE, which is the part worth writing down: emulation is
     # deterministic and throttle only paces the HOST. Nothing in this harness measures wall clock
     # -- every timing call in every sweep is `m.time:as_double()`, which is EMULATED time. That is
     # not luck: L-78/AD-100 moved this project off host-side intervals after one was found to be
     # the wrong instrument, and VP_MARK exists for the same reason.
-    # â˜…â˜…â˜… res_run.ps1 and vm_run.ps1 had ALREADY been passing -nothrottle for many tasks, so two
+    # ★★★ res_run.ps1 and vm_run.ps1 had ALREADY been passing -nothrottle for many tasks, so two
     # of the gates had been validating this quietly the whole time and nobody had noticed the
     # suite was half-paced.
-    # â˜…â˜… TO RESTORE PACING: MAME_EXTRA=-throttle. MAME_EXTRA is also how any other flag is added
+    # ★★ TO RESTORE PACING: MAME_EXTRA=-throttle. MAME_EXTRA is also how any other flag is added
     # without editing this file, so the flag a measurement was taken under is visible in the
     # environment rather than in a shell history [L-45, applied to the launch step].
-    # â˜… -seconds_to_run is EMULATED seconds, and the sweeps already call machine:exit() on
+    # ★ -seconds_to_run is EMULATED seconds, and the sweeps already call machine:exit() on
     # completion, so it is a safety net rather than a budget that is always spent.
-    # â˜…â˜…â˜…â˜…â˜… JAY'S VISUAL GATE STAYS THROTTLED -- see the note in p3b_show.lua. A human watching a
+    # ★★★★★ JAY'S VISUAL GATE STAYS THROTTLED -- see the note in p3b_show.lua. A human watching a
     # room appear needs it to appear at the speed the machine would.
     # shellcheck disable=SC2086
     "$MAME" coco3 -rompath C:/mame/roms -video none -sound none -window -nomaximize \
@@ -112,20 +112,20 @@ run() {   # run <name> <script> <seconds> <src> <out> [flags...]
 M=-DHAL_GFX_MODE_SERVICE
 F=-DHAL_SYS_FAST_CLOCK
 
-# â˜…â˜…â˜…â˜…â˜… L-72: A RUNNER THAT EXITS 0 ON A PARTIAL RUN ASSERTS MORE THAN IT TESTED. This script
+# ★★★★★ L-72: A RUNNER THAT EXITS 0 ON A PARTIAL RUN ASSERTS MORE THAN IT TESTED. This script
 # ended in a bare `exit 0` and every gate's verdict was thrown away -- picgate.py's exit code,
 # res_aggregate.py's, celgate.py's. **A gate whose adjudicator reports FAIL and whose runner
 # exits 0 is worse than no runner**, because a CI step or a `&&` chain reads it as a pass.
-# â˜…â˜… FAILED accumulates the names; the exit code is the count. A build that could not assemble
+# ★★ FAILED accumulates the names; the exit code is the count. A build that could not assemble
 # counts too -- "skipped" is not "passed".
 FAILED=""
 note_fail() { FAILED="$FAILED $1"; }
 
-# â˜…â˜…â˜… pic's SWEEP is whole -- PIC_LIST/order.txt names all 45 pictures, so one launch covers the
+# ★★★ pic's SWEEP is whole -- PIC_LIST/order.txt names all 45 pictures, so one launch covers the
 # set -- but the sweep only WRITES framebuffers. picgate.py is what compares them and prints
 # 45/45, and this script never called it. **The renderer gate's headline number had no producer
 # here either**, which is the same defect as res and cel wearing different clothes: the launch
-# was recorded and the ADJUDICATION was not. â˜…â˜… A sweep that exits 0 having written 90 .bin files
+# was recorded and the ADJUDICATION was not. ★★ A sweep that exits 0 having written 90 .bin files
 # looks exactly like a gate that passed.
 if [ "$WHICH" = "pic" ] || [ "$WHICH" = "all" ]; then
     if run "renderer (45 pictures)" harness/tools/pic_sweep.lua 900 src/harness/pic_probe.s build/pic_probe.bin $M; then
@@ -136,60 +136,61 @@ if [ "$WHICH" = "pic" ] || [ "$WHICH" = "all" ]; then
     echo
 fi
 
-# â˜…â˜… res: ten (title, volume) pairs, one MAME launch each. res_run.ps1 owns the loop, assembles
+# ★★ res: ten (title, volume) pairs, one MAME launch each. res_run.ps1 owns the loop, assembles
 # its own probe, and res_aggregate.py computes the 1,264 -- which previously had no producer.
 if [ "$WHICH" = "res" ] || [ "$WHICH" = "all" ]; then
-    echo "â•â•â• resources (1,264 fetches, 10 volumes) â•â•â•"
+    echo "═══ resources (1,264 fetches, 10 volumes) ═══"
     powershell -NoProfile -ExecutionPolicy Bypass -File harness/tools/res_run.ps1 >/dev/null 2>&1
     python harness/tools/res_aggregate.py || note_fail res
     echo
 fi
 
-# â˜…â˜… cel: six staged titles. cel_run.sh did not exist until T-P0-039; 9,193 came from a hand
+# ★★ cel: six staged titles. cel_run.sh did not exist until T-P0-039; 9,193 came from a hand
 # loop nobody wrote down.
 if [ "$WHICH" = "cel" ] || [ "$WHICH" = "all" ]; then
     sh harness/tools/cel_run.sh || note_fail cel
     echo
 fi
 
-# â˜…â˜…â˜… comp takes a STAGE and a FRAMES dir and there is no default worth trusting: build/comp_stage
-# holds twelve directories, most of them scratch from past experiments (KQ2-r1, PQ1gate2, one78).
-# Falling back to one of them silently is how a gate reports on a sample nobody chose.
+# ★★★★★ comp IS DRIVEN FROM HERE NOW [T-P0-061 AC-4], and the objection that kept it out is MET
+# rather than overruled. The note below is preserved because it was right: build/comp_stage holds
+# twelve directories, most of them scratch from past experiments (KQ2-r1, PQ1gate2, one78), and
+# **falling back to one of them silently is how a gate reports on a sample nobody chose.**
+# ★★★★ THAT IS AN ARGUMENT AGAINST A DEFAULT, NOT AGAINST A GATE. comp_run.sh DECLARES its six
+# corpora, exactly as res_aggregate.py declares its ten volumes -- so a scratch directory
+# appearing cannot join the gate [L-85: the corpus is part of the claim]. ★★★ A gate outside the
+# suite is a gate that does not run; this was the last one.
+# ★★ It fails on a MISSING summary line too, which is what a session cut short leaves behind.
 if [ "$WHICH" = "comp" ] || [ "$WHICH" = "all" ]; then
-    echo "â•â•â• compositing â•â•â•"
-    echo "â˜… run explicitly, e.g.:"
-    echo "    sh harness/tools/run_comp_sweep.sh build/comp_stage/SpaceQuest-1 oracle/dumps/frames-SpaceQuest-1"
-    echo "  (the default stage is NOT the gate -- see this file's header)"
-    # â˜…â˜… NOT a failure: comp is deliberately not driven from here. But `all` must not claim to
-    # have covered it, so it is named in the summary rather than silently absent.
+    sh harness/tools/comp_run.sh || note_fail comp
     echo
 fi
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-# â˜…â˜…â˜…â˜…â˜… p3b: THE INTEGRATION PROBE, WHICH THIS SUITE DID NOT RUN. gates.manifest's own note says
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ p3b: THE INTEGRATION PROBE, WHICH THIS SUITE DID NOT RUN. gates.manifest's own note says
 # it "was the one probe this file did not list ... 48,537 bytes of source and sixteen p3_*
 # routines built by no gate at all", and T-P0-054 fixed the MANIFEST while leaving the SUITE
 # alone -- so it was still assembled by nothing here.
-# â˜…â˜…â˜…â˜… AND IT IS THE ROW THAT EARNS ITS PLACE. Every defect of the last several tasks lived in
+# ★★★★ AND IT IS THE ROW THAT EARNS ITS PLACE. Every defect of the last several tasks lived in
 # this probe, and T-P0-060 added four more: an org gap, a status-block collision, a reservation
 # that already had an occupant, and a takeover before DECB was ready [idiom 43]. **None of them
 # was reachable from pic, res, cel or comp** -- they live in the glue between subsystems that are
-# each independently gated (Â§4A.1), which is exactly what an integration probe is for.
-# â˜…â˜…â˜… It is a HEALTH gate, not a byte gate: it builds, boots on the real path (waits for DECB's
+# each independently gated (§4A.1), which is exactly what an integration probe is for.
+# ★★★ It is a HEALTH gate, not a byte gate: it builds, boots on the real path (waits for DECB's
 # OK prompt), stages a title, runs N cycles and fails on a watchdog stall, a non-zero err, or a
 # missing completion line. The plane comparison is plane_pair_diff.py and needs P3B_DUMP and an
 # oracle dump per picture, so it stays an explicit run like comp.
-# â˜…â˜… P3B_CYCLES narrows it for a spot-check; the default is the gate.
+# ★★ P3B_CYCLES narrows it for a spot-check; the default is the gate.
 if [ "$WHICH" = "p3b" ] || [ "$WHICH" = "all" ]; then
-    echo "â•â•â• p3b (integration probe: boot, stage, ${P3B_CYCLES:-160} cycles) â•â•â•"
+    echo "═══ p3b (integration probe: boot, stage, ${P3B_CYCLES:-160} cycles) ═══"
     powershell -NoProfile -ExecutionPolicy Bypass -File harness/tools/p3b_show.ps1 \
         -Title "${P3B_TITLE:-Kingquest1}" -Cycles "${P3B_CYCLES:-160}" -Headless || note_fail p3b
     echo
 fi
 
 if [ -n "$FAILED" ]; then
-    echo "â˜…â˜…â˜… GATES FAILED:$FAILED"
+    echo "★★★ GATES FAILED:$FAILED"
     exit 1
 fi
-echo "â˜… gates run:$([ "$WHICH" = "all" ] && echo " pic res cel p3b (comp NOT covered -- run it explicitly)" || echo " $WHICH")  -- all green"
+echo "★ gates run:$([ "$WHICH" = "all" ] && echo " pic res cel comp p3b" || echo " $WHICH")  -- all green"
 exit 0

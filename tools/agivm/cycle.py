@@ -96,6 +96,20 @@ class Vm:
         self.said_seen = 0           # said() evaluations, for the wiring's own coverage number
         self.said_matched = 0        # ... and how many returned True
         self.input_fed = 0
+        # ★★★★★ cmdRestartGame's signal [T-P0-061 AC-8]. The oracle's `_restartGame`: the opcode
+        # sets it, and the outer loop breaks out, re-inits, and clears it (cycle.cpp:580-605).
+        # ★★★★ WE STOP INSTEAD OF RE-INITIALISING, deliberately. A leg that re-inits mid-run is
+        # comparing a fresh game against a continuing one, and the trace would show a restart the
+        # other leg has to reproduce at exactly the same cycle to mean anything. Stopping is the
+        # treatment `quit` already gets and it is GATED: Kingquest1 quits at cycle 140 and the
+        # 6809 halts at the same cycle, byte-identical either side [T-P0-060 AC-4].
+        # ★★★ Separate from should_quit so a report can say WHICH happened -- "the game restarted"
+        # and "the game ended" are different facts and one field cannot carry both.
+        self.should_restart = False
+        # ★ The per-cycle instruction watchdog; see run_logic. Settable so a caller that expects
+        # a long cycle can raise it deliberately rather than editing this file.
+        self.cycle_instr_budget = 100000
+        self._cycle_instr0 = 0
         self.modelled_calls = {}
         self.motion_modes_seen = {}
         self.instruction_counter = 0
@@ -288,8 +302,28 @@ class Vm:
         st.code = lg.bytecode
         st.ip = 0
 
-        while st.ip < len(st.code) and not self.should_quit:
+        while st.ip < len(st.code) and not (self.should_quit or self.should_restart):
             self.instruction_counter += 1
+            # ═══════════════════════════════════════════════════════════════════════════════
+            # ★★★★★ A PER-CYCLE INSTRUCTION BUDGET, BECAUSE max_cycles CANNOT SEE THIS.
+            # ★★★★ T-P0-061 AC-9: feeding one of Kingquest3's lines put this interpreter into a
+            # non-terminating nested call -- `interpret_cycle`'s `while run_logic(0) == 0` loop
+            # spinning through cmdCall, forever, INSIDE a single cycle. `max_cycles` is checked
+            # between cycles, so it never got a turn: the run consumed 700+ CPU seconds and
+            # produced nothing, and two of them ran concurrently before it was noticed.
+            # ★★★ THAT IS THIS TASK'S OWN SUBJECT, ONE LAYER DOWN. A bound that does not bound
+            # the thing that runs away is the batch-clock defect wearing different clothes, and
+            # the reference had no watchdog at all while p3b_run.lua has had one for tasks.
+            # ★★ It RAISES rather than returning, so a caller sees a named failure with the
+            # logic and cycle in it instead of a stall -- "it hangs" becomes "it hangs HERE"
+            # [L-59]. vm_input_script.py already treats a raise as a classification.
+            # ★ The default is ~28x the busiest measured cycle in the corpus (Kingquest3 peaks
+            # near 3,500 instructions in a cycle), so it cannot fire on honest work.
+            if self.instruction_counter - self._cycle_instr0 > self.cycle_instr_budget:
+                raise OpcodeError(
+                    "cycle %d exceeded %d instructions inside one cycle (logic %d, ip %d) -- "
+                    "a logic is not terminating"
+                    % (self.cycle_nr, self.cycle_instr_budget, logic_nr, st.ip - 1))
             op = st.code[st.ip]
             st.ip += 1
 
@@ -377,6 +411,9 @@ class Vm:
             self.trace.emit(self.cycle_nr, st.flags, st.vars)
         self.cycle_nr += 1
 
+        # ★ The watchdog's zero point: this cycle's instruction budget is measured from here.
+        self._cycle_instr0 = self.instruction_counter
+
         ego = st.ego()
         if not st.player_control:
             self.set_var(VM_VAR_EGO_DIRECTION, ego.direction)
@@ -386,7 +423,7 @@ class Vm:
         motion.check_all_motions(self)
 
         st.exit_all_logics = False
-        while self.run_logic(0) == 0 and not self.should_quit:
+        while self.run_logic(0) == 0 and not (self.should_quit or self.should_restart):
             self.set_var(VM_VAR_WORD_NOT_FOUND, 0)
             self.set_var(VM_VAR_BORDER_TOUCH_OBJECT, 0)
             self.set_var(VM_VAR_BORDER_CODE, 0)
@@ -422,7 +459,9 @@ class Vm:
         track each other -- the relationship the timer vars depend on.
         """
         passed = 0
-        while not self.should_quit:
+        # ★ should_restart ends the run for the reason given where it is declared: the oracle
+        # re-inits here and a re-initialising leg cannot be diffed against a continuing one.
+        while not (self.should_quit or self.should_restart):
             self.virtual_ms += 25
             passed += 1
             self.timer_update()

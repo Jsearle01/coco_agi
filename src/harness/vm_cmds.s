@@ -979,6 +979,42 @@ vmop_quit:      lda     #1
                 sta     vm_exitall
                 rts
 
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE THREE OPCODES THE PARSER OPENED THE DOOR TO [T-P0-061 AC-8].
+* Without input an AGI game sits in attract mode and never takes these branches, so the
+* nine-title gate never executed one of them. Feeding a line reaches all three: Kingquest1's
+* script hits save.game and restore.game, Kingquest3's hits restart.game.
+*
+* ★★★★ restart.game -- op_cmd.cpp:1913. THE OPCODE DOES NOT RESTART ANYTHING:
+*     stopSound();  doRestart = AUTO_RESTART ? true : restartDialog();
+*     if (doRestart) { _restartGame = true; setFlag(VM_FLAG_RESTART_GAME,true); menu enable all }
+* The restart itself is the outer loop's (cycle.cpp:580-605): it breaks every interpreter loop,
+* re-runs agiInit(), sets RESTART_GAME again and resets the in-game timer.
+* ★★★ SO WE SET THE FLAG AND STOP, rather than re-initialising. A leg that re-inits mid-run is
+* comparing a fresh game against a continuing one. **Stopping is what `quit` already does and it
+* is gated** -- KQ1 quits at cycle 140 and this probe halts at the same cycle, byte-identical
+* [T-P0-060 AC-4]. vm_restart is separate from vm_quit so the host can say WHICH happened.
+* ★★ stopSound and the menu are presentation; the sound opcodes here are no-ops already.
+vmop_restart_game:
+                lda     #FLAG_RESTART_GAME
+                ldb     #1
+                jsr     vm_setflag
+                lda     #1
+                sta     vm_restart
+                sta     vm_exitall              ; unwind the logic stack, as `quit` does
+                rts
+
+* ★★★★ save.game / restore.game -- modelled as the CANCELLED DIALOG, which is a real AGI path.
+* op_cmd.cpp's cmdSaveGame IGNORES saveGameDialog()'s return value, and that dialog's cancel path
+* returns having touched no VM state. restore's VM_FLAG_RESTORE_JUST_RAN is set INSIDE doLoad
+* (saveload.cpp:737), i.e. only on a restore that actually happened.
+* ★★★ So "the player pressed Escape" is observably nothing, and that is a shipping answer rather
+* than a halt: a game offering a save menu keeps running.
+* ★★ THE SUCCESSFUL BRANCH IS THE STORAGE LAYER'S and is NOT modelled here -- writing a file and
+* restoring from it is not a VM question. Declared, not stubbed into something that pretends.
+vmop_save_game:
+vmop_load_game: rts
+
 * ★ Resource "loads" are set membership in the reference. The diff never reads those sets, so
 * the observable effect is nil -- but they are IMPLEMENTED, not modelled, because load_logic
 * has a real effect (it makes the logic fetchable) and the others must stay symmetrical.

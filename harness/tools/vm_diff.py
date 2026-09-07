@@ -86,14 +86,34 @@ def main():
         print("first divergence : cycle %d" % first)
         print("vars involved    : %s" % sorted(varset))
         print("flags involved   : %s" % sorted(flagset))
-    if len(orc) != len(gst):
-        print("★★ cycle counts differ (%d vs %d) -- the shorter run is what was compared, and a"
-              % (len(orc), len(gst)))
-        print("   guest that stopped early has halted; see cycles.txt for the opcode.")
+    # ═══════════════════════════════════════════════════════════════════════════════════════
+    # ★★★★★ A CYCLE-COUNT MISMATCH IS A DIVERGENCE IN EITHER DIRECTION [T-P0-061 AC-9].
+    # The rule was `len(guest) >= len(oracle)`, so a guest that ran PAST the reference passed.
+    # ★★★★ MEASURED: Kingquest3's parser arm gave oracle 508, guest 509 -- the probe's post-cycle
+    # check tested vm_quit but not vm_restart, so it sampled one extra row -- and this printed
+    # "AC-2 PASS -- byte-identical on every compared cycle". **The gate passed on an asymmetry
+    # because of its own length rule**, while `min()` quietly hid the extra row from comparison.
+    # ★★★ THE ASYMMETRIC RULE HAD A REASON AND IT WAS THE WRONG ONE: it was written so a guest
+    # that halted EARLY would fail loudly, and "longer" was left permissive as the harmless
+    # direction. It is not harmless -- it means the two legs disagree about when the run ends,
+    # which is a state difference that happens to fall outside the compared window.
+    # ★★ Both directions now fail, and each is named, because "the guest stopped early" and "the
+    # guest kept going" have opposite causes and a single message would send the reading wrong.
+    same_len = (len(orc) == len(gst))
+    if not same_len:
+        if len(gst) < len(orc):
+            print("★★★ THE GUEST STOPPED EARLY: %d cycles against the oracle's %d -- it has"
+                  % (len(gst), len(orc)))
+            print("    halted; see cycles.txt for the opcode and the logic.")
+        else:
+            print("★★★ THE GUEST RAN PAST THE ORACLE: %d cycles against %d -- the reference"
+                  % (len(gst), len(orc)))
+            print("    ended the run and the guest did not. The extra cycle(s) are OUTSIDE the")
+            print("    compared window, so byte-identity below says nothing about them.")
     print()
-    print("AC-2 %s" % ("PASS -- byte-identical on every compared cycle" if ndiff == 0
+    print("AC-2 %s" % ("PASS -- byte-identical on every compared cycle" if (ndiff == 0 and same_len)
                        else "★★★ FAIL"))
-    return 0 if (ndiff == 0 and len(gst) >= len(orc)) else 1
+    return 0 if (ndiff == 0 and same_len) else 1
 
 
 if __name__ == "__main__":

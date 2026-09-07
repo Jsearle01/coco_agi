@@ -157,6 +157,58 @@ def main():
           "(%d wildcard patterns now KEPT rather than dropped)"
           % (rejected_nospell, rejected_verify, rejected_wild))
 
+    # ══════════════════════════════════════════════════════════════════════════════════════
+    # ★★★★★ CLASSIFY EVERY LINE BY WHAT IT DOES TO THE RUN, AND SCHEDULE THE TERMINAL ONES LAST.
+    # ★★★★ Kingquest3's census puts said(13,237) first, and that line reaches restart.game. Fed
+    # at cycle 1 the whole run ends at cycle 2 -- a two-cycle trace, which is correct and is not
+    # a diff. Kingquest1's quit line does the same at cycle 140.
+    # ★★★★★ THIS IS NOT FILTERING THE TEST TO MAKE IT PASS, and the distinction matters: a
+    # terminal line is still fed, still gated, and the other leg must reproduce the stop at the
+    # SAME cycle or vm_diff.py fails on the length [T-P0-060 AC-4 gates exactly that on KQ1].
+    # **What changes is the ORDER**, so the window is covered before the run ends rather than
+    # instead of it. Ordering a corpus is a corpus decision and it is stated here.
+    # ★★★ A line that RAISES is excluded, because there is no reference behaviour to gate
+    # against -- and which opcode it reached is printed, since that is the coverage fact.
+    # ★★ One probe run per candidate. They are short and the alternative is a schedule whose
+    # effect nobody measured, which is how the two-cycle trace happened.
+    if not a.eye and chosen:
+        base = cycle_mod.Vm(game, 0x2917)
+        base.start()
+        base.run(max_cycles=a.cycles)
+        quiet, terminal, raised = [], [], []
+        at = max(2, a.cycles // 4)
+        for cyc, pat, text in chosen:
+            probe = cycle_mod.Vm(game, 0x2917)
+            probe.load_vocabulary(entries)
+            probe.input_script = {at: text}
+            probe.start()
+            try:
+                probe.run(max_cycles=a.cycles)
+            except Exception as exc:                        # noqa: BLE001
+                raised.append((pat, str(exc).split("(")[0].strip()))
+                continue
+            if probe.should_quit or probe.should_restart:
+                terminal.append((cyc, pat, text))
+            else:
+                quiet.append((cyc, pat, text))
+        # ★★★★★ "RAISE", NOT "REACH AN UNIMPLEMENTED OPCODE". The first version of this line said
+        # the latter, and then the per-cycle watchdog started firing -- so two Kingquest3 lines
+        # that hit a NON-TERMINATING logic were reported under a label that named a different
+        # cause. ★★★ That is `said_gate.py --results` printing the 6809 side as `oracle` [P6.3
+        # §3.F.3], one task later and by the same hand: **a label that names the usual cause
+        # instead of the actual one.** The reason string is printed per line and is the fact; the
+        # heading now says only that the line raised.
+        print("lines classified : %d continue, %d end the run, %d raise (see each reason)"
+              % (len(quiet), len(terminal), len(raised)))
+        for pat, why in raised:
+            print("   ★★★ said(%-12s %s" % (",".join(str(x) for x in pat) + ")", why))
+        for _c, pat, _t in terminal:
+            print("   ★ said(%-12s ends the run -- scheduled LAST"
+                  % (",".join(str(x) for x in pat) + ")"))
+        # ★ At most ONE terminal line, and it goes last: two would make the second unreachable
+        # and a script whose file does not describe what runs is the defect this tool avoids.
+        chosen = quiet + terminal[:1]
+
     # ── 2b. --eye: measure each candidate's effect, one line per run ────────────────────
     if a.eye:
         at = max(2, a.cycles // 4)          # ★ late enough that the room is drawn and settled

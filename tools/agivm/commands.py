@@ -32,6 +32,7 @@ from .optable import (VM_VAR_PREVIOUS_ROOM, VM_VAR_CURRENT_ROOM,
                       VM_VAR_BORDER_TOUCH_OBJECT, VM_VAR_BORDER_CODE,
                       VM_VAR_BORDER_TOUCH_EGO, VM_VAR_EGO_VIEW_RESOURCE,
                       VM_VAR_EGO_DIRECTION, VM_FLAG_NEW_ROOM_EXEC,
+                      VM_FLAG_RESTART_GAME,
                       fDrawn, fAnimated, fUpdate, fIgnoreHorizon, fIgnoreBlocks,
                       fIgnoreObjects, fCycling, fOnWater, fOnLand, fFixLoop,
                       fDontUpdate, fMotion,
@@ -750,8 +751,74 @@ def cmdQuit(vm, p):
 
 @_impl()
 def cmdRestartGame(vm, p):
-    raise OpcodeError("restart.game is not implemented; it re-enters the whole game loop and "
-                      "would silently restart the state diff mid-run")
+    """op_cmd.cpp:1913 cmdRestartGame. [T-P0-061 AC-8]
+
+    ★★★★★ THE OPCODE DOES NOT RESTART ANYTHING. It stops sound, decides, and sets two things:
+
+        vm->_sound->stopSound();
+        doRestart = getFlag(VM_FLAG_AUTO_RESTART) ? true : _systemUI->restartDialog();
+        if (doRestart) { _restartGame = true; setFlag(VM_FLAG_RESTART_GAME, true);
+                         _menu->itemEnableAll(); }
+
+    ★★★★ The RESTART happens in the outer loop (cycle.cpp:580-605): `_restartGame` breaks every
+    interpreter loop, agiInit() re-runs, RESTART_GAME is set again and the in-game timer resets.
+    **So the old error message here -- "it re-enters the whole game loop" -- described the LOOP's
+    behaviour and attributed it to the opcode.** The opcode is three assignments.
+
+    ★★★★★ AND THE REST OF THAT MESSAGE WAS RIGHT, WHICH IS WHY THIS STOPS RATHER THAN RESTARTS.
+    "would silently restart the state diff mid-run" is exactly the hazard: a leg that re-inits is
+    comparing a fresh game against a continuing one, and both legs would have to re-init at the
+    same cycle for the trace to mean anything. **So the opcode is faithful and the LOOP halts** --
+    the same treatment `quit` already gets, which is gated: Kingquest1 quits at cycle 140 and the
+    6809 halts at the same cycle, byte-identical either side [T-P0-060 AC-4].
+
+    ★★★ stopSound and itemEnableAll are presentation (sound opcodes are _nop MODELLED here, and
+    there is no menu), so the observable effect is the flag and the signal.
+    ★★ VM_FLAG_AUTO_RESTART is not modelled: without a UI there is no dialog to decline, and a
+    game that reaches this opcode has already decided. Recorded as a divergence, not hidden.
+    """
+    vm.state.set_flag(VM_FLAG_RESTART_GAME, True)
+    vm.should_restart = True
+    vm.modelled_calls["cmdRestartGame"] = vm.modelled_calls.get("cmdRestartGame", 0) + 1
+
+
+@_impl()
+def cmdSaveGame(vm, p):
+    """op_cmd.cpp:1874 cmdSaveGame -- modelled as the CANCELLED dialog. [T-P0-061 AC-8]
+
+    ★★★★★ A CANCELLED SAVE IS A REAL AGI PATH AND IT IS OBSERVABLY NOTHING. The oracle:
+
+        if (version >= 0x2272) _sound->stopSound();
+        PauseToken pt = pauseEngine();
+        if (automaticSave && saveGameAutomatic()) return;
+        saveGameDialog();                      <- return value IGNORED by the caller
+
+    and `saveGameDialog()`'s cancel path (saveload.cpp) is `return false` having touched no VM
+    state. ★★★★ **So "the player pressed Escape" costs a sound stop and nothing else** -- and
+    sound opcodes are _nop MODELLED here, so it costs nothing the diff can see.
+
+    ★★★ WHY THIS AND NOT A RAISE. Raising is honest and is not a shipping answer: a game that
+    offers a save menu would halt the interpreter. Modelling the cancel branch keeps the game
+    running, keeps the state faithful, and needs no storage layer.
+    ★★★★ WHAT IS NOT MODELLED, AND IT IS THE OTHER HALF: the SUCCESSFUL branch writes a file and
+    restores from it. That needs the storage layer and a UI, and it belongs there -- it is not a
+    parser question and not a VM question. Recorded as an open design item, not as a stub that
+    pretends to save.
+    """
+    vm.modelled_calls["cmdSaveGame"] = vm.modelled_calls.get("cmdSaveGame", 0) + 1
+
+
+@_impl()
+def cmdLoadGame(vm, p):
+    """op_cmd.cpp cmdLoadGame (restore.game) -- modelled as the CANCELLED dialog. [AC-8]
+
+    ★★★★ `loadGameDialog()` sets nothing on cancel: VM_FLAG_RESTORE_JUST_RAN is set INSIDE
+    doLoad (saveload.cpp:737), i.e. only on a restore that actually happened. A cancelled restore
+    returns errOK having changed no observable state.
+    ★★ Same split as cmdSaveGame: the cancel branch is faithful and free; the successful branch
+    is the storage layer's.
+    """
+    vm.modelled_calls["cmdLoadGame"] = vm.modelled_calls.get("cmdLoadGame", 0) + 1
 
 
 # ── resources ──────────────────────────────────────────────────────────────────────────────

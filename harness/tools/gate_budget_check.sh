@@ -57,13 +57,68 @@ rendered() {   # how many pictures did the LAST run actually render, from its ow
 }
 
 if [ "$WHICH" = "headroom" ] || [ "$WHICH" = "all" ]; then
-    echo "═══ headroom: how much of pic's ${PIC_BUDGET}s session budget does the corpus spend? ═══"
-    mame_run "$PIC_BUDGET" "$OUT/headroom.log"
-    n=$(rendered)
-    echo "  pictures rendered this run : $n"
-    echo "  ★ compare the emulated seconds above against the ${PIC_BUDGET}s budget."
-    echo "    The per-picture cost is what says how far the corpus can widen before the"
-    echo "    session is cut with no diagnostic at all."
+    # ═══════════════════════════════════════════════════════════════════════════════════════
+    # ★★★★★ EVERY GATE, NOT JUST pic [T-P0-061 AC-6]. T-P0-060 measured pic at 308 of 900 and
+    # measured nothing else, so four of five bounds were unweighed -- and an unweighed bound is
+    # the assumption this whole instrument exists to replace.
+    # ★★★★ THE UNIT IS ONE SESSION, because that is what -seconds_to_run bounds. pic and p3b run
+    # their whole corpus in one; res, cel, comp and vm launch MAME per item, so their bound
+    # applies to the LARGEST single item and the figure below is that item, not the total.
+    # ★★★ Every number comes from MAME's own "Average speed: N% (S seconds)" line at exit. No
+    # gate is modified and no timing is host-side [L-78].
+    echo "═══ headroom: emulated seconds used vs -seconds_to_run, per gate ═══"
+    echo
+    printf '%-8s %-34s %8s %8s %7s\n' gate "unit the bound applies to" budget used pct
+    printf -- '---------------------------------------------------------------------\n'
+
+    row() {   # row <gate> <unit> <budget> <logfile-or-glob>
+        used=$(grep -hoE "Average speed: [0-9.]+% \([0-9]+ seconds\)" $4 2>/dev/null |
+               grep -oE "\([0-9]+ " | tr -d '( ' | sort -n | tail -1)
+        [ -z "$used" ] && used=0
+        pct=$(awk "BEGIN{printf \"%.0f\", 100*$used/$3}")
+        printf '%-8s %-34s %8s %8s %6s%%\n' "$1" "$2" "$3" "$used" "$pct"
+    }
+
+    # pic -- one session, the whole 45-picture corpus
+    mame_run "$PIC_BUDGET" "$OUT/hr_pic.log" >/dev/null
+    row pic "45 pictures, ONE session" "$PIC_BUDGET" "$OUT/hr_pic.log"
+
+    # cel -- one session per title; the bound applies to the largest (PoliceQuest1, 2,411 cels)
+    sh harness/tools/cel_run.sh > "$OUT/hr_cel.log" 2>&1 || true
+    row cel "largest title (PoliceQuest1)" 900 "$OUT/hr_cel.log"
+
+    # comp -- one session per corpus; largest is KQ1ego1 at 24 frames.
+    # ★★★★ THE LOGS ARE PER-CORPUS, NOT ON STDOUT. comp_run.sh redirects each launch to
+    # build/comp_run_<title>.log, so grepping its stdout finds no speed line and prints **0** --
+    # which is what the first version of this row did, and a 0 in a headroom table reads as
+    # "uses nothing" rather than "measured nothing". ★★★ A zero from a missing input is the same
+    # defect this instrument exists to find, one file along [§2W]. The glob is the fix, and
+    # `row` takes the MAX across the six so the figure is the largest single session.
+    sh harness/tools/comp_run.sh > "$OUT/hr_comp.log" 2>&1 || true
+    row comp "largest corpus (KQ1ego1, 24)" 400 "build/comp_run_*.log"
+
+    # res -- one session per (title, volume); largest is Kingquest3-v2 at 132 requests
+    RES_OUT=build/res_sweep/Kingquest3-v2 RES_STAGE=build/res_stage/Kingquest3-v2 \
+    RES_PROG=build/res_probe.bin \
+    "$MAME" coco3 -video none -seconds_to_run 3000 -skip_gameinfo -nothrottle \
+        -rompath C:/mame/roms -cfg_directory harness/mame-cfg \
+        -autoboot_script C:/Projects/coco_agi/harness/tools/res_sweep.lua -autoboot_delay 0 \
+        > "$OUT/hr_res.log" 2>&1 || true
+    row res "largest volume (KQ3-v2, 132)" 3000 "$OUT/hr_res.log"
+
+    # p3b -- one session, N cycles
+    P3B_PROG=build/p3b_probe_pk_fresh.bin P3B_STAGE=build/vm_stage/Kingquest1 \
+    P3B_SYMBOLS=build/p3b/symbols.txt P3B_CYCLES=160 P3B_OUT=build/p3b_headless P3B_HOLD=0 \
+    "$MAME" coco3 -video none -sound none -window -nomaximize -skip_gameinfo -nothrottle \
+        -seconds_to_run 900 -rompath C:/mame/roms -cfg_directory harness/mame-cfg \
+        -autoboot_script C:/Projects/coco_agi/harness/tools/p3b_run.lua -autoboot_delay 0 \
+        > "$OUT/hr_p3b.log" 2>&1 || true
+    row p3b "160 cycles, ONE session" 900 "$OUT/hr_p3b.log"
+
+    echo
+    echo "★ vm is bounded at 100000 emulated seconds per title -- two orders above any observed"
+    echo "  use, so it is not a bound in any practical sense and is reported as such rather than"
+    echo "  measured against."
     echo
 fi
 

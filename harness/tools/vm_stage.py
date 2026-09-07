@@ -138,9 +138,9 @@ def main():
     # returning true and the game acting on it -- and it must not be read as staging falling
     # short. ★★★ The 6809 leg reaches vm_quit at the same cycle or the state diff fails, so the
     # early stop is itself part of what is being compared, not a shortened window.
-    print("run ended    : %d of %d cycles, should_quit=%s"
-          % (len(rec.rows), a.cycles, vm.should_quit))
-    if a.input and vm.should_quit:
+    print("run ended    : %d of %d cycles, should_quit=%s should_restart=%s"
+          % (len(rec.rows), a.cycles, vm.should_quit, vm.should_restart))
+    if a.input and (vm.should_quit or vm.should_restart):
         print("★ the run QUIT before --cycles. With a script fed this is a said() branch firing,")
         print("  and the guest must quit at the same cycle for the diff to pass.")
     if a.input and vm.said_matched == 0:

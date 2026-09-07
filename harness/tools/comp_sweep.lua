@@ -74,6 +74,32 @@ do
 end
 w_("frames: %d from %s", #frames, STAGE)
 
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+-- ★★★★★ CLEAR WHAT THIS RUN WILL WRITE, BEFORE IT WRITES IT [L-92, §2W.2, T-P0-061 AC-3].
+-- ★★★★ THIS DEFECT HAS NOW FIRED TWICE. AD-131: the cel adjudicator graded the PREVIOUS run's
+-- directories and "the pass survived the gate not running". T-P0-060: the renderer gate printed
+-- "45 PASS, 0 FAIL, 0 with no output (of 45)" and exited 0 on a session cut short at eight
+-- pictures, because pic_sweep.lua created build/sweep and never emptied it.
+-- ★★★ THIS SWEEP HAS THE SAME SHAPE UNDER COMP_DUMP: one pair of files per frame, named by the
+-- frame number, into a directory that is only ever mkdir'd. A frame this run never reaches keeps
+-- the file the last run left, and anything downstream that reads guest<N>.*.bin -- the eye gate,
+-- plane_pair_diff.py -- is then looking at an artifact from a different run.
+-- ★★ THE COMPARISON ITSELF IS SAFE and that is worth stating rather than assuming: compareFrame
+-- reads the guest's planes out of RAM, not out of these files, so a stale file cannot make a
+-- divergent frame report identical. **The dumps are diagnostics, and a stale diagnostic is what
+-- sends a reading to the wrong place** -- which is the whole of AD-122 and P6.3 §3.F.
+-- ★ The list is the run's own work list, not a glob: deleting `guest*.bin` would reach files
+-- this sweep does not own; deleting exactly what it is about to write cannot.
+if os.getenv("COMP_DUMP") then
+    local nrm = 0
+    for i = 1, #frames do
+        local n = frames[i][1]
+        if os.remove(OUT .. "/guest" .. n .. ".visual.bin") then nrm = nrm + 1 end
+        if os.remove(OUT .. "/guest" .. n .. ".priority.bin") then nrm = nrm + 1 end
+    end
+    w_("cleared %d stale dump file(s) for the %d frames this run will write", nrm, #frames)
+end
+
 local fi, si = 1, 0
 local sprites, celblob
 local frame, state = 0, "load"

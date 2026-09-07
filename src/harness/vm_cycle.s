@@ -129,6 +129,8 @@ vm_st_ozero:    clr     ,x
 * this covers a restart, which is what vm_lastsec's zeroing above used to cover.
                 clr     vm_sectick
                 clr     vm_quit
+                clr     vm_restart              ; ★ a location the host may read still needs the
+                                                ;   GUEST to define its power-on value [vm_probe.s]
                 clr     vm_exitall
                 rts
 
@@ -216,6 +218,8 @@ vm_ic_ok:
                 clra                            ; logic 0
                 jsr     vm_call_logic0          ; ★ the cycle needs logic.0's OWN retflag
                 lda     vm_quit
+                bne     vm_ic_after
+                lda     vm_restart              ; ★ cycle.cpp:270's other guard on this same loop
                 bne     vm_ic_after
                 lda     vm_retflag
                 bne     vm_ic_after             ; an explicit `return` ends the loop

@@ -30,6 +30,10 @@ vm_curlogic     fcb     0               ; which logic is resident
 * ★ vm_logsp is gone: the arena stack (res_open/res_close) IS the logic call stack, so a
 * second stack pointer would be a second home for the same fact (§2F).
 vm_quit         fcb     0               ; should_quit
+* ★★★ cmdRestartGame's signal, and it is SEPARATE from vm_quit [T-P0-061 AC-8]. A game that
+* ended and a game that asked to start over are different facts; one byte cannot carry both, and
+* the host reports which of them stopped the run.
+vm_restart      fcb     0               ; should_restart
 vm_exitall      fcb     0               ; exit_all_logics
 vm_testres      fcb     0               ; st.test_result
 vm_badop        fcb     0               ; the opcode that halted us
@@ -65,6 +69,10 @@ vm_rl_loop:
                 cmpd    vm_codelen
                 lbhs    vm_rl_done              ; ip >= len -- UNSIGNED [L-40]
                 lda     vm_quit
+                lbne    vm_rl_done
+* ★ The oracle's `_restartGame` guards every interpreter loop it has [cycle.cpp:270, 580, 668;
+* op_cmd.cpp:2428; op_test.cpp:436], so it guards this one.
+                lda     vm_restart
                 lbne    vm_rl_done
 
                 ldx     vm_code                 ; ★ a POINTER now: the logic lives in P1.3's arena

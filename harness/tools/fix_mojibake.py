@@ -5,7 +5,15 @@
 codepage and `Set-Content -Encoding utf8` writes UTF-8 WITH A BOM. A round trip through the pair
 therefore does two things to every non-ASCII character:
 
-    "★" (E2 98 85)  --read as cp1252-->  "â˜…"  --written as UTF-8-->  C3 A2 CB 9C E2 80 A6
+    U+2605  E2 98 85  --read as cp1252-->  three chars  --written as UTF-8-->  7 bytes
+                                           U+00E2 U+02DC U+2026   C3 A2 CB 9C E2 80 A6
+
+★★★★ THE EXAMPLE IS SPELT IN CODEPOINTS AND NOT IN THE CHARACTERS THEMSELVES.
+The first draft embedded the damaged form literally so a reader could see it -- and this tool
+then flagged its OWN DOCSTRING, because a written-down example is byte-identical to the real
+thing. Running the repair over the tree would have "fixed" the illustration and destroyed the
+one place the defect is recorded. ★★★ A tool that cannot be run on its own source is one
+somebody will exclude from the sweep, and an excluded file is where the next instance hides.
 
 and prepends EF BB BF. T-P0-061 did that to six files, four of them already pushed, while doing
 bulk edits that the Edit tool would have made safely. **The damage is comment-only and every

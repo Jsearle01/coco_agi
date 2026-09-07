@@ -236,6 +236,39 @@ def ours(vocab, cases):
     return res
 
 
+def read_cases(workdir):
+    """The case file the ORACLE ACTUALLY CONSUMED, not a regeneration of it. [T-P0-061 AC-5]
+
+    ★★★★★ ONE PRODUCER, TWO CONSUMERS [L-88]. --emit writes oracle_parser_cases.txt, the oracle
+    reads it, parser_gate.lua stages the SAME bytes into the 6809 -- and then --check rebuilt the
+    list from the game and the `--limit` it happened to be invoked with. **Three consumers, two of
+    which read the artifact and one of which reproduced it.**
+
+    ★★★★ IT WAS NOT HYPOTHETICAL. T-P0-059's widened run used --limit 1000; T-P0-060 came to check
+    it with the default 400 and got 6,210 cases against the oracle's 12,435. The count check
+    refused -- correctly -- but the number needed to make it agree existed nowhere on disk and was
+    recovered by bisection. Recording `cases.limit` made it recoverable; reading the file makes
+    the question not arise.
+
+    ★★★ AND IT CLOSES A GAP THE LIMIT NEVER COULD: if build_tokenise's generation rules change,
+    a regenerated corpus silently stops being the one the oracle ran, at the same count. **The
+    limit protects the SIZE; only the file protects the CONTENT** -- which is res_aggregate.py's
+    lesson this same task, one artifact along.
+
+    Returns None when the file is absent, so the caller can say so rather than default.
+    """
+    p = pathlib.Path(workdir) / "oracle_parser_cases.txt"
+    if not p.exists():
+        return None
+    cases = []
+    for line in p.read_text(encoding="ascii", errors="replace").splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        pat, _tab, text = line.partition("\t")
+        cases.append((tuple(int(x) for x in pat.split(",") if x != ""), text))
+    return cases
+
+
 def read_oracle(workdir, path=""):
     """★★ Same record format either side, deliberately: "<n> ego=a,b,c -> r".
 
@@ -289,13 +322,23 @@ def main():
         # defined by the emit run, not by whatever the checker was invoked with; an explicit
         # --limit on the command line still wins, so a deliberate re-scope is still possible.
         lim = a.limit if a.emit or a.limit != 400 else emitted_limit(a.workdir, a.limit)
-        if lim != a.limit:
-            print("limit             : %d, from %s/cases.limit (the emit run's)" % (lim, a.workdir))
         vocab, cases = build_tokenise(a.game_dir, lim)
         if a.emit:
             p, n = emit(cases, a.workdir, lim)
             print("wrote %s  (AC-4: %d tokeniser cases, limit %d)" % (p, n, lim))
             return 0
+        # ★★★★★ READ THE CORPUS THE ORACLE RAN, and fall back to regenerating it only when the
+        # file is absent -- saying so when that happens. The vocabulary still comes from the game
+        # (it is what the parser is being tested AGAINST); only the CASES come from the file.
+        staged = read_cases(a.workdir)
+        if staged is not None:
+            cases = staged
+            print("cases             : %d from %s/oracle_parser_cases.txt (the file the oracle read)"
+                  % (len(cases), a.workdir))
+        else:
+            print("★★★ no oracle_parser_cases.txt in %s -- REGENERATING the corpus at limit %d."
+                  % (a.workdir, lim))
+            print("    That compares against a corpus this run built, not the one the oracle ran.")
         mine = ours(vocab, cases)
         theirs = read_oracle(a.workdir, a.results)
         if len(mine) != len(theirs):

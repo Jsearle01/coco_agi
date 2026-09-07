@@ -273,6 +273,11 @@ vp_nocal:
                 jsr     vm_pace
                 lda     vm_quit
                 bne     vp_halted
+* ★★ A restart STOPS this probe, for the reason vm_core.s gives at vm_restart's declaration: a
+* leg that re-initialises is not comparable with one that continues. The host distinguishes the
+* two by reading vm_restart -- badop stays 0 for both, so the byte is the only discriminator.
+                lda     vm_restart
+                bne     vp_halted
 * ★★ AC-7's SPLIT. -DVM_PACEONLY runs the pacing gate and NOTHING ELSE, so the difference
 * between the two timed runs is the interpreter proper. Measuring the total alone would report
 * a number without saying which half to attack, and the pacing path is not free: vm_step_clock
@@ -338,6 +343,11 @@ vp_wait:        lda     VP_GO
 
                 lda     vm_quit
                 bne     vp_halted
+* ★★ A restart STOPS this probe, for the reason vm_core.s gives at vm_restart's declaration: a
+* leg that re-initialises is not comparable with one that continues. The host distinguishes the
+* two by reading vm_restart -- badop stays 0 for both, so the byte is the only discriminator.
+                lda     vm_restart
+                bne     vp_halted
 
 * ★★★★★ GUARDED, BECAUSE -DVM_PACEONLY MUST MEAN *NO INTERPRETATION ANYWHERE* [L-79].
 * The free-run branch above has carried `ifndef VM_PACEONLY` since T-P0-033 and this one did
@@ -361,6 +371,22 @@ vp_wait:        lda     VP_GO
                 std     VP_OPCOUNT
                 lda     vm_icguard
                 sta     VP_ICGUARD
+* ═══════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE POST-CYCLE CHECK MUST TEST vm_restart TOO, AND MEASUREMENT IS WHAT SAID SO.
+* This tested vm_quit alone. A restart fires DURING a cycle body, so with only the quit test
+* here the probe looped, paced, and parked once more before vp_wait's guard caught it -- the host
+* sampled one extra row and only then saw the halt.
+* ★★★★ MEASURED, NOT REASONED: Kingquest3's parser arm gave **oracle 508 cycles, guest 509**,
+* and vm_diff.py reported `AC-2 PASS -- byte-identical on every compared cycle`. It passes
+* because its length rule is `len(guest) >= len(oracle)` and it compares min(), so a guest that
+* runs PAST the reference satisfies it. **The gate passed on an asymmetry, by accident of the
+* rule rather than by agreement** -- which is this task's own subject aimed at itself.
+* ★★★ cycle.py exits its run loop on should_restart at the top of the next iteration, i.e. after
+* the cycle in which it fired. Testing it here is what makes the two legs stop at the same cycle.
+* ★★ vm_diff.py's rule is tightened to `==` in the same change, so the next asymmetry of this
+* shape fails instead of passing quietly.
+                lda     vm_restart
+                bne     vp_halted
                 lda     vm_quit
                 beq     vp_ok
 vp_halted:      lda     #1

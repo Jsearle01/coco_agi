@@ -29,21 +29,23 @@ $VM_GATE_TITLES = @("Kingquest1","Kingquest2","Kingquest3",
 # T-P0-060's AC-4 ran three titles and the choice lived on a command line -- which is the exact
 # defect the block above is about, freshly minted one task later: "the scope of a gate is part of
 # its definition and it kept living in an environment variable."
-# ★★★★ WHY THESE THREE AND NOT THE NINE. Kingquest3 is EXCLUDED and the reason is a measurement:
-# fed a line, the REFERENCE raises on `restart.game`, which dispatch.py declines to implement
-# because it re-enters the whole game loop and would silently restart the state diff mid-run.
-# Kingquest1 also reaches `save.game` ($7D) and `restore.game` ($7E) on other lines.
+# ★★★★★ IT IS NOW THE SAME NINE [T-P0-061 AC-9]. T-P0-060 ran three because Kingquest3 was
+# BLOCKED: fed a line it reaches `restart.game`, which dispatch.py raised on. AC-8 implemented
+# that opcode from the oracle -- it sets RESTART_GAME and signals; the outer loop is what
+# restarts, and this VM halts there rather than re-initialising mid-diff -- so the block is gone.
+# `save.game` and `restore.game`, which Kingquest1 reaches, are modelled as the CANCELLED dialog,
+# which is a real AGI path and observably nothing.
+# ★★★★ THE ARM AND THE GATE NOW COVER THE SAME CORPUS, which is what makes "the parser changes
+# nothing it should not" a claim about the whole gated set rather than a third of it.
 # ★★★ **Without input an AGI game sits in attract mode and never takes those branches**, so the
-# nine-title gate has never executed them. The parser is the door to a part of the command space
-# no gate has covered -- an open item (T-P0-060 §7.4), not a reason to hide the titles.
-# ★★ The remaining five are simply not yet measured with input; widening this list is T-P0-060
-# §8.5 and should be done by RUNNING them, not by assuming they behave like these three.
-$VM_PARSER_TITLES = @("Kingquest1","Kingquest2","SpaceQuest-1")
+# no-input gate had never executed any of the three. The parser is the door to that part of the
+# command space [T-P0-060 §7.4], and AC-9 is the first run that walks through it on every title.
+$VM_PARSER_TITLES = $VM_GATE_TITLES
 $TITLES = if ($env:VM_TITLES) { $env:VM_TITLES -split "," }
           elseif ($env:VM_INPUT) { $VM_PARSER_TITLES }
           else { $VM_GATE_TITLES }
 if ($env:VM_INPUT -and -not $env:VM_TITLES) {
-  "★ parser arm: $($VM_PARSER_TITLES -join ', ')  (Kingquest3 excluded -- the reference raises on restart.game when fed)"
+  "★ parser arm: all $($VM_PARSER_TITLES.Count) gate titles (T-P0-061 AC-9; Kingquest3 unblocked by AC-8's restart.game)"
 }
 $CYCLES = if ($env:VM_CYCLES) { $env:VM_CYCLES } else { "600" }
 
@@ -99,10 +101,11 @@ foreach ($t in $TITLES) {
   # words into this one -- a divergence that points at parser.s.
   Remove-Item -Force -ErrorAction SilentlyContinue "$stage\input.txt", "$stage\words.tok"
   $stageArgs = @((Join-Path $GAMES $t), "--out", $stage, "--cycles", $CYCLES)
+  $fed = $false
   if ($env:VM_INPUT) {
     python harness\tools\vm_input_script.py (Join-Path $GAMES $t) --out "$stage\input.gen.txt" --cycles $CYCLES
     if ($LASTEXITCODE -ne 0) { "★★★ $t : no verified input lines -- running WITHOUT input"; }
-    else { $stageArgs += @("--input", "$stage\input.gen.txt") }
+    else { $stageArgs += @("--input", "$stage\input.gen.txt"); $fed = $true }
   }
   python harness\tools\vm_stage.py @stageArgs | Out-Null
   if ($LASTEXITCODE -ne 0) { "★★★ $t : staging did not fit"; continue }
@@ -118,9 +121,29 @@ foreach ($t in $TITLES) {
   $d = python harness\tools\vm_diff.py --oracle "$stage\oracle.bin" --guest "$sweep\guest.bin" --title $t 2>&1
   $code = $LASTEXITCODE
   $d | Select-Object -Last 22
-  $summary += [pscustomobject]@{ title = $t; exit = $code }
+  $summary += [pscustomobject]@{ title = $t; exit = $code; fed = $fed }
   ""
 }
 
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ THE SUMMARY MUST SAY WHICH TITLES WERE ACTUALLY FED [T-P0-061 AC-9].
+# The parser arm's first nine-title run printed nine PASSes. **Six titles were fed and three
+# were not** -- SpaceQuest-2's candidates all reach get.string, and BlackCauldron and
+# MixedUpMotherGoose call said() ZERO times in the gated window, so all three fell back to the
+# no-input path and their traces are bit-identical to the plain gate's.
+# ★★★★ Nine PASSes for a six-title arm is res_aggregate.py's defect exactly -- "100% of a
+# smaller number" -- reproduced in the AC that was written to widen coverage, in the same task
+# that fixed it elsewhere. **A gate must report the corpus it actually covered** [L-85].
+# ★★★ NOT-FED is not a failure and is not hidden: it is a fact about the TITLE, and for two of
+# the three it is the strongest fact available -- a v2 game whose first 600 cycles never test
+# the parser cannot be covered by any input script.
 "=== AC-2 SUMMARY ==="
-$summary | ForEach-Object { "{0,-12} {1}" -f $_.title, $(if ($_.exit -eq 0) { "PASS" } else { "FAIL" }) }
+$summary | ForEach-Object {
+  "{0,-20} {1,-5} {2}" -f $_.title,
+    $(if ($_.exit -eq 0) { "PASS" } else { "FAIL" }),
+    $(if ($env:VM_INPUT) { if ($_.fed) { "input fed" } else { "★ NO INPUT -- not covered by this arm" } } else { "" })
+}
+if ($env:VM_INPUT) {
+  $nf = ($summary | Where-Object { -not $_.fed }).Count
+  "";  "★ parser arm covered {0} of {1} titles with input; {2} ran without and are the plain gate." -f ($summary.Count - $nf), $summary.Count, $nf
+}

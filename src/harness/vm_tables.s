@@ -257,10 +257,10 @@ VMOP_TAB:
                 fdb     vm_op_modelled          ; 7A add.to.pic(nnnnnnn)  [modelled]
                 fdb     vm_op_modelled          ; 7B add.to.pic.v(vvvvvvv)  [modelled]
                 fdb     vm_op_modelled          ; 7C status()  [modelled]
-                fdb     vm_op_unimpl            ; 7D save.game()
-                fdb     vm_op_unimpl            ; 7E restore.game()
+                fdb     vmop_save_game          ; 7D save.game()
+                fdb     vmop_load_game          ; 7E restore.game()
                 fdb     vm_op_modelled          ; 7F init.disk()  [modelled]
-                fdb     vm_op_unimpl            ; 80 restart.game()
+                fdb     vmop_restart_game       ; 80 restart.game()
                 fdb     vm_op_modelled          ; 81 show.obj(n)  [modelled]
                 fdb     vmop_random             ; 82 random(nnv)
                 fdb     vmop_program_control    ; 83 program.control()
