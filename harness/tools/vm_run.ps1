@@ -52,6 +52,13 @@ $CYCLES = if ($env:VM_CYCLES) { $env:VM_CYCLES } else { "600" }
 $ASMARGS = @("--format=raw","--output=build/vm_probe.bin","--list=build/vm_probe.lst",
              "--map=build/vm_probe.map","-I.","-DHAL_GFX_MODE_SERVICE","-DHAL_SYS_FAST_CLOCK")
 if ($env:VM_TRACE) { $ASMARGS += "-DVM_TRACE" }
+# ★★★★★ THE VBL CLOCK ARM [Jay's ruling AD-138]. VM_VBLCLOCK=1 runs VAR_SECONDS off the CoCo3's
+# real 59.92 Hz vertical-sync interrupt instead of the cycle-derived virtual counter. Unset,
+# nothing changes and the nine-title gate is HEAD's gate exactly -- which is the arm L-79 requires
+# to exist, and the reason the default is off is that the arm currently CRASHES the probe before
+# its first park (see vm_probe.s at the ifdef). ★★★ The clock SOURCE is not in doubt:
+# vbl_probe.s takes 300 of 300 VBLs at 59.9227 Hz with CC.I at 0.0%.
+if ($env:VM_VBLCLOCK) { $ASMARGS += "-DVM_VBLCLOCK"; "★★★ VBL CLOCK ARM (-DVM_VBLCLOCK): VAR_SECONDS runs off real vertical sync -- known to crash before the first park" }
 # ★★ AC-3: build with a deliberate one-boundary error in vm_check_step, to show the gate can
 # fail. A gate that has never failed is an assertion about the harness, not about the VM.
 if ($env:VM_FAULT) { $ASMARGS += "-DVM_FAULT"; "FAULT INJECTED (-DVM_FAULT) -- this build is EXPECTED to fail AC-2" }

@@ -285,7 +285,52 @@ _G._n = emu.add_machine_frame_notifier(function()
     end
 
     if state == "boot" then
-        if prog:read_u8(GO) ~= 0 then return end
+        -- ★★★★★ THE STALL DETECTOR BELONGS HERE TOO, AND THIS IS WHERE IT WAS NEEDED FIRST.
+        -- It was added to the "run" state below and the guest hung in BOOT -- so it never fired,
+        -- and the gate looked from the outside exactly as it had before: MAME burning CPU,
+        -- guest.bin at zero bytes, run.log ending at "PC set". **A detector on the wrong state is
+        -- not a detector** [§2W: the instrument must be shown able to fire on the case at hand].
+        if prog:read_u8(GO) ~= 0 then
+            _G._bstall = (_G._bstall or 0) + 1
+            if _G._bstall == 1 then _G._bhist, _G._btraj = {}, {} end
+            if _G._bstall > 60 then
+                local pc = cpu.state["PC"].value
+                _G._bhist[pc] = (_G._bhist[pc] or 0) + 1
+                if #_G._btraj < 40 then
+                    _G._btraj[#_G._btraj + 1] = string.format("$%04X%s", pc,
+                        ((cpu.state["CC"].value & 0x10) ~= 0) and "I" or "-")
+                end
+            end
+            if _G._bstall > 1200 then
+                w("★★★ GUEST NEVER REACHED ITS GATE -- VP_GO uncleared for %d frames.", _G._bstall)
+                w("    VP_GO=%d VP_STATUS=%d arena_bad=$%04X vocab_bad=$%04X",
+                  prog:read_u8(GO), prog:read_u8(STATUS),
+                  prog:read_u8(0x008E) * 256 + prog:read_u8(0x008F),
+                  prog:read_u8(0x0097) * 256 + prog:read_u8(0x0098))
+                local names = {}
+                for k, v in pairs(SYM) do names[#names + 1] = { name = k, addr = v } end
+                table.sort(names, function(a, b) return a.addr < b.addr end)
+                local function near(p)
+                    local best
+                    for _, s in ipairs(names) do
+                        if s.addr <= p then best = s else break end
+                    end
+                    return best and string.format("%s+%d", best.name, p - best.addr) or "?"
+                end
+                local rows, tot = {}, 0
+                for p, c in pairs(_G._bhist) do rows[#rows + 1] = { pc = p, c = c }; tot = tot + c end
+                table.sort(rows, function(a, b) return a.c > b.c end)
+                for i = 1, math.min(#rows, 10) do
+                    w("    $%04X %6d %5.1f%%  %s", rows[i].pc, rows[i].c,
+                      100.0 * rows[i].c / tot, near(rows[i].pc))
+                end
+                w("    distinct PCs: %d %s", #rows,
+                  #rows == 1 and "★ ONE address = a PARK (crash), not a busy loop" or "")
+                w("    run-in: %s", table.concat(_G._btraj, " "))
+                out:close(); idx:close(); m:exit()
+            end
+            return
+        end
         w("guest reached its gate at frame %d -- MMU live, staging", frame)
         do local ab = prog:read_u8(0x008E)*256 + prog:read_u8(0x008F)
            w("  arena self-test: %s", ab == 0 and "clean -- every byte held its pattern"
@@ -398,7 +443,69 @@ _G._n = emu.add_machine_frame_notifier(function()
         return
     end
 
-    if prog:read_u8(GO) ~= 0 then return end        -- the guest is still in a cycle
+    -- ═══════════════════════════════════════════════════════════════════════════════════════
+    -- ★★★★★ THE STALL DETECTOR. The line below waits for the guest to clear VP_GO, and if the
+    -- guest never does, this notifier returns forever: MAME burns CPU, guest.bin stays ZERO
+    -- BYTES, and run.log's last line is "PC set". **That is what a hung gate looked like from
+    -- the outside for thirteen minutes** -- no error, no timeout, no address, nothing to act on.
+    -- ★★★★ THE FIX IS AN ADDRESS, NOT A TIMEOUT. A timeout says "it hung"; the histogram below
+    -- says WHERE, and this task has already had that distinction cost five measurements: a VBL
+    -- rate of 7.79 Hz against 59.92 was read as an interrupt-masking problem in the interpreter's
+    -- hot path, and four candidate maskers were chased through the HAL and all four were
+    -- innocent. One PC sample settled it -- a single address with a 100% share, which is a park,
+    -- not a workload. **A crashed guest and a slow guest produce the same rate** [L-93 candidate
+    -- `a-rate-is-not-an-address`].
+    -- ★★★ THE TRAJECTORY IS KEPT, NOT ONLY THE DESTINATION. The address a guest dies at is
+    -- usually in data and names nothing (the last one resolved to a framebuffer base + 2391);
+    -- the address it LEFT is in code and names the routine. So the run-in is printed too.
+    -- ★★ It cannot fire on a healthy run: STALL_FRAMES is 4x the worst paced cycle ever
+    -- measured here, and the counter resets on every cycle the guest completes.
+    if prog:read_u8(GO) ~= 0 then
+        _G._stall = (_G._stall or 0) + 1
+        if _G._stall == 1 then _G._stall_hist, _G._stall_traj = {}, {} end
+        if _G._stall > 60 then                       -- only sample once it looks stuck
+            local pc = cpu.state["PC"].value
+            _G._stall_hist[pc] = (_G._stall_hist[pc] or 0) + 1
+            if #_G._stall_traj < 40 then
+                _G._stall_traj[#_G._stall_traj + 1] =
+                    string.format("$%04X %s", pc,
+                                  ((cpu.state["CC"].value & 0x10) ~= 0) and "I" or "-")
+            end
+        end
+        if _G._stall > 1800 then                     -- ~30 emulated s with no cycle completed
+            w("★★★ GUEST STALLED at cycle %d -- VP_GO never cleared for %d frames.", n, _G._stall)
+            w("    VP_STATUS=%d badop=$%02X badlogic=%d  vm_cycle=%d",
+              prog:read_u8(STATUS), prog:read_u8(BADOP), prog:read_u8(BADLOGIC),
+              prog:read_u8(CYCLE) * 256 + prog:read_u8(CYCLE + 1))
+            -- ★ nearest preceding symbol, from SYM, so the address names a routine where it can
+            local names = {}
+            for k, v in pairs(SYM) do names[#names + 1] = { name = k, addr = v } end
+            table.sort(names, function(a, b) return a.addr < b.addr end)
+            local function near(pc)
+                local best
+                for _, s in ipairs(names) do
+                    if s.addr <= pc then best = s else break end
+                end
+                return best and string.format("%s+%d", best.name, pc - best.addr) or "?"
+            end
+            local rows = {}
+            for pc, c in pairs(_G._stall_hist) do rows[#rows + 1] = { pc = pc, c = c } end
+            table.sort(rows, function(a, b) return a.c > b.c end)
+            local tot = 0
+            for _, r in ipairs(rows) do tot = tot + r.c end
+            w("    %-8s %6s %7s  %s", "PC", "hits", "share", "nearest preceding symbol")
+            for i = 1, math.min(#rows, 10) do
+                w("    $%04X    %6d  %5.1f%%  %s", rows[i].pc, rows[i].c,
+                  100.0 * rows[i].c / tot, near(rows[i].pc))
+            end
+            w("    distinct PCs while stalled: %d  %s", #rows,
+              #rows == 1 and "★ ONE address = a PARK (crash), not a busy loop" or "")
+            w("    run-in: %s", table.concat(_G._stall_traj, " "))
+            out:close(); idx:close(); m:exit()
+        end
+        return                                       -- the guest is still in a cycle
+    end
+    _G._stall = 0
 
     if n > 0 then
         local st = prog:read_u8(STATUS)

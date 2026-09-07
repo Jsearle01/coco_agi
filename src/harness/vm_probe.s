@@ -96,8 +96,23 @@ VP_BUF_END      equ     VP_CLNBUF+42
 * the host. The guest writes a walking pattern here and reads it back ITSELF, exactly as the
 * arena self-test does, and reports the first address that does not hold what was written.
 VP_VOCAB        equ     $E000
-VP_VOCAB_END    equ     $FF00           ; $FF00-$FFFF is the I/O page and is not ours
-VP_VOCAB_MAX    equ     VP_VOCAB_END-VP_VOCAB           ; 7,936 >= 6,828
+* ★★★★★ $FE00, NOT $FF00 -- THE VECTOR PAGE IS NOT OURS EITHER, AND IT WAS BEING SCRIBBLED ON.
+* INIT0 bit 3 (MC3) is set by HAL_sys_init and preserved by HAL_time_init [time.s:61-62,98], so
+* $FE00-$FEFF is constant RAM holding the interrupt vectors. The vocabulary self-test writes a
+* walking pattern the length of its window and this window ENDED AT $FF00 -- so it has been
+* overwriting the vector page on every VM run since T-P0-060.
+* ★★★★ IT WAS HARMLESS FOR EXACTLY AS LONG AS NOTHING ENABLED INTERRUPTS. Switching the VBL clock
+* on made the CPU vector through the garbage the self-test had just written: the probe ran away out
+* of vp_vt_rd across 283 distinct PCs, executing the address-derived pattern itself -- and two runs
+* traced the SAME address sequence offset by a constant, which is what executing that pattern looks
+* like. The control settles it: HEAD's probe takes the identical path to frame 46 and then goes
+* vm_st_c -> vm_st_ozero -> vp_wait and parks, 71% of samples at the gate.
+* ★★★ **This is §2M.1's shape in the harness** -- a defect latent in a tree that never exercises
+* the path, surfacing the moment a second client does. The clock change did not cause it; it was
+* the first thing to READ what the self-test had been writing.
+* ★★ 7,680 still clears the 6,828 the window must hold, so nothing is lost by stopping lower.
+VP_VOCAB_END    equ     $FE00           ; $FE00-$FEFF is the VECTOR PAGE; $FF00+ is I/O
+VP_VOCAB_MAX    equ     VP_VOCAB_END-VP_VOCAB           ; 7,680 >= 6,828
 
                 org     $0700
 vm_probe_entry:
@@ -130,6 +145,55 @@ vm_probe_entry:
 * ★ `sta`, not `clr`: `clr` extended reads the address first, and SAM control addresses respond
 * to accesses rather than to writes (the same reasoning as sys.s step 5's $FFD9).
                 sta     $FFDF                   ; SAM TY=1: $0000-$FEFF is RAM
+
+* ═══════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE VBL CLOCK SOURCE [Jay's ruling, AD-138]. VAR_SECONDS and friends advance from the
+* CoCo3's 60 Hz vertical-sync interrupt, not from a cycle-derived virtual counter.
+* ★★★★ WHY IT IS NOT A FIDELITY ARGUMENT: the virtual clock is COUPLED TO OUR PERFORMANCE
+* PROBLEM. At T3's 2.22 cycles/s it runs ~4.5x slow against real time and ZERO during a blocked
+* message window [AD-135, AD-138], so a timing-dependent puzzle behaves differently at 2.22 than
+* at 10 -- and the error CHANGES as T3 improves. VSYNC decouples them.
+* ★★★★★ AND THE ORACLE PACES THE SAME WAY ROUND, which is the deeper reason [cycle.cpp:558]:
+*     if (_passedPlayTimeCycles >= timeDelay) { inGameTimerResetPassedCycles(); interpretCycle(); }
+* **_passedPlayTimeCycles comes from the REAL clock**, so a slow machine DROPS CYCLES and the
+* clock keeps real time. Our vm_pace had cause and effect inverted -- time advanced BECAUSE a
+* cycle ran -- which slows the clock instead of dropping frames. Different games.
+* ★★★ NOTHING SHARED CHANGES (§2M): irq_vbl.s already carries a real GIME VBL handler that
+* increments the 16-bit counter at DP $10/$11, and HAL_time_init already installs it at $010C.
+* **The machinery was here and was never switched on** -- this probe masked IRQ at entry and
+* never called HAL_time_init, so the counter has been dead in every VM run to date.
+* ★★ The mask must be LIFTED and stay lifted: a handler masked while the interpreter is blocked
+* reproduces the exact defect this ruling exists to remove [Jay's note §4].
+* ★★★★★ THE ENABLE IS NOT HERE. IT IS AFTER THE SELF-TESTS, AND PUTTING IT HERE COST A RUN.
+* Placed at this line — the obvious spot, beside the all-RAM write — the probe ran the arena and
+* vocabulary self-tests with IRQ live and then PARKED AT $8957 FOREVER, with CC.I set, 260 of 260
+* samples at ONE address. mask_where.lua's trajectory is unambiguous: frames 1-40 in vp_at_wr /
+* vp_at_rd / vp_vt_wr with CC.I CLEAR and VBLs arriving normally (39 of them), then frame 41 at
+* $8957 and never anywhere else again.
+* ★★★★ THE SELF-TESTS ARE DESTRUCTIVE BY DESIGN AND THAT IS THE POINT OF THEM. vp_at_* writes a
+* walking pattern over the WHOLE 21 KB arena, $6B00-$BF00 — **$8957 is inside it** — and vp_vt_*
+* does the same over $E000-$FF00. They exist to prove that memory is RAM end to end, so they must
+* own the machine while they run. An interrupt taken mid-sweep vectors through plumbing the sweep
+* is in the middle of overwriting, and the CPU lands in the pattern it just wrote.
+* ★★★ IT IS ALSO WHY THE SYMPTOM POINTED AT THE WRONG THING FOR THREE MEASUREMENTS. The counter
+* read 7.79 Hz against 59.92, and "13% of VBLs delivered" reads as a masking problem in the VM's
+* hot path — so the search went to every orcc #$50 in the HAL, to HAL_time_frame_count, to DP, and
+* to S-as-a-data-pointer, and all four were innocent. **A crashed guest and a masked guest produce
+* the same rate.** The discriminator was the ADDRESS, not the rate: one PC with a 100% share is a
+* park, and a park is a crash. [§2W.3 — a diagnostic that reports a rate without an address cannot
+* distinguish the two things that produce it.]
+* ★★ vbl_probe.s is the control that made this readable: identical prologue, no self-tests, 300 of
+* 300 VBLs at 59.9227 Hz with CC.I 0.0%. **The machine, the GIME setup, HAL_time_init, the $010C
+* vector and hal_vbl_handler are all correct** — nothing shared needed changing (§2M).
+* ★★★★ NOR IS HAL_time_init ITSELF HERE, AND THAT IS THE SECOND HALF OF THE SAME LESSON.
+* Moving only the `andcc` down and leaving the init at this line, the probe still never reached its
+* first park: it ran away DURING vp_vt_rd, wandering 284 distinct PCs with CC.I SET THROUGHOUT --
+* so no interrupt took it there and the enable was not the remaining cause.
+* ★★★ HAL_time_init WRITES THE GIME, NOT ONLY THE VECTOR. It sets $FF90 = $6C, and INIT0 bit 3 is
+* MC3, which maps the $FE00-$FEFF vector page -- INSIDE the $E000-$FF00 range vp_vt_* sweeps. The
+* self-test and the clock init are contending for the same 256 bytes, and the self-test loses.
+* ★★ So the whole clock bring-up moves below the self-tests, which is where it belonged on its own
+* merits: **initialise a device next to where you enable it, not three hundred lines earlier.**
 
 * ═══════════════════════════════════════════════════════════════════════════════════
 * ★★★ THE ARENA SELF-TEST -- IS THE ARENA ACTUALLY RAM, FOR THE GUEST, END TO END?
@@ -220,6 +284,35 @@ vp_vt_done:     std     VP_VOCAB_BAD
                 ldd     #0
                 std     VP_FREE
                 std     VP_CAL
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE VBL CLOCK GOES LIVE HERE [Jay's ruling, AD-138] — after every destructive self-test
+* and before any interpretation. HAL_time_init ran at entry with the mask still up, so the vector
+* and the counter are installed; this is the single instruction that starts the clock.
+* ★★★ The counter is re-zeroed because the sweeps above ran between init and here, and a clock
+* that starts at an arbitrary value is a clock nobody can subtract from. hal_frame_hi/lo are DP
+* $10/$11 and are outside both self-test ranges, so this is cheap insurance, not a fix.
+* ★★ FIRQ stays masked: there is no sound yet, and an unhandled FIRQ is a crash with a worse
+* signature than the one this task just spent three measurements chasing.
+* ★★★★★ BEHIND A FLAG, BECAUSE THE GATE MUST NOT BE LEFT RED BY AN UNFINISHED CHANGE.
+* The clock source itself is PROVEN [vbl_probe.s: 300 of 300 VBLs, 59.9227 Hz, CC.I 0.0%], and the
+* vector-page defect this work uncovered is fixed above and is fixed for everyone. What is NOT yet
+* understood is an interaction between live interrupts and the probe's FIRST cycle: with the clock
+* on and the host's VP_GO already set, the guest runs away into the $0400-$05FF text buffer before
+* its first park -- 109 addresses, all masked, arena_bad=$0000 and vocab_bad=$0000, so both
+* self-tests pass and the runaway is downstream of them.
+* ★★★★ Jay's ruling accepts the nine-title gate going red while T3 recovers -- but that is a
+* STATE-DIFF divergence from a changed clock model, which is a finding. **A guest that crashes is
+* not that; it is a defect, and shipping it as "the accepted redness" would spend the ruling's
+* budget on a bug.** So the default build is HEAD's behaviour exactly, and the clock is one flag
+* away for the task that finishes it.
+* ★★★ THE INSTRUMENT TO FINISH IT IS NOW IN THE TREE: vm_sweep.lua's boot-state stall detector is
+* what turned thirteen minutes of silent CPU burn into an address list, and mask_where.lua is the
+* standalone form. Neither existed this morning.
+                ifdef   VM_VBLCLOCK
+                jsr     HAL_time_init           ; $010C, $FF90/$FF92/$FF93, counter zeroed
+                andcc   #$EF                    ; ★ unmask IRQ. The VBL clock is now running.
+                endc
 
                 jsr     vm_start
 
