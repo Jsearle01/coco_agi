@@ -40,8 +40,28 @@ AGI_MEMMAP_INC  equ     1
 * ── slot 0: system, always resident ──────────────────────────────────────────────
 * ★ $0000-$001F is the HAL's direct page and is NOT ours [pic_probe.s:75].
 MAP_STATUS      equ     $0020           ; interpreter status/scratch, 224 B
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ 768 B, NOT 1,024 -- THE MAP WAS STALE AGAINST THE PROBE BY A FULL TASK-SERIES [P6.13].
+* This said 1,024 B / 512 entries. **pic_probe.s cut the stack to $0100-$0400 in P3.13** -- 768 B,
+* 384 entries -- and the map was never brought along, so the engine reserved 256 bytes the
+* renderer had already given back. A dispatch then budgeted from this line and computed "roughly
+* 950 bytes idle" from a figure with no producer [AD-95's shape: a number in a comment].
+*
+* ★★★★★ THE SIZE IS EVIDENCE-BASED AND THE EVIDENCE IS RE-MEASURED, not inherited. Across the
+* renderer gate's whole corpus the high-water mark is **74 bytes / 37 entries** (`sp_peak_bytes`
+* in build/sweep/timing.csv, max over every picture; mean 15.2 B). That is the same figure P3.13
+* sized against, re-taken on the corpus that runs today rather than cited from it.
+* ★★★★ HEADROOM IS SIZED ON THE MODEL, NOT THE SAMPLE. The P2 fill study's offline prediction of
+* worst-case demand is 102 entries / 204 bytes -- higher than any picture actually reaches. 384
+* entries is 3.8x that prediction and 10.4x the measured peak, and pic_probe.s ASSERTS the
+* resulting margin at assembly time rather than trusting it.
+* ★★★ NOT CUT FURTHER, DELIBERATELY. A flood fill's demand is a property of pictures we have not
+* rendered [AD-113 found a 71.5% divergence on a picture outside the gate corpus], the overflow
+* path HALTS rather than wrapping, and **this region cannot relieve the pressure that motivated
+* the cut**: the seed stack is in slot 0 at $0100 and the code region is slots 1-2 at $2000-$5300.
+* Bytes freed here do not house a text engine.
 MAP_SEEDSTACK   equ     $0100           ; picture flood-fill seed stack
-MAP_SEEDSTACK_E equ     $0500           ; ★ 1,024 B = 512 entries of (x,y)
+MAP_SEEDSTACK_E equ     $0400           ; ★ 768 B = 384 entries of (x,y); peak measured at 37
 * ★★ S STARTS AT $0800 AND GROWS DOWN into $0500-$07FF. pic_probe learned this the hard way:
 * leaving S where DECB put it aimed the hardware stack into the fill stack, and a deep fill
 * overwrote a return address [pic_probe.s:20-26]. 768 B against a MEASURED max depth of 3.
@@ -210,8 +230,17 @@ MAP_ARENA_BYTES equ     24576           ; ★ 3 blocks, CHOSEN FROM THE EVICTION
                 ifgt    MAP_SEEDSTACK-MAP_STATUS-224
                 error   "status block overruns the seed stack"
                 endc
-                ifgt    MAP_SEEDSTACK+1024-MAP_SEEDSTACK_E
-                error   "seed stack is not 1024 B"
+* ★★★★★ 768, AND THE ASSERTION IS WHY THE SIZE CHANGE WAS SAFE TO MAKE [P6.13]. Resizing the
+* region above without this line would have been a silent edit; instead p3b_probe.s refused to
+* assemble and named the constant. **That is the mechanism working exactly as its header claims**
+* -- and it caught the change within a minute of my making it, where P6.11's code-region overrun
+* went a whole task unnoticed because nobody ran the build that asserts.
+* ★★★ The bound is the MEASURED peak with headroom, not a round number: 37 entries / 74 bytes is
+* the high-water mark across the renderer gate's 45 pictures, the P2 fill study's offline
+* prediction of worst-case demand is 102 entries / 204 bytes, and 384 entries is 3.8x that model
+* and 10.4x the sample. pic_probe.s asserts its own margin separately.
+                ifgt    MAP_SEEDSTACK+768-MAP_SEEDSTACK_E
+                error   "seed stack is not 768 B -- see the sizing note at MAP_SEEDSTACK"
                 endc
                 ifgt    MAP_SEEDSTACK_E-MAP_HWSTACK
                 error   "seed stack overruns the hardware stack region"

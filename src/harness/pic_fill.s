@@ -13,7 +13,14 @@
 *   ★ When BOTH planes are on, the bound is tested on the VISUAL screen ALONE. A fill that also
 *   tested priority would stop at priority edges the oracle walks straight through.
 *
-* ★ STACK OVERFLOW HALTS. 448 entries against a measured peak of 102 is ample, but a wrap would
+* ★★★★ BOTH NUMBERS IN THIS LINE WERE WRONG AND IT SAID "MEASURED" [corrected P6.13]. It read
+* "448 entries against a measured peak of 102". The stack is **384 entries** ($0100-$0400, cut in
+* P3.13 and asserted at assembly time in pic_probe.s), and **102 was never a measurement** -- it
+* is the P2 fill study's OFFLINE PREDICTION of worst-case demand (204 bytes / 102 entries,
+* pic_fill.s:1379). The measured peak across the gate corpus is **37 entries / 74 bytes**.
+* ★★★ A comment that calls a prediction a measurement is worse than one that is merely stale: it
+* launders a model into evidence, and a later reader sizing against it thinks the sample said so.
+* ★ STACK OVERFLOW HALTS. 384 entries against a measured peak of 37 is ample, but a wrap would
 * corrupt code and produce a picture that is wrong for a reason no diff could name (L-23).
 *
 * ═══════════════════════════════════════════════════════════════════════════════════════════

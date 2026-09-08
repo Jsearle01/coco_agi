@@ -59,7 +59,20 @@ PIC_W           equ     160
 PIC_H           equ     168
 
 STACK_BASE      equ     $0100           ; fill stack (seed points)
+* ★★★★★ AC-6's FAULT [P6.13]. The overflow path HALTS rather than wrapping, and that claim had
+* never been exercised: every picture in the corpus peaks at 37 entries against a 384-entry stack,
+* so the halt is 10x away from anything the gate does. **A path nothing reaches is an assertion,
+* not a behaviour** [L-62, §2W].
+* ★★★★ -DPIC_SEEDFAULT drops the ceiling to 20 entries, below the corpus maximum of 37
+* (Kingquest1-009, 74 bytes). The deepest pictures must then halt and the gate must go red on
+* them -- and, just as informatively, the shallow ones must still pass, because a fault that
+* breaks every picture would prove only that the binary changed.
+                ifdef   PIC_SEEDFAULT
+STACK_TOP       equ     STACK_BASE+40   ; ★ 20 entries -- below the measured peak of 37
+                endc
+                ifndef  PIC_SEEDFAULT
 STACK_TOP       equ     $0400           ; one past the last usable fill entry
+                endc
 HW_STACK        equ     $0700           ; 6809 S, grows DOWN into $0400..$06FF
 * ★★★ P3.13 — THE SEED STACK WAS CUT FROM 1024 B TO 768 B AND THE ORIGIN MOVED DOWN 256 B,
 * because the COUNTED build overran PIC_DATA and the gate reported it as one picture with
