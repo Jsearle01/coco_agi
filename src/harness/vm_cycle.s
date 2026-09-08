@@ -337,10 +337,18 @@ vm_post_cycle:
                 jsr     vm_setvar
                 rts
 
-* vm_step_clock: one 25 ms tick, the timer update, and the current delay threshold.
+* vm_step_clock: one VERTICAL-SYNC tick, the timer update, and the current delay threshold.
+* ★★★★★ IT COUNTS TICKS, NOT MILLISECONDS [AD-138; the reference's `self.vsync` is the same
+* quantity]. It added 25 per iteration and called itself virtual_ms. ★★★★ **Nothing has ever read
+* it** -- vm_timer_update advances the game clock from vm_sectick, and the only other writers of
+* this location are here and vm_start's reset -- so the milliseconds were a 32-bit accumulator
+* maintained for no consumer, and a unit the 6809 cannot measure. As ticks it is the same storage
+* and the same cost, and it now names something the machine will actually have: the VBL counter.
+* ★★ Kept rather than deleted: removing state nothing reads is a separate change [L-54], and this
+* one has a consumer the moment the VBL clock comes off its flag.
 vm_step_clock:
                 ldd     vm_vms+2
-                addd    #25
+                addd    #1
                 std     vm_vms+2
                 bcc     vm_sp_nocarry
                 ldd     vm_vms
@@ -352,10 +360,18 @@ vm_sp_nocarry:
 
                 lda     #VAR_TIME_DELAY
                 jsr     vm_getvar
+* ★★★★★ x3, NOT x2 -- VM_VAR_TIME_DELAY IS IN 50 ms AGI TICKS AND A TICK IS NOW A VERTICAL SYNC.
+* 50 ms is 2 x 25 ms and is 3 x 16.667 ms, so the wall-clock time per cycle is IDENTICAL and only
+* the unit changed. cycle.py carries the same multiplier for the same reason [P6.12].
+* ★★★ `aslb / rola` doubled; tripling is the double plus the original, which needs the original
+* kept -- hence the push. Still 16-bit before the clamp below, so a TIME_DELAY of 85 (the largest
+* that fits x3 in a byte) behaves and anything larger clamps visibly rather than aliasing.
                 tfr     a,b
                 clra
+                pshs    d                       ; keep time_delay
                 aslb
-                rola                            ; time_delay * 2
+                rola                            ; x2
+                addd    ,s++                    ; + x1 = time_delay * 3
                 cmpd    #0
                 bne     vm_sp_have
                 ldd     #1
@@ -398,9 +414,20 @@ vm_timer_update:
 * is NOT the reason for the change -- it is stated so the change is not later mistaken for a
 * behavioural risk it removes.
 * ═══════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ 60, NOT 40 -- THE TICK IS A VERTICAL SYNC NOW [Jay's ruling AD-138; P6.12 moved the
+* reference and left this leg behind]. A second is 60 ticks at 60 Hz where it was 40 ticks of
+* 25 ms. **The boundary argument above is unchanged and still exact**: vm_sectick's only writers
+* are this increment and this clear, so it fires on precisely every 60th tick, forever.
+* ★★★★ WHY IT HAD TO CHANGE, and it is a regression I introduced: P6.12 put the REFERENCE on
+* vertical-sync ticks and argued the two models were equivalent because the nine-title diff stayed
+* 9/9. **That test was run on the no-input arm.** With input fed, five of six titles diverge on
+* vars 11 and 12 -- SECONDS and MINUTES -- from cycle 36, guest ahead of oracle, because the
+* non-equivalent case I wrote into cycle.py (time_delay == 0: 25 ms here against 16.667 ms there)
+* is a case that only INPUT drives titles into. ★★★ L-85, on my own claim: a gate's corpus is part
+* of its claim, and I checked the corpus that could not fail.
                 inc     vm_sectick
                 lda     vm_sectick
-                cmpa    #40                     ; 1000 ms / 25 ms per tick
+                cmpa    #60                     ; one second = 60 vertical syncs
                 blo     vm_tu_out
                 clr     vm_sectick
 * seconds += 1, carrying into minutes / hours / days
