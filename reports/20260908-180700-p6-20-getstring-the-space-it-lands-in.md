@@ -349,4 +349,5 @@ None.
 ---
 
 ### 11 — Commit
-See the follow-up commit.
+`6a7b132` — pushed to origin/wip, carrying both tools and this report. ★ Corrected by one follow-up
+commit, since a report cannot name the hash of the commit that contains it.
