@@ -80,16 +80,50 @@ def oracle_slice_without_format(theirs, fmt_indices):
     return out
 
 
-def reference_events(game_dir, fault_wrap=False, skip_format=False):
+def _unsafe_for_oracle(msg):
+    """agi.cpp's sweep guard, byte for byte: a `%m` whose index does not begin 1..9.
+
+    ★★★ The oracle's own guard at text.cpp:1272 is `numTexts > i` -- high end only -- so an index
+    of 0 reads texts[-1]. `%m` with no digits gives strtoul 0, and so does an explicit `%m0`.
+    """
+    for k in range(len(msg) - 1):
+        if msg[k:k + 1] == b"%" and msg[k + 1:k + 2] == b"m":
+            nxt = msg[k + 2:k + 3]
+            if not (b"1" <= nxt <= b"9"):
+                return True
+    return False
+
+
+def reference_events(game_dir, fault_wrap=False, skip_format=False, fault_printf=False):
     """Run the reference over the same messages, in the same order, as agi.cpp's sweep."""
-    # ★★★ The fault is set on the REFERENCE MODULE, not applied by this gate. A gate that could
+    # ★★★ Faults are set on the REFERENCE MODULE, not applied by this gate. A gate that could
     # manufacture its own failure would prove nothing when it failed [§2W].
+    # ★★★★ The two faults reach DIFFERENT STAGES, which is the point of having both: --fault-wrap
+    # diverges rectangle 0 (every message wraps), --fault-printf diverges rectangle 555 (only the
+    # format-bearing ones), so each says which stage the gate is actually watching.
     textref.FAULT_WRAP = bool(fault_wrap)
+    textref.FAULT_PRINTF = bool(fault_printf)
 
     game = resource.load_from_files(game_dir)
-    r = textref.TextRenderer()
+
+    # ★★★ logic 0's messages, which %g reads directly and %m reads via curLogicNr (see below).
+    logic0_texts = []
+    try:
+        raw0 = game.load("LOGIC", 0)
+        if raw0:
+            logic0_texts = [m.decode("latin-1") for m in logic_mod.split(raw0, 0).messages]
+    except Exception:                                  # noqa: BLE001
+        pass
+
+    # ★★★★ The sweep runs at INIT: no input parsed, no strings set, variables at their initial
+    # values. So ego words and strings are empty and getVar returns 0 -- the PrintfState defaults.
+    # Those are ASSUMPTIONS ABOUT THE SWEEP, not guarantees from the state diff (AC-5), and the
+    # gate is what tests them.
+    st = textref.PrintfState(logic0_texts=logic0_texts)
+    r = textref.TextRenderer(printf_state=st)
     logics = 0
     msgs = 0
+    skipped = 0
     fmt_indices = set()
     # ★★ agi.cpp's sweep walks dirLogic in index order and skips absent entries; this mirrors it.
     for nr in range(256):
@@ -101,8 +135,43 @@ def reference_events(game_dir, fault_wrap=False, skip_format=False):
             continue
         lg = logic_mod.split(raw, nr)
         logics += 1
+        # ★★★★★ %m READS LOGIC 0 IN THE SWEEP, AND THIS LINE CHANGED ONCE ALREADY. Its guard is
+        # `if (logics[curLogicNr].numTexts > i)` (text.cpp:1272), and **the sweep never sets
+        # curLogicNr, so curLogicNr is 0** -- %m reads logic 0's message table, exactly as %g does.
+        #
+        # ★★★★ P6.17/P6.18 measured EMPTY and were right at the time, for a reason that has since
+        # been removed: the sweep called unloadResource on every logic INCLUDING logic 0, so
+        # `logics[0].numTexts` was 0, the guard failed, and %m contributed nothing. Three candidates
+        # were tried against the oracle's own rectangle for Kingquest1 message 555 (w=74, box width
+        # 16): curLogicNr=0 gave 78, the swept logic gave 82, and EMPTY gave 74.
+        #
+        # ★★★★★ P6.18's crash fix HELD LOGIC 0 RESIDENT (agi.cpp -- %g88 was dereferencing it after
+        # the free), and that silently moved %m from "appends nothing" to "substitutes". **The same
+        # 596 Kingquest1 messages now emit 35,716 glyphs instead of 35,584 -- +132.** ★★★ A fix to
+        # one substitution code moved a different one, which is §2H exactly: the first mechanism was
+        # real and was not the whole mechanism. Had the reference not been changed with it, the gate
+        # would have reported a wrapping divergence on 35 Kingquest1 messages and the cause would
+        # have been three files away.
+        #
+        # ★★ Still a property of the SWEEP rather than of AGI: in real gameplay curLogicNr is the
+        # RUNNING logic, not 0. A gate driven from gameplay needs it, and the 288-byte state diff
+        # does not carry it (AC-5).
+        r.printf_state.cur_logic_texts = logic0_texts
         for msg in lg.messages[:MSGS_PER_LOGIC]:
             if not msg:
+                continue
+            # ★★★★★ MIRRORS agi.cpp's SKIP, AND MIRRORING IS ALL IT DOES. The sweep refuses to draw
+            # a message carrying a `%m` whose index does not begin 1..9, because stringPrintf reads
+            # `texts[-1]` on it and the oracle segfaults -- SpaceQuest-2 message #355, which killed
+            # the capture at 354 for two tasks. ★★★★ Without this line the reference draws 575 where
+            # the oracle drew 574 and the gate reports a WRAPPING divergence at rectangle 354: a
+            # real mismatch, pointing at the wrong subsystem entirely.
+            # ★★★ IT IS DELIBERATELY THE NARROWEST FORM. A skip that dropped every %m-bearing
+            # message would hide 1,044 of the corpus's 1,194 format-bearing messages and the gate
+            # would still print PASS [§2W: an instrument that cannot be wrong does not measure].
+            # ★★ One message in nine titles is skipped, and the gate prints the count.
+            if _unsafe_for_oracle(msg):
+                skipped += 1
                 continue
             if b"%" in msg:
                 fmt_indices.add(msgs)
@@ -118,7 +187,8 @@ def reference_events(game_dir, fault_wrap=False, skip_format=False):
             r.close_window()
             msgs += 1
     textref.FAULT_WRAP = False
-    return r.events, logics, msgs, fmt_indices
+    textref.FAULT_PRINTF = False
+    return r.events, logics, msgs, fmt_indices, skipped
 
 
 def classify_rect(a, b):
@@ -169,20 +239,27 @@ def main():
                     help="exclude messages carrying a %% code: gates the WRAP alone, "
                          "and gates nothing about stringPrintf")
     ap.add_argument("--fault-wrap", action="store_true",
-                    help="AC-5: change the wrap test from >= to >; EXPECTED to fail")
+                    help="P6.17 AC-5: change the wrap test from >= to >; EXPECTED to fail")
+    ap.add_argument("--fault-printf", action="store_true",
+                    help="P6.18 AC-4: drop %%v's leading-zero strip; EXPECTED to fail at the "
+                         "first format-bearing message, with the wrap intact")
     a = ap.parse_args()
 
     theirs, dropped = read_oracle(a.oracle_log)
-    ours, logics, msgs, fmt_indices = reference_events(a.game_dir, a.fault_wrap, a.skip_format)
+    ours, logics, msgs, fmt_indices, skipped = reference_events(
+        a.game_dir, a.fault_wrap, a.skip_format, a.fault_printf)
     if a.skip_format:
         theirs = oracle_slice_without_format(theirs, fmt_indices)
 
     title = pathlib.Path(a.game_dir).name
     print(f"=== text gate: {title} ===")
     print(f"  sweep region : {len(theirs)} events kept, {dropped} dropped after the last restore")
-    print(f"  reference    : {msgs} messages across {logics} logics")
+    print(f"  reference    : {msgs} messages across {logics} logics"
+          + (f"   ({skipped} skipped: the oracle reads texts[-1] on them)" if skipped else ""))
     if a.fault_wrap:
         print("  *** FAULT INJECTED (--fault-wrap): wrap test >= became > -- EXPECTED TO FAIL")
+    if a.fault_printf:
+        print("  *** FAULT INJECTED (--fault-printf): %v leading-zero strip dropped -- EXPECTED TO FAIL")
 
     c = compare(ours, theirs)
     print(f"  rectangles   : ours {c['our_rects']}   oracle {c['their_rects']}"

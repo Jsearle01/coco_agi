@@ -40,6 +40,35 @@ the Specs.
 |                                | into the display buffer.             | so the port does not copy it|
 | `checksum`                     | ★★★★ likewise gate-only. The port    | zero                        |
 |                                | has no reason to compute it.         |                             |
+| ── `stringPrintf`, added P6.18 ─────────────────────────────────────────────────────────────|
+| `out` accumulating the         | ★★★★★ A SECOND FIXED 2,000-BYTE      | 2,000 B more of             |
+| substituted `str`              | BUFFER, DISTINCT FROM THE WRAP'S.    | MAP_RESERVED -- 4,000 B for |
+|                                | The oracle has both:                 | the text engine's two       |
+|                                | `resultPrintfBuffer[2000]` at        | stages, and they cannot     |
+|                                | text.cpp:1218 and                    | share one buffer because    |
+|                                | `resultWrappedBuffer[2000]` at 1096, | the wrap READS the printf   |
+|                                | and the wrap READS the printf's      | output while WRITING its    |
+|                                | output (text.cpp:463 then 468)       | own [text.cpp:463,468]      |
+| `string_printf` RECURSING for  | ★★★★★ THE HAZARD ROW. The oracle     | ★★★ a per-call accumulator  |
+| `%s` and `%m`                  | recurses into THE SAME static        | the 6809 does not get for   |
+|                                | buffer and gets away with it ONLY    | free. Either a second       |
+|                                | because it accumulates into a        | staging buffer, or an       |
+|                                | SEPARATE `Common::String` and copies | append-in-place rewrite     |
+|                                | to the static last [1288, 1294].     | that never returns a        |
+|                                | ★★★★ A 6809 port that recurses       | pointer to shared storage.  |
+|                                | straight into one shared output      | ★★ Depth is 1 in the        |
+|                                | buffer CLOBBERS THE CALLER.          | sweep and unbounded in      |
+|                                |                                      | principle -- state a cap.   |
+| `z`, the `"%015i"` scratch     | ★★ 16 bytes, and the 6809 has no     | 16 B + a byte-to-decimal    |
+|                                | `sprintf`: a divide-by-10 loop       | routine (~40 B of code)     |
+|                                | emitting 15 digits into a fixed      |                             |
+|                                | buffer, then an index into it.       |                             |
+| `PrintfState`'s six callbacks  | ★★★ NOT closures -- five are direct  | zero; they are already      |
+|                                | reads of resident state (vars, the   | where the port needs them   |
+|                                | OBJECT file, logic 0's message       |                             |
+|                                | table, the parsed-word slots, the    |                             |
+|                                | string table) and the sixth is       |                             |
+|                                | `curLogicNr`, one byte.              |                             |
 
 ★★★★ THE ROW THAT WILL PROBABLY BE WRONG, said in advance because parser.py's §3.E predicted four
 forms and the fourth was incomplete: **"the message is not copied" is the claim most likely to
@@ -156,6 +185,178 @@ def string_word_wrap(text, max_width):
     return "".join(out), box_width, box_height
 
 
+PRINTF_BUFFER_MAX = 2000        # ★ text.cpp:1218 -- static char resultPrintfBuffer[2000]
+
+
+class PrintfState:
+    """The game state stringPrintf substitutes FROM.
+
+    ★★★★★ AC-5: THIS IS THE ANSWER, AND IT IS NOT ALL COVERED BY THE STATE DIFF. The nine-title
+    diff is 288 bytes -- 32 packed flag bytes then 256 variables [vm_diff.py:4] -- and
+    stringPrintf reads FOUR things beyond that:
+
+        %v  getVar(i)                      -> variables      ★ COVERED by the diff
+        %0  objectName(i)                  -> the OBJECT file  ✗ NOT covered
+        %g  logics[0].texts[i]             -> logic 0's messages (static game data)
+        %w  getEgoWord(i)                  -> the last PARSED INPUT words   ✗ NOT covered
+        %s  getString(i)                   -> VM strings      ✗ NOT covered
+        %m  logics[curLogicNr].texts[i]    -> and curLogicNr  ✗ NOT covered
+
+    ★★★★ SO A GREEN NINE-TITLE DIFF DOES NOT GUARANTEE THE SUBSTITUTION'S INPUTS. Three of the six
+    codes read state the diff never compares, and a fourth depends on curLogicNr, which the diff
+    also does not carry. **For the oracle's SWEEP this happens not to bite** -- it runs at init,
+    before any input is parsed, so ego words and strings are empty and the variables are at their
+    initial values -- but that is a property of the sweep, not a guarantee from the gate.
+    ★★★ Stated as a limit rather than worked around: a text gate driven from real gameplay would
+    need those four covered, and the diff would have to widen to do it.
+
+    ★★★★★ AC-7 MEASURED THIS AND HALF OF IT WAS WRONG. The sentence here used to say `objectName`
+    and `getString` "are unused ... and will be exercised the first time a title uses them -- which
+    AC-7's wider corpus is what would find." **The corpus found one of the two.**
+    `harness/tools/text_census.py` over all nine v2 gate titles, 14,944 messages:
+
+        %v 436   %0 0   %g 4   %w 121   %s 189   %m 1,044        (1,194 format-bearing messages)
+
+    ★★★★ **`%s` IS USED, by six of the nine titles** -- PoliceQuest1 94, SpaceQuest-1 40,
+    SpaceQuest-2 32, larry1 16, MixedUpMotherGoose 6, Kingquest2 1 -- and `%s` is the RECURSING
+    code, so the hazard row in the §2V table above is on a live path rather than a hypothetical one.
+    ★★★ It still models as empty and still agrees with the oracle, because the sweep runs at init
+    and the oracle's string table is empty there too: **both sides read the same empty state, which
+    is agreement about the harness and not evidence about substitution.** That is a limit on what
+    596-times-nine has tested, and it is the limit AC-9's `get.string` work has to lift.
+
+    ★★ **`%0` is used by NO staged title** -- zero occurrences in 14,944 messages -- so the object
+    path is untested and the corpus cannot contradict the empty model. ★ Kingquest1's own 44
+    format-bearing messages are %v x28, %m x35, %w x13, which is why one title could not have found
+    either of these.
+
+    ★ Also measured, and it retires divergence C below as a live concern: **no message in any of the
+    nine ends in a backslash** (65 contain one, 63 of them PoliceQuest1's).
+    """
+
+    def __init__(self, get_var=None, object_name=None, logic0_texts=None,
+                 ego_word=None, get_string=None, cur_logic_nr=0, cur_logic_texts=None):
+        # ★ Defaults are the SWEEP's state: fresh init, nothing parsed, no strings set.
+        self.get_var = get_var or (lambda i: 0)
+        self.object_name = object_name or (lambda i: "")
+        self.logic0_texts = logic0_texts or []
+        self.ego_word = ego_word or (lambda i: "")
+        self.get_string = get_string or (lambda i: "")
+        self.cur_logic_nr = cur_logic_nr
+        self.cur_logic_texts = cur_logic_texts or []
+
+
+# ★★★★★ AC-4's FAULT. It lives in the reference, not the gate, so the gate cannot manufacture its
+# own failure [§2W]. It drops the leading-zero strip from %v, which is the single most plausible
+# slip in this function: getVar returns a byte, "%015i" pads it to fifteen digits, and forgetting
+# to strip turns "3" into "000000000000003". ★★★★ It moves the CHECKSUM and the WRAP (a 15-digit
+# number wraps differently), leaving everything the wrap does correct -- so it exercises the
+# substitution stage specifically, which is what AC-4 asks for and what the wrap fault could not
+# reach.
+FAULT_PRINTF = False
+
+
+def string_printf(text, st):
+    """text.cpp:1217-1296, statement for statement.
+
+    ★★★★ THE FIVE THINGS THAT ARE EASY TO GET WRONG:
+      1. **The object code is '0', not 'o'** (text.cpp:1254). Reading the Specs would give %o.
+      2. `%v` formats through "%015i" and then strips leading zeros with `i < 14`, so an all-zero
+         value keeps ONE digit rather than vanishing -- the engine's comment says "don't remove
+         the 3rd zero if 000".
+      3. `%v<n>|<w>` sets a field WIDTH: i = 15 - w, taking the last w digits.
+      4. `%s` and `%m` RECURSE through stringPrintf, so a substituted string is substituted again.
+         ★★ `%s` does NOT subtract 1 from its index; `%0`, `%g`, `%w` and `%m` all do.
+      5. `\\` escapes the next character and falls through to the literal branch.
+
+    ★★★★★ THREE PLACES THIS REFERENCE IS DELIBERATELY NOT THE ORACLE, recorded rather than quietly
+    "fixed" [§2.1: say which you are reproducing; §8: a divergence is stated, not assumed benign].
+    **All three are out-of-range paths that the oracle does not guard and this does.** None is
+    reachable from well-formed game data, and none is exercised by the 596-message sweep -- so they
+    are stated as limits on what the gate has tested, not as claims about which behaviour is right:
+
+      A. **`%g` is unchecked in the oracle** [text.cpp:1260]: `logics[0].texts[i]` with no bound
+         test at all. A `%g` past logic 0's message count reads out of bounds there and emits
+         nothing here.
+      B. **`%m`'s guard is one-sided** [text.cpp:1272]: `numTexts > i` catches the high end and not
+         `i == -1`, which `%m0` produces. This checks `0 <= idx`.
+      C. ★★★ **A TRAILING `\\` WALKS PAST THE TERMINATOR in the oracle** [text.cpp:1283-1288]: the
+         escape branch increments, then FALLS THROUGH to `resultString += *originalText++`, which
+         appends the NUL and leaves the pointer one byte beyond it -- so the `while (*originalText)`
+         at 1224 resumes on whatever follows the message. This stops at the end of the string.
+
+    ★★★★ WHY THIS MATTERS TO THE PORT AND NOT ONLY TO THE REFERENCE: C is the one to carry forward.
+    On the 6809 the messages are contiguous in the LOGIC resource's text table, so "reads past the
+    terminator" means "reads the NEXT MESSAGE", and the naive port reproduces the oracle's walk
+    exactly and for free. **If a title ever ends a message with a backslash, matching the oracle
+    here requires deliberately NOT bounds-checking** -- which is a decision, and it belongs on the
+    §2V table above rather than in whatever the port happens to do.
+    """
+    out = []
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch == "%":
+            i += 1
+            if i >= n:
+                break
+            code = text[i]
+            i += 1
+            digits = ""
+            while i < n and text[i].isdigit():
+                digits += text[i]
+                i += 1
+            num = int(digits) if digits else 0
+
+            if code == "v":
+                z = "%015i" % st.get_var(num)
+                width = 99
+                if i < n and text[i] == "|":
+                    i += 1
+                    wd = ""
+                    while i < n and text[i].isdigit():
+                        wd += text[i]
+                        i += 1
+                    width = int(wd) if wd else 0
+                if width == 99:
+                    if FAULT_PRINTF:
+                        k = 0                     # ★ AC-4's fault: no leading-zero strip
+                    else:
+                        k = 0
+                        while k < 14 and z[k] == "0":
+                            k += 1
+                else:
+                    k = 15 - width
+                out.append(z[k:])
+            elif code == "0":
+                out.append(st.object_name(num - 1))
+            elif code == "g":
+                idx = num - 1
+                if 0 <= idx < len(st.logic0_texts):
+                    out.append(st.logic0_texts[idx])
+            elif code == "w":
+                out.append(st.ego_word(num - 1))
+            elif code == "s":
+                out.append(string_printf(st.get_string(num), st))
+            elif code == "m":
+                idx = num - 1
+                if 0 <= idx < len(st.cur_logic_texts):
+                    out.append(string_printf(st.cur_logic_texts[idx], st))
+            # ★ default: the code is consumed and nothing is emitted
+            while i < n and text[i].isdigit():
+                i += 1
+        elif ch == "\\":
+            i += 1
+            if i < n:
+                out.append(text[i])
+                i += 1
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+
 def char_attrib_ega(foreground, background):
     """text.cpp:198-206, the EGA branch of charAttrib_Set.
 
@@ -176,11 +377,12 @@ class TextRenderer:
     cannot see and the port would inherit the wrong emphasis [§2O.1].
     """
 
-    def __init__(self, window_row_min=2):
+    def __init__(self, window_row_min=2, printf_state=None):
         # ★ _window_Row_Min is `gameRow` (text.cpp:93). For a normal v2 game with the status line
         # at row 0 the message box sits two rows down, which the capture confirms: the first
         # message's startingRow is 8 and its first glyph is logged at row 10.
         self.window_row_min = window_row_min
+        self.printf_state = printf_state or PrintfState()
         self.events = []            # ★★ gate-only; see the §2V table
         self.checksum = 0
         self._msg = None
@@ -195,6 +397,12 @@ class TextRenderer:
         max_width = wanted_width
         if wanted_width == 0:
             max_width = 30                       # text.cpp:457-458
+
+        # ★★★★★ THE SUBSTITUTION RUNS FIRST -- text.cpp:463, and missing it is what made 11 of
+        # Kingquest1's 596 messages diverge from index 555 [P6.17]. The wrap sees stringPrintf's
+        # OUTPUT, never the raw message, so every downstream number -- box width, rectangle,
+        # checksum -- is computed from the substituted string.
+        text = string_printf(text, self.printf_state)
 
         wrapped, calc_w, calc_h = string_word_wrap(text, max_width)
         text_w, text_h = calc_w, calc_h
@@ -252,3 +460,39 @@ class TextRenderer:
         m = self._msg
         self.events.append(("R", m["bg_x"], max(0, m["bg_y"]), m["bg_w"], m["bg_h"]))
         self._msg = None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★ AC-9 -- WHAT `get.string` STILL NEEDS, NOW THAT THE DISPLAY SIDE EXISTS
+#
+# ★★★ Read at the pin, `cmdGetString` (op_cmd.cpp), so this is a list of named callees rather than
+# a guess at a design. Its lead-in text path is ALREADY BUILT by this module:
+#
+#       stringPrintf(leadInTextPtr)          <- string_printf above
+#       stringWordWrap(processed, 40)        <- string_word_wrap above, max_width 40 not 30
+#       displayText(...)                     <- the _display_text path in TextRenderer
+#
+# ★★★★ SO THE REMAINING WORK IS NOT RENDERING, IT IS INPUT AND CURSOR STATE -- five things, none
+# of which this reference models today:
+#
+#   1. `charPos_Push` / `charPos_Set(row, col)` / `charPos_Pop`. ★★ A SAVED CURSOR, and the push and
+#      pop bracket the whole opcode, so it is a one-deep stack of two bytes. On the 6809 that is two
+#      direct-page bytes, not a structure.
+#   2. `inputEditOn` / `inputEditOff`, restored to the PREVIOUS state rather than to off
+#      (`previousEditState`) -- ★★ an opcode that runs inside an existing edit must not end it.
+#   3. `cycleInnerLoopActive(CYCLE_INNERLOOP_GETSTRING)`. ★★★★ THE HARD PART, AND IT IS A VM
+#      QUESTION RATHER THAN A TEXT ONE: the interpreter re-enters a nested cycle loop that keeps
+#      drawing and polling until the edit ends. **The port's main loop has no such re-entry today**
+#      -- vm_cycle.s runs one pass and returns -- and it is the same shape as `have.key`.
+#   4. `stringSet("")` then `stringEdit(maxLen)`, with `maxLen` clamped to TEXT_STRING_MAX_SIZE.
+#      ★★ A FIXED 40-byte edit buffer (MAX_STRINGLEN), which the 6809 already wants.
+#   5. `setString(destNr, _inputString)` into `strings[MAX_STRINGS + 1][MAX_STRINGLEN]`
+#      -- ★★★ 25 x 40 = 1,000 BYTES of string table, and this is the storage `%s` reads. It is
+#      currently modelled as empty here, and AC-7 measured that six of the nine titles use `%s`
+#      (189 occurrences), so the empty model is a limit the gate cannot see past until this exists.
+#
+# ★★★ ONE MORE ORACLE GUARD THAT IS ONE-SIDED, in the same family as the three named in
+# string_printf's docstring: `state->_curLogic->numTexts >= leadInTextNr` admits
+# `leadInTextNr == numTexts`, one past the end, because leadInTextNr is already `parameter[1] - 1`.
+# ★★ Not observed to fire; recorded so the port's choice there is made rather than inherited.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════

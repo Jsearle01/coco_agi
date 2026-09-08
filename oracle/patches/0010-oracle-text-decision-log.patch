@@ -26,8 +26,23 @@
 # tree, which is a change to how the whole series is kept -- recorded as a follow-up rather than
 # done in passing. This header is here so nobody discovers the shape by applying it.
 #
+# ★★★★★ AMENDED P6.18 -- THE SWEEP SEGFAULTED ON TWO OF NINE TITLES and the two causes differ in
+# kind. PoliceQuest1 died at its first `%g`, because this sweep unloaded logic 0 while `%g` reads
+# it (text.cpp:1259) -- OUR defect, fixed by holding logic 0 for the sweep's duration.
+# SpaceQuest-2 died on a bare `%m`, which strtoul turns into index 0 while text.cpp:1272 guards
+# only the high end, so `texts[-1]` is read -- THE ENGINE'S, on shipped game data, and not ours to
+# change while the oracle is pinned; that one message is skipped and counted.
+# ★★★★ Holding logic 0 also moved `%m` from "appends nothing" to "substitutes", because the sweep
+# never sets curLogicNr and so reads logic 0 -- Kingquest1's same 596 messages emit 35,716 glyphs
+# instead of 35,584. harness/tools/text_gate.py carries the matching change and the evidence.
+#
+# ★★★ REGENERATED THROUGH harness/tools/patch_regen.py, which also repaired this file: every `★`
+# in the diff body had been replaced by `?` by an ASCII-strip in whatever produced the original
+# (112 restored, 0 present before). **The archived record was lossy against a source that was
+# fine**, which is exactly the drift the regenerator exists to stop.
+#
 diff --git a/engines/agi/agi.cpp b/engines/agi/agi.cpp
-index 7280068f..f1241193 100644
+index 7280068f..e27e5ffb 100644
 --- a/engines/agi/agi.cpp
 +++ b/engines/agi/agi.cpp
 @@ -54,6 +54,11 @@
@@ -42,13 +57,13 @@ index 7280068f..f1241193 100644
  void AgiEngine::allowSynthetic(bool allow) {
  	_allowSynthetic = allow;
  }
-@@ -155,10 +160,208 @@ int AgiEngine::agiInit() {
+@@ -155,10 +160,250 @@ int AgiEngine::agiInit() {
  	if (ec == errOK)
  		ec = _loader->loadWords();
  
 +	// coco_agi ORACLE INSTRUMENTATION (P6.1, AC-3) -- THE PARSER GATE.
 +	//
-+	// ??????????????? WHY THIS AND NOT A SCRIPTED PLAYTHROUGH. The first attempt fed input into the
++	// ★★★★★ WHY THIS AND NOT A SCRIPTED PLAYTHROUGH. The first attempt fed input into the
 +	// running engine at a chosen cycle. It works -- parseUsingDictionary() is exactly what a
 +	// keystroke calls -- but the engine then STOPS: a typed command produces a response the
 +	// game waits on, and a null backend has no key to give it. Measured: 11 cycles against a
@@ -57,16 +72,16 @@ index 7280068f..f1241193 100644
 +	// gate**, and adding synthetic keypresses to get past the wait would be reaching states a
 +	// player's input alone does not [T-P0-004].
 +	//
-+	// ???????????? So the parser is gated as what it is: a pure function of (vocabulary, input,
++	// ★★★★ So the parser is gated as what it is: a pure function of (vocabulary, input,
 +	// operands). The operand patterns are not invented -- said_census.py walks the shipped
 +	// LOGIC bytecode and extracts every real call site, so the cases are the game's own
 +	// grammar in the game's own proportions.
 +	//
-+	// ?????? Each case calls parseUsingDictionary() first, which is what clears
++	// ★★ Each case calls parseUsingDictionary() first, which is what clears
 +	// SAID_ACCEPTED_INPUT and sets ENTERED_CLI -- so every case starts from the state a fresh
 +	// keystroke establishes, and said()'s match-consumes-input side effect cannot leak between
 +	// cases.
-+	// ??? Absent file = nothing runs. Every existing gate is unaffected.
++	// ★ Absent file = nothing runs. Every existing gate is unaffected.
 +	if (ec == errOK) {
 +		Common::File cases;
 +		if (cases.open("oracle_parser_cases.txt")) {
@@ -172,26 +187,50 @@ index 7280068f..f1241193 100644
 +
 +		// coco_agi ORACLE INSTRUMENTATION (P6.15) -- THE TEXT SWEEP.
 +		//
-+		// ??????????????? WITHOUT THIS THERE IS NO TEXT ORACLE AT ALL, which is why the text work has been
++		// ★★★★★ WITHOUT THIS THERE IS NO TEXT ORACLE AT ALL, which is why the text work has been
 +		// blocked for two dispatches. This dump run is a PICTURE SWEEP followed by the game sitting
 +		// in its credits until the wall-clock kill -- so no message box ever opens and
 +		// drawCharacter is never called. **An empty text log was the corpus, not the writer**, and
-+		// it took a probe line from a path that always runs to tell those two apart [??2W].
++		// it took a probe line from a path that always runs to tell those two apart [§2W].
 +		//
-+		// ???????????? drawMessageBox, NOT messageBox. messageBox() draws and then BLOCKS on a keypress
++		// ★★★★ drawMessageBox, NOT messageBox. messageBox() draws and then BLOCKS on a keypress
 +		// unless VM_FLAG_OUTPUT_MODE is set (text.cpp:370-386); drawMessageBox() is the draw alone,
 +		// which is exactly the half a renderer must reproduce. closeWindow() then emits the restore
 +		// rectangle through render_Block -- both halves of the model in one pass.
 +		//
-+		// ????????? BOUNDED AT 8 MESSAGES PER LOGIC, deliberately. Every message in every logic is the
-+		// game's whole script; the log holds no characters (??2P -- see drawCharacter) but sweeping
++		// ★★★ BOUNDED AT 8 MESSAGES PER LOGIC, deliberately. Every message in every logic is the
++		// game's whole script; the log holds no characters (§2P -- see drawCharacter) but sweeping
 +		// the entire script to exercise a glyph renderer is still disproportionate. Eight per logic
 +		// across every logic covers the width, wrapping and colour cases many times over.
 +		//
-+		// ?????? OPT-IN, for patch 0006's measured reason: a sweep that runs unconditionally CHANGES
++		// ★★ OPT-IN, for patch 0006's measured reason: a sweep that runs unconditionally CHANGES
 +		// THE GAME, and this one opens and closes windows.
++		// ★★★★★ THE SWEEP SEGFAULTED ON TWO OF THE NINE GATE TITLES [P6.18], and the two causes are
++		// NOT THE SAME KIND OF THING. Both are recorded because the difference is the whole point:
++		// one was this harness's own defect, and one is the engine reading out of bounds.
++		//
++		// ★★★★ PoliceQuest1 died after 10 messages, at sweep message #11, which is the 4-byte
++		// message `%g88`. `%g` reads `_game.logics[0].texts[i]` (text.cpp:1259) -- and THE LOOP
++		// BELOW USED TO UNLOAD EVERY LOGIC IT VISITED, INCLUDING LOGIC 0. By the time logic 2 was
++		// drawn, logic 0's texts had been freed. **In a real game logic 0 is the always-resident
++		// logic and this cannot happen: the sweep manufactured the crash.** Logic 0 is now held for
++		// the whole sweep and released after it. ★★★ A defect in the instrument, found only because
++		// the instrument was finally pointed at more than one title [L-85, L-86].
++		//
++		// ★★★★★ SpaceQuest-2 died after 354, at message #355, which carries a BARE `%m` -- no
++		// digits, so strtoul gives 0 and text.cpp:1272's guard (`numTexts > i`) tests only the HIGH
++		// end. `texts[-1]` is read. **That one is the engine, on unmodified shipped game data, and
++		// it is not ours to fix**: the oracle is pinned (§2Q) and changing its semantics would make
++		// it a different oracle. ★★★ It is SKIPPED and COUNTED instead, so the corpus reads "less
++		// one, named" rather than a number that quietly means something else [L-72].
++		//
++		// ★★★★ harness/tools/text_oob.py predicts both, offline, from game data alone: across all
++		// nine titles it names the first hazardous message, each title that crashed stopped exactly
++		// one message before the one it names, and every title it calls clean swept to the end.
++		// ★★ Nine for nine is why this states a cause rather than a hypothesis.
 +		if (ConfMan.hasKey("coco_text_dump") && ConfMan.getBool("coco_text_dump")) {
-+			int msgs = 0, logics = 0;
++			int msgs = 0, logics = 0, skipped = 0;
++			bool logic0Held = (loadResource(RESOURCETYPE_LOGIC, 0) == errOK);
 +			for (int16 nr = 0; nr < MAX_DIRECTORY_ENTRIES; nr++) {
 +				if (_game.dirLogic[nr].offset == _EMPTY)
 +					continue;
@@ -202,13 +241,31 @@ index 7280068f..f1241193 100644
 +					const char *msg = _game.logics[nr].texts[t];
 +					if (msg == nullptr || *msg == '\0')
 +						continue;
++					// ★★★ The narrowest guard that covers the observed crash: a `%m` whose index
++					// does not begin 1..9 is the only shape that reaches texts[-1]. It does NOT
++					// guard %g or %s -- those are in range in all nine titles (text_oob.py), and a
++					// guard wider than the measurement hides the next finding instead of reporting
++					// it [§2W: an instrument that cannot be wrong does not measure].
++					bool unsafe = false;
++					for (const char *p = msg; p[0] && p[1]; p++) {
++						if (p[0] == '%' && p[1] == 'm' && (p[2] < '1' || p[2] > '9'))
++							unsafe = true;
++					}
++					if (unsafe) {
++						skipped++;
++						continue;
++					}
 +					_text->drawMessageBox(msg);
 +					_text->closeWindow();
 +					msgs++;
 +				}
-+				unloadResource(RESOURCETYPE_LOGIC, nr);
++				if (nr != 0)
++					unloadResource(RESOURCETYPE_LOGIC, nr);
 +			}
-+			warning("oracle: swept %d messages across %d logics", msgs, logics);
++			if (logic0Held)
++				unloadResource(RESOURCETYPE_LOGIC, 0);
++			warning("oracle: swept %d messages across %d logics, skipped %d as out-of-bounds",
++			        msgs, logics, skipped);
 +		}
 +
 +		// coco_agi ORACLE INSTRUMENTATION (P5.1) -- decode EVERY view, so oracleDumpCel() in
@@ -216,14 +273,14 @@ index 7280068f..f1241193 100644
 +		// few seconds of play happened to touch (which under-reports mirrored loops badly --
 +		// they cluster in walking sprites).
 +		//
-+		// ?????? OPT-IN, AND THAT IS NOT OPTIONAL. Measured at P5.1: running this sweep
++		// ★★ OPT-IN, AND THAT IS NOT OPTIONAL. Measured at P5.1: running this sweep
 +		// unconditionally CHANGES THE GAME. Kingquest1's flag 20 completes one cycle earlier
 +		// (divergence at cycle 185 instead of 186) against an otherwise byte-identical
 +		// pre-sweep oracle. The cause is an interaction with patch 0004, which has already
 +		// called loadVolumeResource() for every VIEW; this sweep's unloadResource() then tears
 +		// down state 0004 established, and the game behaves differently afterwards.
 +		//
-+		// The oracle is the BASELINE (CLAUDE.md ??2O.1). Instrumentation that changes it is not
++		// The oracle is the BASELINE (CLAUDE.md §2O.1). Instrumentation that changes it is not
 +		// instrumentation, it is a different oracle. So the sweep runs only when explicitly
 +		// asked for, and a cel-dump run is a SEPARATE run from any run whose vmstate is used.
 +		//
@@ -251,24 +308,24 @@ index 7280068f..f1241193 100644
  	_keyHoldMode = false;
  	_keyHoldModeLastKey = Common::KEYCODE_INVALID;
  
-@@ -204,6 +407,35 @@ void AgiEngine::agiDeinit() {
+@@ -204,6 +449,35 @@ void AgiEngine::agiDeinit() {
  	clearImageStack();
  }
  
 +// coco_agi ORACLE INSTRUMENTATION (P1.1, AC-5) -- dump the RAW bytes the engine loads.
 +//
-+// ?????? THIS IS THE BASELINE OUR PYTHON PARSER IS DIFFED AGAINST (CLAUDE.md ??2O.1). The whole
++// ★★ THIS IS THE BASELINE OUR PYTHON PARSER IS DIFFED AGAINST (CLAUDE.md §2O.1). The whole
 +// value is that these bytes did not come from us. So the dump is taken at exactly one point:
 +// immediately after loadVolumeResource() returns and BEFORE any decode.
 +//
-+// ??? FOR LOGIC THAT ORDERING IS NOT A DETAIL, IT IS THE WHOLE THING. decodeLogic() DECRYPTS THE
++// ★ FOR LOGIC THAT ORDERING IS NOT A DETAIL, IT IS THE WHOLE THING. decodeLogic() DECRYPTS THE
 +// MESSAGE STRINGS IN PLACE. Dumping after it would compare our pre-decode bytes against their
 +// post-decode bytes and fail everywhere -- or worse, would tempt someone to "fix" the parser to
 +// match, which inverts the validation exactly as tuning to POP's 59 would have.
 +static void oracleDumpRaw(int16 resourceType, int16 resourceNr, const uint8 *data, uint32 len) {
 +	if (data == nullptr)
 +		return;
-+	// ?????? INDEXED BY THE REAL ENUM, WHICH STARTS AT 1 AND IS NOT IN THE OBVIOUS ORDER.
++	// ★★ INDEXED BY THE REAL ENUM, WHICH STARTS AT 1 AND IS NOT IN THE OBVIOUS ORDER.
 +	// agi.h:171-174:  RESOURCETYPE_LOGIC = 1, SOUND = 2, VIEW = 3, PICTURE = 4.
 +	// An earlier version of this array assumed {logic,object,view,picture,sound} from 0 and
 +	// mislabelled EVERY dump -- LOGIC written as "object", PICTURE compared against VIEW.
@@ -287,7 +344,7 @@ index 7280068f..f1241193 100644
  int AgiEngine::loadResource(int16 resourceType, int16 resourceNr) {
  	if (resourceNr >= MAX_DIRECTORY_ENTRIES)
  		return errBadResource;
-@@ -217,6 +449,7 @@ int AgiEngine::loadResource(int16 resourceType, int16 resourceNr) {
+@@ -217,6 +491,7 @@ int AgiEngine::loadResource(int16 resourceType, int16 resourceNr) {
  
  			// load raw resource into data
  			data = _loader->loadVolumeResource(&_game.dirLogic[resourceNr]);
@@ -295,7 +352,7 @@ index 7280068f..f1241193 100644
  			_game.logics[resourceNr].data = data;
  
  			// uncompressed logic files need to be decrypted
-@@ -239,6 +472,7 @@ int AgiEngine::loadResource(int16 resourceType, int16 resourceNr) {
+@@ -239,6 +514,7 @@ int AgiEngine::loadResource(int16 resourceType, int16 resourceNr) {
  			// if cached but not loaded, etc
  			unloadResource(RESOURCETYPE_PICTURE, resourceNr);
  			data = _loader->loadVolumeResource(&_game.dirPic[resourceNr]);
@@ -303,7 +360,7 @@ index 7280068f..f1241193 100644
  
  			if (data != nullptr) {
  				_game.pictures[resourceNr].rdata = data;
-@@ -252,6 +486,7 @@ int AgiEngine::loadResource(int16 resourceType, int16 resourceNr) {
+@@ -252,6 +528,7 @@ int AgiEngine::loadResource(int16 resourceType, int16 resourceNr) {
  	case RESOURCETYPE_SOUND:
  		if (~_game.dirSound[resourceNr].flags & RES_LOADED) {
  			data = _loader->loadVolumeResource(&_game.dirSound[resourceNr]);
@@ -311,7 +368,7 @@ index 7280068f..f1241193 100644
  
  			// "data" is freed by objects created by createFromRawResource on success
  			const bool isAgiV1 = (getVersion() <= 0x2001);
-@@ -273,6 +508,7 @@ int AgiEngine::loadResource(int16 resourceType, int16 resourceNr) {
+@@ -273,6 +550,7 @@ int AgiEngine::loadResource(int16 resourceType, int16 resourceNr) {
  		if (~_game.dirView[resourceNr].flags & RES_LOADED) {
  			unloadResource(RESOURCETYPE_VIEW, resourceNr);
  			data = _loader->loadVolumeResource(&_game.dirView[resourceNr]);
@@ -328,13 +385,13 @@ index 1bb1d202..35d78fa0 100644
   */
  void GfxMgr::initVideo() {
 +	// coco_agi ORACLE INSTRUMENTATION (P6.15) -- THE PROBE THAT MAKES A SILENT LOG READABLE.
-+	// ??????????????? Without this, an empty text_events.txt has two indistinguishable causes: the game drew
++	// ★★★★★ Without this, an empty text_events.txt has two indistinguishable causes: the game drew
 +	// no text, or the writer never worked. **The first is a finding and the second is a bug**, and
-+	// a missing file says both at once [??2W: an instrument must be shown able to fail; L-97: only
++	// a missing file says both at once [§2W: an instrument must be shown able to fail; L-97: only
 +	// an address separates two states that produce the same output].
-+	// ????????? One line, from a path that always runs, emitted only when the dump is enabled. If the
++	// ★★★ One line, from a path that always runs, emitted only when the dump is enabled. If the
 +	// file contains this line and nothing else, the writer is proven and the corpus is the finding.
-+	// ??? TEMPORARY DIAGNOSTIC (P6.15): the probe did not fire and the writer is therefore suspect.
++	// ★ TEMPORARY DIAGNOSTIC (P6.15): the probe did not fire and the writer is therefore suspect.
 +	// This says which half is wrong -- the ConfMan lookup or the DumpFile write -- rather than
 +	// leaving both possible.
 +	warning("coco_agi: text_dump hasKey=%d value=%d",
@@ -392,32 +449,32 @@ index 1bb1d202..35d78fa0 100644
   */
 +// coco_agi ORACLE INSTRUMENTATION (P6.15) -- the TEXT DECISION LOG.
 +//
-+// ??????????????? IT LOGS CALLS, NOT PIXELS, AND THAT IS DELIBERATE. oracleDumpScreens above records why
++// ★★★★★ IT LOGS CALLS, NOT PIXELS, AND THAT IS DELIBERATE. oracleDumpScreens above records why
 +// the display path is not dumped: "it is a rendering of these buffers, and diffing against a
 +// rendering would put ScummVM's upscaler inside our baseline." For PICTURES that is the whole
 +// argument. For TEXT the display screen is not a rendering of anything we hold -- it is where the
 +// glyphs primarily live -- but the CONCERN transfers unchanged: dumping 320x200 pixels would put
 +// the upscaler, the font file and translateFontPosToDisplayScreen all inside the comparison.
 +//
-+// ???????????? So this emits the DECISIONS: which glyph, at which font-grid row and column, in which
++// ★★★★ So this emits the DECISIONS: which glyph, at which font-grid row and column, in which
 +// colours. That is what a reference must reproduce to be right, and it is free of every rendering
 +// concern the note above rules out. A pixel-level gate is a separate question that needs the
 +// upscaler settled first [P6.15 AC-3].
 +//
-+// ????????? GATED INERT, like patch 0006's sweep and 0007's sprite dump: a switch that perturbs the
++// ★★★ GATED INERT, like patch 0006's sweep and 0007's sprite dump: a switch that perturbs the
 +// oracle must never be on for a run whose state anyone consumes.
 +static bool oracleTextDumpEnabled() {
 +	return ConfMan.hasKey("coco_text_dump") && ConfMan.getBool("coco_text_dump");
 +}
 +
-+// ??? Order-sensitive rolling checksum of the characters drawn, so the log can prove both sides
-+// laid out the same string without containing the string (??2P).
++// ★ Order-sensitive rolling checksum of the characters drawn, so the log can prove both sides
++// laid out the same string without containing the string (§2P).
 +static uint32 s_textChecksum = 0;
 +
 +void GfxMgr::oracleLogText(const char *kind, int a, int b, int c, int d, int e) {
 +	if (!oracleTextDumpEnabled())
 +		return;
-+	// ??????????????? A STATIC HANDLE, HELD OPEN -- patch 0002's s_vmLog pattern, and the first version of
++	// ★★★★★ A STATIC HANDLE, HELD OPEN -- patch 0002's s_vmLog pattern, and the first version of
 +	// this did not follow it. Common::DumpFile::open's second parameter is createPath, NOT append
 +	// (common/file.h), so open-write-close per event TRUNCATES on every call and the file ends up
 +	// holding one line or none. **The order of these events is the artifact**, so the handle stays
@@ -429,21 +486,21 @@ index 1bb1d202..35d78fa0 100644
 +	}
 +	Common::String line = Common::String::format("%s %d %d %d %d %d\n", kind, a, b, c, d, e);
 +	s_textLog.write(line.c_str(), line.size());
-+	// ??? Flushed per line for the reason patch 0002 flushes: the run is killed on a wall-clock
++	// ★ Flushed per line for the reason patch 0002 flushes: the run is killed on a wall-clock
 +	// timeout, so anything sitting in a buffer at the kill is lost and the log silently truncates.
 +	s_textLog.flush();
 +}
 +
  void GfxMgr::drawCharacter(int16 row, int16 column, byte character, byte foreground, byte background, bool disabledLook) {
-+	// ??????????????? THE CHARACTER CODE IS NOT LOGGED, AND THAT IS ??2P, NOT SQUEAMISHNESS. A sweep over
++	// ★★★★★ THE CHARACTER CODE IS NOT LOGGED, AND THAT IS §2P, NOT SQUEAMISHNESS. A sweep over
 +	// every message in every logic would put the GAME'S ENTIRE SCRIPT in this file -- copyrighted
-+	// text, in bulk, for a gate that does not need it. CLAUDE.md ??2P: "counts, hashes and word
++	// text, in bulk, for a gate that does not need it. CLAUDE.md §2P: "counts, hashes and word
 +	// numbers only."
-+	// ???????????? AND THE GATE LOSES NOTHING. What a text renderer must get right is WHERE each glyph
++	// ★★★★ AND THE GATE LOSES NOTHING. What a text renderer must get right is WHERE each glyph
 +	// goes and in WHAT COLOURS; the reference is handed the same resources and therefore the same
 +	// characters, so a rolling checksum is enough to prove both sides laid out the same string.
 +	// **Position and colour are compared exactly; identity is compared by hash.**
-+	// ?????? The checksum is order-sensitive on purpose -- two strings with the same letters in a
++	// ★★ The checksum is order-sensitive on purpose -- two strings with the same letters in a
 +	// different order must not agree.
 +	s_textChecksum = (uint32)(s_textChecksum * 31u + (uint32)character);
 +	oracleLogText("G", row, column, (int)foreground, (int)background, (int)(s_textChecksum & 0xFFFF));
@@ -468,7 +525,7 @@ index 320019fa..50e1a5dc 100644
 +	// restores, in call order. graphics.cpp carries the reasoning: it logs CALLS and not display
 +	// pixels, because the note on oracleDumpScreens above rules out diffing a rendering, and that
 +	// argument transfers to text even though the display screen is where text primarily lives.
-+	// ??? Public because TextMgr::closeWindow emits the restore rectangle through it.
++	// ★ Public because TextMgr::closeWindow emits the restore rectangle through it.
 +	void oracleLogText(const char *kind, int a, int b, int c, int d, int e);
 +
 +	// coco_agi ORACLE INSTRUMENTATION (P5.2). Read-only views of the two buffers, so the
@@ -489,14 +546,14 @@ index 06773598..002492ea 100644
  		const int16 x = _messageState.backgroundPos_x;
  		const int16 y = MAX<int16>(0, _messageState.backgroundPos_y);
 +		// coco_agi ORACLE INSTRUMENTATION (P6.15) -- THE RESTORE RECTANGLE.
-+		// ??????????????? This is the whole restore model in one call and it confirms P6.6's reading at the
++		// ★★★★★ This is the whole restore model in one call and it confirms P6.6's reading at the
 +		// source: the window is closed by RE-RENDERING a rectangle of the game screen into the
 +		// display screen. There is no save-under buffer anywhere -- the comment three lines above
 +		// says "copying the game screen to the display screen" in the engine's own words.
-+		// ????????? The rectangle is logged BEFORE render_Block runs, and the CLAMPED y is logged
++		// ★★★ The rectangle is logged BEFORE render_Block runs, and the CLAMPED y is logged
 +		// rather than backgroundPos_y: a reference that reproduced the raw value would diverge on
 +		// exactly the MUMG nursery-rhyme case the comment above documents (y=0 print.at putting
-+		// the border over the menu bar, negative background y). ?????? Logging what the engine ACTS
++		// the border over the menu bar, negative background y). ★★ Logging what the engine ACTS
 +		// on, not what it stores, is the difference between a gate and a near-miss.
 +		_gfx->oracleLogText("R", x, y, _messageState.backgroundSize_Width, _messageState.backgroundSize_Height, 0);
  		_gfx->render_Block(x, y, _messageState.backgroundSize_Width, _messageState.backgroundSize_Height);
