@@ -44,7 +44,7 @@ vm_update_objs:
 * ★★★★★ BOUNDED BY vm_objtop [P6.11] -- see vm_check_all_motions for the reasoning and the
 * measurement. The counter is gone with the bound, and with it the per-slot pshs/puls/decb.
 vm_uo_lp:       cmpx    vm_objtop
-                bhs     vm_uo_done
+                bhi     vm_uo_done              ; ★ INCLUSIVE mark: walk slots 0..mark
                 lda     VMO_FLAGS+1,x
                 anda    #VM_ACTIVE_L
                 cmpa    #VM_ACTIVE_L
@@ -461,7 +461,11 @@ vm_changecnt    fcb     0
 * while `cmpx` is 7 cycles. The host divides once, at report time, where arithmetic is free.
 * ★★ Guarded, so the gate build is byte-for-byte what it was. This is a measurement, and P6.10's
 * whole point was that a measurement arm must not quietly become the shipped program.
+* ★★ The STORAGE is guarded too, not just the update. Two unconditional bytes in a probe that
+* assembles 23 bytes past its code region is two bytes that have to come from somewhere else.
+                ifdef   VM_OBJCENSUS
 vm_objhighp     fdb     VM_OBJ
+                endc
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ vm_objtop -- THE BOUND THE INTERPRETER MAINTAINS [P6.11 AC-2]. One past the last slot
@@ -487,8 +491,9 @@ vm_objhighp     fdb     VM_OBJ
 * ★★ IT NEVER FALLS. unanimate.all clears the flags on all 255 slots and the mark stays where it
 * is; a high-water mark that decays needs a rule for when, and a wrong rule loses objects. The
 * cost of never falling is bounded by the census (AC-7).
-* ★ Initialised to slot 0 + 1: object 0 is the ego and always exists.
-vm_objtop       fdb     VM_OBJ+VMO_SIZE
+* ★ INCLUSIVE: it points AT the highest slot ever active, and the loops walk 0..mark. Initialised
+* to slot 0, which is the ego and always exists.
+vm_objtop       fdb     VM_OBJ
 vm_loopnr       fcb     0
 vm_celcur       fcb     0
 vm_cellast      fcb     0

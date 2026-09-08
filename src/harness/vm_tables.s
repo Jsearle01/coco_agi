@@ -131,6 +131,9 @@ VMTEST_ARGS:
 * ★★ Unimplemented entries point at vm_op_unimpl, which HALTS with the opcode
 * number. AC-5 forbids a silent no-op: it would desynchronise nothing and
 * diverge everything, so the diff would name a symptom, never the cause.
+* ★★★★ 14 trailing `modelled` entries (A9-B6) are NOT emitted: vm_core.s
+* branches on VMOP_MODELLED_LO to the same vm_op_modelled they all pointed at.
+VMOP_MODELLED_LO equ     169
 VMOP_TAB:
                 fdb     vm_op_return            ; 00 return
                 fdb     vmop_increment          ; 01 increment(v)
@@ -301,20 +304,6 @@ VMOP_TAB:
                 fdb     vmop_mul_v              ; A6 mul.v(vv)
                 fdb     vmop_div_n              ; A7 div.n(vn)
                 fdb     vmop_div_v              ; A8 div.v(vv)
-                fdb     vm_op_modelled          ; A9 close.window()  [modelled]
-                fdb     vm_op_modelled          ; AA set.simple(n)  [modelled]
-                fdb     vm_op_modelled          ; AB push.script()  [modelled]
-                fdb     vm_op_modelled          ; AC pop.script()  [modelled]
-                fdb     vm_op_modelled          ; AD hold.key()  [modelled]
-                fdb     vm_op_modelled          ; AE set.pri.base(n)  [modelled]
-                fdb     vm_op_modelled          ; AF discard.sound(n)  [modelled]
-                fdb     vm_op_modelled          ; B0 hide.mouse()  [modelled]
-                fdb     vm_op_modelled          ; B1 allow.menu(n)  [modelled]
-                fdb     vm_op_modelled          ; B2 show.mouse()  [modelled]
-                fdb     vm_op_modelled          ; B3 fence.mouse(nnnn)  [modelled]
-                fdb     vm_op_modelled          ; B4 get.mse.posn(vv)  [modelled]
-                fdb     vm_op_modelled          ; B5 release.key()  [modelled]
-                fdb     vm_op_modelled          ; B6 adj.ego.move.to.x.y()  [modelled]
 
 * ── VMTEST_TAB: handler per test opcode ───────────────────────────
 VMTEST_MAX      equ     20

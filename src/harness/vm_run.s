@@ -461,7 +461,7 @@ VM_MOT_ACTIVE_L equ     fAnimated+fUpdate+fDrawn        ; $51 -- all three bits 
 vm_check_all_motions:
                 ldx     #VM_OBJ
 vm_cam_lp:      cmpx    vm_objtop
-                bhs     vm_cam_done
+                bhi     vm_cam_done             ; ★ INCLUSIVE mark: walk slots 0..mark
                 lda     VMO_FLAGS+1,x
                 anda    #VM_MOT_ACTIVE_L
                 cmpa    #VM_MOT_ACTIVE_L

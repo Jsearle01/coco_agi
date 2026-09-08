@@ -30,7 +30,7 @@ vm_start:
 * whose census max is 0 -- Kingquest1 and PoliceQuest1 -- must still PASS, and the other seven
 * must FAIL. A fault that breaks everything proves the gate is connected; one that breaks exactly
 * the titles the census says it should proves the gate is measuring the bound.
-                ldx     #VM_OBJ+VMO_SIZE
+                ldx     #VM_OBJ                 ; ★ INCLUSIVE mark: slot 0, the ego
                 stx     vm_objtop
 * clear vars, flags and controllers
                 ldx     #VM_VARS

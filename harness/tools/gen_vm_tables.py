@@ -175,9 +175,45 @@ def build(implemented, status):
     # ★★★★ AND THE HANDLER TABLE, M-48's other 146 bytes -- 73 entries x 2. Out-of-range now
     # takes vm_core.s's `ldx #vm_op_unimpl` branch, which is THE SAME HANDLER the padding
     # pointed at, so the change is a layout change and not a behaviour change.
+    # ═════════════════════════════════════════════════════════════════════════════════
+    # ★★★★★ THE TRAILING RUN OF `modelled` ENTRIES IS REPLACED BY A RANGE BRANCH [P6.12].
+    # The v2 command space ends in an unbroken run of DECLARED NO-OPS -- close.window,
+    # set.simple, push/pop.script, hold.key, set.pri.base, discard.sound, the four mouse
+    # commands, allow.menu, release.key, adj.ego.move.to.x.y -- and every one of them emits
+    # the SAME two bytes, the address of vm_op_modelled. That is a table whose tail carries
+    # no information.
+    # ★★★★★ THIS IS M-48'S OWN TRANSFORMATION, APPLIED ONCE MORE, and M-48's note is the
+    # argument verbatim: "an opcode >= VMOP_MAX reached vm_op_unimpl through the padding
+    # before and reaches THE SAME HANDLER through this branch now." Here an opcode >=
+    # VMOP_MODELLED_LO reached vm_op_modelled through the table and reaches it through
+    # vm_core.s's branch. **A layout change, not a behaviour change**, and the nine-title
+    # byte-identical state diff is what checks it rather than this comment.
+    # ★★★★ WHY IT WAS DONE NOW, which matters more than the bytes: P6.11's object bound
+    # pushed p3b_probe.s 23 bytes past MAP_CODE_END and broke a gate whose build P6.11's
+    # report claimed was unchanged. Shrinking the bound recovered 9; this recovers 19 more
+    # (28 bytes of table against 9 of branch). **p3b has been running on 2-3 bytes of
+    # headroom for several tasks with the trigger deferred; this is that trigger.**
+    # ★★★ ONLY THE TRAILING RUN. A modelled entry with an implemented opcode above it stays
+    # in the table -- the branch tests one boundary and cannot express a hole.
+    # ★★ VMOP_ARGS is NOT truncated: argument counts differ per opcode and the dispatcher
+    # indexes it for every command. Only the handler table has a redundant tail.
+    modelled_lo = len(cmds)
+    for i in range(len(cmds) - 1, 0, -1):
+        name_i, params_i, handler_i = cmds[i]
+        base_i = label_for(handler_i)
+        lab_i = "vmop_" + base_i if base_i else None
+        if lab_i and lab_i in implemented:
+            break
+        if status.get(("cmd", i), "unimplemented") != "modelled":
+            break
+        modelled_lo = i
+    out.append("* ★★★★ %d trailing `modelled` entries (%02X-%02X) are NOT emitted: vm_core.s"
+               % (len(cmds) - modelled_lo, modelled_lo, len(cmds) - 1))
+    out.append("* branches on VMOP_MODELLED_LO to the same vm_op_modelled they all pointed at.")
+    out.append("VMOP_MODELLED_LO equ     %d" % modelled_lo)
     out.append("VMOP_TAB:")
     miss_cmd = []
-    for i in range(len(cmds)):
+    for i in range(modelled_lo):
         if i == 0:
             out.append("                fdb     vm_op_return            ; 00 return")
             continue

@@ -117,10 +117,32 @@ class Vm:
         self.table = DispatchTable(version, platform, game_id, features)
         self.table.bind(commands.COMMAND_IMPLS, tests.TEST_IMPLS)
 
-        # in-game timer, driven by the SAME virtual clock rule as oracle patch 0005:
-        # 25 ms per main-loop iteration.
-        self.virtual_ms = 0
-        self._last_cycles = 0
+        # ═══════════════════════════════════════════════════════════════════════════════════
+        # ★★★★★ THE CLOCK IS VERTICAL-SYNC TICKS [Jay's ruling, AD-138]. VAR_SECONDS and friends
+        # advance from the CoCo3's 60 Hz vertical-sync interrupt, and 60 ticks is one second.
+        #
+        # ★★★★★ BOTH LEGS OR NEITHER [L-95, AD-137]. This file used to advance a virtual
+        # millisecond counter by 25 per pacing iteration, which is exactly what the 6809 leg did
+        # -- so the two agreed with each other and differed from the oracle in the same way, and
+        # the 288-byte state diff was BLIND to the clock entirely. Changing only the port would
+        # have made them diverge immediately and correctly; changing only the reference does the
+        # same. **The unit is the one the target can actually measure, on both sides.**
+        #
+        # ★★★★ THE TICK IS THE PRIMITIVE AND MILLISECONDS ARE DERIVED, not the reverse. A 6809
+        # counting VBLs has no milliseconds -- it has a 16-bit counter at DP $10/$11 that the
+        # handler increments [irq_vbl.s] -- so a reference that thinks in milliseconds is
+        # modelling a quantity the target does not hold [§2V.2: name the 6809 form].
+        #
+        # ★★★ WHY 3 TICKS PER AGI TICK. VM_VAR_TIME_DELAY is in AGI ticks of 50 ms; at 60 Hz that
+        # is exactly 3 vertical syncs. The old model spent 2 iterations of 25 ms on the same 50 ms,
+        # so **wall-clock time per cycle is unchanged and the state diff must stay 9/9** -- which is
+        # the check that the two models are equivalent rather than merely both plausible.
+        #
+        # ★★ Jay ruled the SIMPLE 60-count over true NTSC 59.9227 Hz: "one second in 12.5 minutes
+        # won't be missed." That is a +0.13% drift, accepted, and it lives HERE as well as in the
+        # port -- if the reference used 59.9227 and the port used 60 they would diverge slowly and
+        # the gate would blame the port.
+        self.vsync = 0                  # 60 Hz vertical-sync ticks; the clock
         self._last_seconds = 0
 
         self._logic_cache = {}
@@ -144,12 +166,14 @@ class Vm:
 
     # ── the in-game timer (global.cpp inGameTimerUpdate, with patch 0005's clock) ──────────
     def timer_update(self):
-        cur_cycles = self.virtual_ms // 25
-        if cur_cycles == self._last_cycles:
-            return
-        self._last_cycles = cur_cycles
-
-        cur_seconds = self.virtual_ms // 1000
+        # ★★★★ SECONDS COME FROM THE TICK COUNT, NOT FROM MILLISECONDS. 60 ticks = 1 second, which
+        # is the arithmetic the 6809 will do: a 16-bit VBL counter and a compare against 60. The
+        # old form divided a millisecond accumulator by 1000, which the target cannot do cheaply
+        # and, more to the point, from a quantity it does not have [§2V.2].
+        # ★★ The 25 ms early-out is gone with the millisecond counter: every pacing iteration is
+        # now exactly one tick, so "has a tick elapsed" is true by construction and testing it
+        # would be an assertion dressed as a guard.
+        cur_seconds = self.vsync // 60
         if cur_seconds == self._last_seconds:
             return
         delta = cur_seconds - self._last_seconds
@@ -462,12 +486,29 @@ class Vm:
         # ★ should_restart ends the run for the reason given where it is declared: the oracle
         # re-inits here and a re-initialising leg cannot be diffed against a continuing one.
         while not (self.should_quit or self.should_restart):
-            self.virtual_ms += 25
+            # ★★★★★ ONE ITERATION = ONE VERTICAL SYNC [AD-138]. The loop used to add 25 ms per
+            # iteration and gate on time_delay*2; it now counts ticks and gates on time_delay*3,
+            # because VM_VAR_TIME_DELAY is in 50 ms AGI ticks and 50 ms is 3 ticks at 60 Hz.
+            # ★★★ 2 x 25 ms and 3 x 16.667 ms are the same 50 ms, so **wall-clock time per cycle
+            # is unchanged and the nine-title state diff must stay 9/9.** That equivalence is the
+            # test of this change, not a claim about it: if the diff moves, the two models are not
+            # the same clock and the difference is the finding [L-95].
+            self.vsync += 1
             passed += 1
             self.timer_update()
 
             time_delay = self.get_var(VM_VAR_TIME_DELAY)
-            time_delay = time_delay * 2
+            time_delay = time_delay * 3
+            # ★★★★ THE ZERO CASE IS THE ONE PLACE THE TWO MODELS ARE *NOT* EQUIVALENT, AND IT IS
+            # WRITTEN DOWN BEFORE THE GATE RUNS RATHER THAN EXPLAINED AFTERWARDS. time_delay 0
+            # means "as fast as the pacing clock allows" -- one tick. Under the old 25 ms model
+            # that was 25 ms per cycle; under vertical sync it is 16.667 ms. Every non-zero value
+            # is unchanged (2 x 25 ms and 3 x 16.667 ms are both 50 ms per AGI tick).
+            # ★★★ So a title that sets VM_VAR_TIME_DELAY to 0 inside the gated window will run its
+            # clock 1.5x faster than before and the diff will move. **If the nine titles stay 9/9,
+            # none of them does so; if one moves, that is the finding and not a defect** -- the
+            # oracle's own `if (!timeDelay) timeDelay = 1` is one tick of ITS clock, and ours is
+            # now the tick the 6809 can actually count.
             if not time_delay:
                 time_delay = 1
 

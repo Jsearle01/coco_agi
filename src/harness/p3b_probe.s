@@ -912,8 +912,16 @@ phase_draw_enter:
 * the VM plus the HAL only, and P6.1's §7 flagged it as "an allocation to be checked, not a
 * measurement". This is the check, and it fires at assembly time.
 P3_CODE_END     equ     *
+* ★★★★★ -DP3B_ACCEPT_OVERRUN NOW SUPPRESSES THIS GUARD TOO, FOR THE SAME REASON IT SUPPRESSES THE
+* DRAW-PHASE ONE BELOW: **you cannot measure an overrun with a build that refuses to produce a
+* map.** When this fired in P6.12 the error named the .map -- "see the .map for the size" -- and
+* lwasm had written no .map, because it errored. The advice pointed at a file the failure prevents
+* from existing. ★★ The guard still fires by default and still fails the build; the escape exists
+* only so the SIZE can be read, which is the first thing anyone needs when it goes off.
+                ifndef  P3B_ACCEPT_OVERRUN
                 ifgt    P3_CODE_END-MAP_CODE_END
                 error   "P3b code overruns the map's code region -- see the .map for the size"
+                endc
                 endc
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════

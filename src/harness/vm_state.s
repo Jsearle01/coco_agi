@@ -356,15 +356,18 @@ vm_objflags_set:
 * 57.310 ms/cycle. Rooms 1 and 2 are unchanged at mark 13, room 3 improves 3 -> 2.
 * ★★★ The flag is gone rather than left as a default-on option: a knob whose other position is
 * known-worse is not a configuration, it is a way to ship the worse one by accident.
+* ★★★★★ THE MARK IS INCLUSIVE -- IT POINTS AT THE HIGHEST ACTIVE SLOT, NOT ONE PAST IT.
+* The exclusive form cost `pshs x / leax VMO_SIZE,x / stx / puls x` here, because the value to
+* store was not the value in hand. Inclusive, X *is* the value: `cmpx / bls / stx`, 8 bytes
+* against 14. ★★★★ That is not a micro-optimisation, it is a REGRESSION FIX: P6.11's version
+* pushed p3b_probe.s 23 bytes past MAP_CODE_END and broke a gate that P6.11's report claimed was
+* unchanged. **The loops pay nothing for it** -- `bhi` where they had `bhs`.
                 andb    #VM_ACTIVE_L
                 cmpb    #VM_ACTIVE_L
                 bne     vm_ofs_intop            ; this write did not make it active
                 cmpx    vm_objtop
-                blo     vm_ofs_intop
-                pshs    x
-                leax    VMO_SIZE,x
+                bls     vm_ofs_intop            ; X <= mark: already covered
                 stx     vm_objtop
-                puls    x
 vm_ofs_intop:
                 endc
                 puls    d,pc

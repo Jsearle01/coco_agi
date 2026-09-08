@@ -159,8 +159,46 @@ vm_rl_loop:
 * ★ It loads X and FALLS INTO the same `jsr ,x`, so everything downstream -- the opcount, the
 * stacked opcode, the arg advance, vm_exitall -- runs identically for an unimplemented command.
                 cmpa    #VMOP_MAX
-                blo     vm_rl_inrange
+                blo     vm_rl_modelchk
                 ldx     #vm_op_unimpl
+                bra     vm_rl_dispatch
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE SECOND RANGE CHECK, AND IT IS M-48's ARGUMENT WORD FOR WORD [P6.12].
+* The v2 command space ends in an unbroken run of DECLARED NO-OPS whose table entries were all
+* the same two bytes -- the address of vm_op_modelled. **An opcode >= VMOP_MODELLED_LO reached
+* vm_op_modelled through the table before and reaches THE SAME HANDLER through this branch now**,
+* so it is a layout change, not a behaviour change, and the nine-title byte-identical state diff
+* is what checks that rather than this comment.
+* ★★★★ IT IS 9 BYTES OF BRANCH AGAINST 28 OF TABLE, and the 19 it returns are what put
+* p3b_probe.s back inside MAP_CODE_END after P6.11's object bound pushed it 23 bytes past.
+* ★★★ It falls into the same `ldx` / `jsr ,x` path, so opcount, the stacked opcode, the argument
+* advance and vm_exitall all run identically for a modelled command.
+* ★★★★★ AC-8's FAULT FOR THIS BRANCH, AND IT EXISTS BECAUSE THE GATE NEARLY PROVED NOTHING.
+* Of the 14 opcodes this branch now serves (A9-B6), the nine-title corpus executes exactly ONE,
+* AD (hold.key), exactly ONCE. **A 9/9 on that is a claim about one execution** [L-86 -- a fixed
+* sample that always passes is evidence about the sample first], so the branch needs a fault that
+* the corpus can actually see.
+* ★★★★ -DVM_MODELLED_FAULT drops the boundary to $A0, an opcode the corpus executes EIGHT times
+* and which has a real handler. With the fault in, A0 routes to vm_op_modelled instead of its
+* handler and the state diff must go red. **That tests the branch is load-bearing and the gate is
+* watching it, which the passing run alone does not.**
+* ★★★★★ $93, NOT $A0, AND THE FIRST CHOICE WAS AN INERT FAULT. A0 (disable.item) is executed 8
+* times by the corpus, which is why it was picked -- but A0's own handler IS vm_op_modelled, so
+* misrouting it to vm_op_modelled changed nothing and the gate passed 9/9 with the fault in. **A
+* fault that cannot fail is the defect §2W exists to catch, and this one was mine.**
+* ★★★★ 93 is reposition.to, executed 9 times across the corpus, and its handler is
+* vmop_reposition_to -- a real one. Misrouting it is a change the diff can see.
+* ★★★ The lesson generalises past this line: when choosing what to misroute, check the TARGET's
+* current handler, not just that the target is executed. Every executed opcode in this table's
+* upper range except 93 is already modelled.
+                ifdef   VM_MODELLED_FAULT
+vm_rl_modelchk: cmpa    #$93                    ; ★ deliberately too low -- misroutes reposition.to
+                endc
+                ifndef  VM_MODELLED_FAULT
+vm_rl_modelchk: cmpa    #VMOP_MODELLED_LO
+                endc
+                blo     vm_rl_inrange
+                ldx     #vm_op_modelled
                 bra     vm_rl_dispatch
 vm_rl_inrange:
                 ldx     #VMOP_TAB

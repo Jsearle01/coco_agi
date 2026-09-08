@@ -73,6 +73,11 @@ if ($env:VM_OBJBOUND_FAULT) { $ASMARGS += "-DVM_OBJBOUND_FAULT"; "★★★ BOUN
 # gain lost -- because something there writes flags on a high slot. Rooms 1/2 sit at 13, room 3 at
 # 3. ★★★ It must earn the same 9/9 the conservative default already has before it can replace it.
 if ($env:VM_OBJBOUND_TIGHT) { throw "VM_OBJBOUND_TIGHT is retired (P6.11): raising only on ACTIVE-making writes is now the shipped default, gate-proven 9/9. There is no loose variant to select." }
+# ★★★★★ P6.12 AC-8: the fault for the VMOP_MODELLED_LO branch. The corpus executes exactly ONE of
+# the 14 opcodes that branch serves (AD, once), so a passing gate is nearly no evidence about it
+# [L-86]. This drops the boundary to $A0 -- executed 8 times, with a real handler -- so the misroute
+# is something the diff can see. EXPECTED to FAIL.
+if ($env:VM_MODELLED_FAULT) { $ASMARGS += "-DVM_MODELLED_FAULT"; "★★★ FAULT INJECTED (-DVM_MODELLED_FAULT): VMOP_MODELLED_LO dropped to \$A0 -- this build is EXPECTED to FAIL" }
 # ★★★★★ THE VBL CLOCK ARM [Jay's ruling AD-138]. VM_VBLCLOCK=1 runs VAR_SECONDS off the CoCo3's
 # real 59.92 Hz vertical-sync interrupt instead of the cycle-derived virtual counter. Unset,
 # nothing changes and the nine-title gate is HEAD's gate exactly -- which is the arm L-79 requires
