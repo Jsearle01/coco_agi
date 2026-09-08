@@ -450,10 +450,18 @@ vm_nr_tdone:
 * ★ _ACTIVE = fAnimated | fUpdate | fDrawn, and the gate is stepTimeCount == 1 EXACTLY, not <=.
 VM_MOT_ACTIVE_L equ     fAnimated+fUpdate+fDrawn        ; $51 -- all three bits are in the LOW byte
 
+* ★★★★★ BOUNDED BY vm_objtop, NOT BY A FIXED COUNT [P6.11]. This loop walked all 255 slots every
+* cycle to service at most a handful of actives -- measured at 9.881 ms/cycle across both object
+* loops, 19.8% of a 50 ms AGI tick, at 74.0 CPU cycles per skipped slot [P6.10 AC-2/AC-4].
+* ★★★ THE COUNTER GOES WITH IT. `pshs b` / `puls b` / `decb` were three of those 74 cycles per
+* slot and existed only to protect the counter; with X tested against the mark there is no
+* counter to protect, so the saving is larger than removing the iterations alone.
+* ★★ X survives vm_check_motion -- the old loop relied on that too, since `leax VMO_SIZE,x` below
+* was always reached with X still on the current object.
 vm_check_all_motions:
                 ldx     #VM_OBJ
-                ldb     #VM_OBJ_SCAN            ; ★ = VM_OBJ_MAX unless ablated [vm_state.s]
-vm_cam_lp:      pshs    b
+vm_cam_lp:      cmpx    vm_objtop
+                bhs     vm_cam_done
                 lda     VMO_FLAGS+1,x
                 anda    #VM_MOT_ACTIVE_L
                 cmpa    #VM_MOT_ACTIVE_L
@@ -463,10 +471,8 @@ vm_cam_lp:      pshs    b
                 bne     vm_cam_next             ; ★ EXACTLY 1
                 jsr     vm_check_motion
 vm_cam_next:    leax    VMO_SIZE,x
-                puls    b
-                decb
-                bne     vm_cam_lp
-                rts
+                bra     vm_cam_lp
+vm_cam_done:    rts
 
 * in: X -> object
 vm_check_motion:

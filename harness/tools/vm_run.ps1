@@ -52,13 +52,27 @@ $CYCLES = if ($env:VM_CYCLES) { $env:VM_CYCLES } else { "600" }
 $ASMARGS = @("--format=raw","--output=build/vm_probe.bin","--list=build/vm_probe.lst",
              "--map=build/vm_probe.map","-I.","-DHAL_GFX_MODE_SERVICE","-DHAL_SYS_FAST_CLOCK")
 if ($env:VM_TRACE) { $ASMARGS += "-DVM_TRACE" }
-# ★★★★★ P6.10 AC-2/AC-3/AC-4: the object-scan ablation bound. vm_check_all_motions and
-# vm_update_objs walk all 255 SLOTS every cycle; VM_OBJ_SCAN=<n> walks n instead. ★★★★ It moves
-# exactly one variable -- how many EMPTY slots are traversed -- so with every active object below
-# the bound the state diff must stay BYTE-IDENTICAL, and that identity is what makes the timing
-# figure admissible rather than assumed [L-73]. ★★★ If the diff moves, the bound cut a live
-# object and that arm's number is void. Default unset = VM_OBJ_MAX = HEAD's build.
-if ($env:VM_OBJ_SCAN) { $ASMARGS += "-DVM_OBJ_SCAN=$($env:VM_OBJ_SCAN)"; "★ OBJECT-SCAN ABLATION: VM_OBJ_SCAN=$($env:VM_OBJ_SCAN) (default 255) -- state diff must stay byte-identical or the arm is void" }
+# ★★★★★ VM_OBJ_SCAN IS RETIRED [P6.11]. It was P6.10's ablation knob and the loops no longer read
+# it -- they are bounded by vm_objtop, which the interpreter maintains. ★★★★ It is REMOVED rather
+# than left inert: a build flag that silently does nothing is the defect class this project has
+# now found eight times, and this one would have been passed on a command line and believed.
+# ★★ To reproduce P6.10's ablation, build that revision.
+if ($env:VM_OBJ_SCAN) { throw "VM_OBJ_SCAN is retired (P6.11): the loops are bounded by vm_objtop. Build the P6.10 revision to reproduce that ablation." }
+# ★★★★★ P6.11 AC-7: the object census. Records the highest slot ever seen ACTIVE, per title, in
+# the GUEST and on the loop the bound governs. Measurement only -- the gate build is unchanged.
+if ($env:VM_OBJCENSUS) { $ASMARGS += "-DVM_OBJCENSUS"; "★ OBJECT CENSUS (-DVM_OBJCENSUS): reporting the highest ACTIVE slot per title" }
+# ★★★★★ P6.11 AC-4: THE BOUND'S FAULT. Disables the RAISING of vm_objtop (it does not clamp the
+# value -- clamping would not stick, because the first vm_objflags_set would lift it again and the
+# fault build would behave like the good one). The mark stays at slot 0, so the PREDICTION IS
+# SPECIFIC: Kingquest1 and PoliceQuest1, whose census max is 0, must still PASS; the other seven
+# must FAIL. ★★★ A bound that cannot be broken has not been tested [L-62, §2W].
+if ($env:VM_OBJBOUND_FAULT) { $ASMARGS += "-DVM_OBJBOUND_FAULT"; "★★★ BOUND FAULT INJECTED (-DVM_OBJBOUND_FAULT): vm_objtop never rises -- 7 of 9 titles are EXPECTED to FAIL" }
+# ★★★★★ P6.11 AC-5: the TIGHT bound. Raises vm_objtop only when a flag write leaves the object
+# ACTIVE, instead of on any flag write at all. ★★★★ Measured reason it exists: the conservative
+# hook pins the mark at slot 255 in Kingquest1's attract mode -- zero active objects, and the whole
+# gain lost -- because something there writes flags on a high slot. Rooms 1/2 sit at 13, room 3 at
+# 3. ★★★ It must earn the same 9/9 the conservative default already has before it can replace it.
+if ($env:VM_OBJBOUND_TIGHT) { throw "VM_OBJBOUND_TIGHT is retired (P6.11): raising only on ACTIVE-making writes is now the shipped default, gate-proven 9/9. There is no loose variant to select." }
 # ★★★★★ THE VBL CLOCK ARM [Jay's ruling AD-138]. VM_VBLCLOCK=1 runs VAR_SECONDS off the CoCo3's
 # real 59.92 Hz vertical-sync interrupt instead of the cycle-derived virtual counter. Unset,
 # nothing changes and the nine-title gate is HEAD's gate exactly -- which is the arm L-79 requires
@@ -74,9 +88,25 @@ if ($env:VM_PACEONLY) { $ASMARGS += "-DVM_PACEONLY"; "PACE-ONLY build (AC-7 spli
 # so every later said() in the same cycle passes a guard that should have rejected it. This
 # build is EXPECTED to fail the state diff on any title whose script makes a line match.
 if ($env:VM_FAULT_SAID_PURE) { $ASMARGS += "-DVM_FAULT_SAID_PURE"; "★★★ FAULT INJECTED (-DVM_FAULT_SAID_PURE): said() treated as PURE -- this build is EXPECTED to FAIL" }
+# ★★★★★ VM_PROG_PREBUILT -- run a binary this script did NOT assemble [P6.11 AC-5]. The gain has
+# to be measured against a build of the PREVIOUS REVISION, because the knob that used to express
+# the before-state is retired: the loops read vm_objtop now, so "before" is a different program,
+# not a different flag. ★★★★ Its map must come with it, because symbols move between revisions and
+# a stale symbol file is the P1.3 defect exactly -- vm_symbols.py reads the map named here.
+# ★★★ It refuses a binary older than its map rather than guessing, and it prints what it is running
+# so no report can quote a figure without saying which build produced it.
+if ($env:VM_PROG_PREBUILT) {
+    if (-not (Test-Path $env:VM_PROG_PREBUILT)) { throw "VM_PROG_PREBUILT not found: $($env:VM_PROG_PREBUILT)" }
+    $preMap = "$($env:VM_PROG_PREBUILT).map"
+    if (-not (Test-Path $preMap)) { throw "VM_PROG_PREBUILT needs its map beside it: $preMap" }
+    Copy-Item $env:VM_PROG_PREBUILT build\vm_probe.bin -Force
+    Copy-Item $preMap               build\vm_probe.map -Force
+    "★ PREBUILT: $($env:VM_PROG_PREBUILT) ($((Get-Item build\vm_probe.bin).Length) bytes) -- NOT assembled by this script"
+} else {
 & C:\WIN_LWTools\lwasm.exe @ASMARGS src/harness/vm_probe.s
 if ($LASTEXITCODE -ne 0) { throw "assemble failed" }
 "vm_probe: $((Get-Item build\vm_probe.bin).Length) bytes"
+}
 # ★★ AC-3's stamp -- see res_run.ps1. vm_load.ps1 deliberately does NOT build (concurrent MAME
 # instances would race on this file), so it checks staleness instead; this is the producer whose
 # identity that check is against.
@@ -97,6 +127,16 @@ $WANT = @("res_volbase","res_slicebase","res_curblk","vm_icguard","res_depth","r
           # once per ACTIVE object every cycle, so it is the scaling curve's x-axis -- and reading
           # it is what stops "room 1 has four objects" being an assumption carried into a graph.
           "vm_changecnt")
+# ★★★★★ P6.11 AC-7: the census pointer, REQUESTED ONLY ON THE CENSUS ARM. vm_symbols.py treats a
+# missing want as fatal, so listing it unconditionally broke the AC-5 before-arm -- a build of an
+# earlier revision that predates the symbol. ★★★ That is the right failure (a symbol file must
+# match its binary [P1.3]) and the wrong request: a symbol that exists only under a build flag
+# belongs behind the same flag.
+if ($env:VM_OBJCENSUS) { $WANT += "vm_objhighp" }
+# ★★★★★ P6.11 AC-5: the bound itself, so the gain can be explained by the mark rather than by a
+# story about it. Absent from the AC-5 before-arm, which predates it, so it is requested only when
+# the build defines it -- gate_audit's --hash is not a substitute for asking the map.
+if (Test-Path build\vm_probe.map) { if (Select-String -Path build\vm_probe.map -Pattern "Symbol: vm_objtop " -Quiet) { $WANT += "vm_objtop" } }
 if ($env:VM_TRACE) { $WANT += @("vmtr_buf","vmtr_idx","vmtr_from","vmtr_logic","vmtr_seen") }
 python harness\tools\vm_symbols.py build\vm_probe.map --out build\vm_stage\symbols.txt --want @WANT
 if ($LASTEXITCODE -ne 0) { throw "symbols missing" }

@@ -72,26 +72,17 @@ VM_OBJ_MAX      equ     255
 VM_OBJ_END      equ     VM_OBJ+VM_OBJ_MAX*32            ; $6220 -- 255 x 32 from $4240
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════
-* ★★★★★ VM_OBJ_SCAN -- THE ABLATION BOUND FOR P6.10's AC-2/AC-3/AC-4. MEASUREMENT ONLY.
-* vm_check_all_motions and vm_update_objs both open `ldx #VM_OBJ / ldb #VM_OBJ_MAX` and walk
-* EVERY ONE OF THE 255 SLOTS on every cycle, testing a flag and skipping the inactive ones. So
-* their traversal is a CONSTANT and only their bodies are per-object -- which makes "O(active
-* objects)" true of the cost and false of the loop.
-* ★★★★ WHY A BOUND AND NOT AN `ifdef` ROUND THE CALLS. Skipping either call outright stops
-* objects moving and updating, which changes the VM's whole trajectory: a later cycle interprets
-* different bytecode, opcount moves, and the arm has changed several variables at once [L-73 --
-* an ablation can exonerate the wrong component when both arms move the same harness variable].
-* ★★★★★ LOWERING THE BOUND MOVES EXACTLY ONE THING: how many EMPTY slots are walked. AGI's ego
-* is object 0 and a room's objects are low-numbered, so with every active object below the bound
-* the two arms must be BYTE-IDENTICAL on the 288-byte state diff -- and that identity is the
-* proof the ablation changed no behaviour, rather than an assumption that it did not.
-* ★★★ It is therefore its own check: if the diff moves, the bound cut a live object and the
-* timing figure from that arm is void. **The gate says whether the measurement is admissible.**
-* ★★ Default is VM_OBJ_MAX, so an ordinary build is HEAD's build exactly. Recon only -- §2 of
-* T-P0-066 does not authorise changing the shipped bound, and this does not change it.
-                ifndef  VM_OBJ_SCAN
-VM_OBJ_SCAN     equ     VM_OBJ_MAX
-                endc
+* ★★★★★ VM_OBJ_SCAN IS GONE, SUPERSEDED BY vm_objtop [P6.11; it was P6.10's ablation knob].
+* P6.10 added it to measure what the fixed 255-slot walk cost, by lowering the bound and proving
+* the arms byte-identical. That measurement is done -- 9.881 ms/cycle, 74.0 CPU cycles per skipped
+* slot -- and the loops are now bounded by vm_objtop [vm_objects.s], which the interpreter
+* maintains. **Nothing referenced VM_OBJ_SCAN any more**, and a defined-but-unread symbol is not
+* harmless here: flag_diff reports it as ON in every row, which reads as a live configuration.
+* ★★★ TO REPRODUCE P6.10's ABLATION, BUILD THAT REVISION, don't keep a knob for it. A knob that
+* exists only to re-enact a superseded measurement is a second home for the fact [§2F], and the
+* control build is both more honest and exactly what located the vector-page defect in P6.8b.
+* ★★ The census that replaced the guesswork behind it -- the highest ACTIVE slot per title -- is
+* -DVM_OBJCENSUS and vm_objhighp [vm_objects.s].
 
 * ★★ AC-5 COVERAGE: one byte per command opcode, incremented on dispatch. Above VM_OBJ, which
 * ends at $9220 -- NOT $9200, an arithmetic slip that cost a debugging session when a trace
@@ -338,6 +329,44 @@ vm_objflags_set:
                 ora     ,s
                 orb     1,s
                 std     VMO_FLAGS,x
+* ★★★★★ THE BOUND IS RAISED HERE, AT THE FUNNEL [P6.11 AC-2, vm_objects.s vm_objtop].
+* Every site that can make an object ACTIVE passes through this routine with X on the object, so
+* one hook covers all seven fUpdate setters and whatever the eighth turns out to be. Hooking the
+* sites by name is how a bound goes stale, and the failure mode is a sprite that silently stops
+* moving -- invisible to a state gate on any title whose actives stay low.
+* ★★ X and D are both preserved: D is on the stack already, X is pushed only on the rare raising
+* path. In-bounds cost is cmpx + blo = 10 cycles.
+                ifndef  VM_OBJBOUND_FAULT
+* ★★★★★ VM_OBJBOUND_TIGHT -- RAISE ONLY WHEN THE WRITE MAKES THE OBJECT ACTIVE [P6.11 AC-5].
+* The conservative hook raises on ANY flag set, and MEASUREMENT SHOWS THAT COSTS THE WHOLE GAIN IN
+* ATTRACT MODE: Kingquest1 room 83 has ZERO active objects and the mark pins at slot 255, because
+* something in the attract sequence writes flags on a high slot. Rooms 1/2 sit at 13 and room 3 at
+* 3, so the bound works there -- 10.06 ms saved against 1.269 ms in room 83, and that 1.269 is
+* only the removed loop counter.
+* ★★★★ THE TEST IS FREE AND STILL COMPLETE. D holds the NEW flags after the store, and the mask
+* pushed at entry is what `puls d,pc` restores -- so B can be clobbered here. Testing the three
+* ACTIVE bits keeps the funnel property intact (every activation still passes through this
+* routine) while refusing to raise for a write that does not activate anything.
+* ★★★ It is measured as an ARM, not shipped by assertion: the conservative hook is the gate-proven
+* default [9/9], and this one has to earn the same 9/9 before it can replace it.
+* ★★★★★ THE ACTIVE TEST IS UNCONDITIONAL -- IT IS THE SHIPPED BOUND, MEASURED AND GATED.
+* It was introduced behind -DVM_OBJBOUND_TIGHT to be measured against the conservative hook, and
+* it won on both counts: 9/9 byte-identical on the nine-title gate, and it recovers the gain the
+* conservative version loses. Room 83 (attract, ZERO active objects): mark 255 -> 1, 66.533 ->
+* 57.310 ms/cycle. Rooms 1 and 2 are unchanged at mark 13, room 3 improves 3 -> 2.
+* ★★★ The flag is gone rather than left as a default-on option: a knob whose other position is
+* known-worse is not a configuration, it is a way to ship the worse one by accident.
+                andb    #VM_ACTIVE_L
+                cmpb    #VM_ACTIVE_L
+                bne     vm_ofs_intop            ; this write did not make it active
+                cmpx    vm_objtop
+                blo     vm_ofs_intop
+                pshs    x
+                leax    VMO_SIZE,x
+                stx     vm_objtop
+                puls    x
+vm_ofs_intop:
+                endc
                 puls    d,pc
 vm_objflags_clr:
                 pshs    d

@@ -466,6 +466,16 @@ _G._n = emu.add_machine_frame_notifier(function()
             w("    active objects (vm_changecnt, last cycle) = %d",
               prog:read_u8(SYM.vm_changecnt))
         end
+        -- ★★★★★ THE BOUND ITSELF [P6.11 AC-5]. The gain came out at 10.06 ms in rooms with
+        -- objects and only 1.269 ms in attract mode -- the OPPOSITE of the expectation, since the
+        -- empty room should walk the fewest slots. The mark is raised on ANY flag write, not only
+        -- on one that makes an object active, so it can sit far above the highest ACTIVE slot.
+        -- ★★★ Whether that is what happens is a measurement, not a story: print the mark.
+        if SYM.vm_objtop then
+            local p = prog:read_u8(SYM.vm_objtop) * 256 + prog:read_u8(SYM.vm_objtop + 1)
+            w("    vm_objtop = slot %d  (pointer $%04X) -- slots walked per loop per cycle",
+              (p - 0x4240) // 32, p)
+        end
         m:exit()
         return
     end
@@ -609,6 +619,16 @@ _G._n = emu.add_machine_frame_notifier(function()
     if n >= NCYC then
         out:close(); idx:close()
         w("★ %d cycles complete", n)
+        -- ★★★★★ P6.11 AC-7: THE HIGHEST SLOT THIS TITLE EVER HAD ACTIVE. A shipping bound must
+        -- survive the slot range the corpus actually uses, and "9/9 at VM_OBJ_SCAN=16" is a claim
+        -- about nine titles whose actives happen to sit low [L-85]. ★★★ The guest keeps a pointer
+        -- because `cmpx` is cheap and a divide is not; the slot number is recovered here, where
+        -- arithmetic is free. ★★ Silent on a build without -DVM_OBJCENSUS.
+        if SYM.vm_objhighp then
+            local p = prog:read_u8(SYM.vm_objhighp) * 256 + prog:read_u8(SYM.vm_objhighp + 1)
+            w("    OBJCENSUS highest ACTIVE slot = %d  (pointer $%04X, VM_OBJ $4240, 32 B/entry)",
+              (p - 0x4240) // 32, p)
+        end
         report_parser()
         w("    ego x=%d y=%d  var0=%d var109=%d  icguard=%d  resdepth=%d restop=%04X",
           prog:read_u8(0x4240), prog:read_u8(0x4241), prog:read_u8(0x4000),

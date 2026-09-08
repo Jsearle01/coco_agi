@@ -263,6 +263,17 @@ vmop_animate_obj:
                 bne     vmop_ao_out             ; already animated: the reference returns
                 ldd     #fAnimated+fUpdate+fCycling
                 std     VMO_FLAGS,x             ; ★ ASSIGNED, not OR'd -- the reference replaces
+* ★★★ THE BOUND, HOOKED HERE TOO [P6.11 AC-2]. This is the one write to VMO_FLAGS that bypasses
+* vm_objflags_set. It clears fDrawn and so cannot itself create an ACTIVE object -- but that is a
+* reasoning-based exemption and §2H exists because those are wrong more often than they look.
+* Ten cycles on a once-per-object opcode buys not having to be right about it.
+* ★★★★ THIS HOOK IS GONE, AND ITS ABSENCE IS THE ANSWER TO §2H's SECOND-MECHANISM CHECK, NOT AN
+* OVERSIGHT. animate.obj ASSIGNS fAnimated+fUpdate+fCycling, which CLEARS fDrawn -- so this write
+* can only ever leave an object NOT active, and the shipped bound raises only on writes that make
+* an object active. A hook here would test a condition that cannot hold.
+* ★★★ The exhaustive check behind that: VMO_FLAGS has exactly THREE writers in the tree --
+* vm_state.s:331 (the OR funnel, which is hooked), vm_state.s:374 (the AND, which can only
+* deactivate), and this one. Not a first-mechanism read [§2H].
                 clr     VMO_MOTION,x            ; kMotionNormal
                 clr     VMO_CYCLE,x             ; kCycleNormal
                 clr     VMO_DIR,x

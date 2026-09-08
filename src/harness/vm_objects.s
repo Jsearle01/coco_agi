@@ -41,13 +41,23 @@ vm_dir_dy       equ     VMT_DIR_DY
 vm_update_objs:
                 clr     vm_changecnt
                 ldx     #VM_OBJ
-                ldb     #VM_OBJ_SCAN            ; ★ = VM_OBJ_MAX unless ablated [vm_state.s]
-vm_uo_lp:       pshs    b
+* ★★★★★ BOUNDED BY vm_objtop [P6.11] -- see vm_check_all_motions for the reasoning and the
+* measurement. The counter is gone with the bound, and with it the per-slot pshs/puls/decb.
+vm_uo_lp:       cmpx    vm_objtop
+                bhs     vm_uo_done
                 lda     VMO_FLAGS+1,x
                 anda    #VM_ACTIVE_L
                 cmpa    #VM_ACTIVE_L
                 lbne    vm_uo_next
                 inc     vm_changecnt
+* ★★★★ AC-7's census, on the ACTIVE branch -- so it records slots that were genuinely active, not
+* slots something merely touched. Guarded: the gate build is unchanged.
+                ifdef   VM_OBJCENSUS
+                cmpx    vm_objhighp
+                blo     vm_uo_nothigh
+                stx     vm_objhighp
+vm_uo_nothigh:
+                endc
 
 * ---- loop selection from the direction ----------------------------------------
                 lda     #4
@@ -100,10 +110,8 @@ vm_uo_cyc:
                 lda     VMO_CYCLETIME,x
                 sta     VMO_CYCLETIMECNT,x
 vm_uo_next:     leax    VMO_SIZE,x
-                puls    b
-                decb
-                lbne    vm_uo_lp
-
+                lbra    vm_uo_lp
+vm_uo_done:
                 tst     vm_changecnt
                 beq     vm_uo_out
                 jsr     vm_update_position
@@ -442,6 +450,45 @@ vm_sm_zero:     clra
                 rts
 
 vm_changecnt    fcb     0
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ vm_objhighp -- THE HIGHEST SLOT EVER SEEN ACTIVE, as a POINTER [P6.11 AC-7].
+* A shipping bound has to survive the slot range the CORPUS actually uses, and "9/9 at
+* VM_OBJ_SCAN=16" is a claim about nine titles whose actives happen to sit below 16 [L-85]. This
+* is the census that says what that range really is, measured in the GUEST, on the same loop the
+* bound will govern -- not inferred from the Python reference, which is a different program.
+* ★★★ A POINTER, not an index: the loop walks X and turning X into a slot number costs a divide,
+* while `cmpx` is 7 cycles. The host divides once, at report time, where arithmetic is free.
+* ★★ Guarded, so the gate build is byte-for-byte what it was. This is a measurement, and P6.10's
+* whole point was that a measurement arm must not quietly become the shipped program.
+vm_objhighp     fdb     VM_OBJ
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ vm_objtop -- THE BOUND THE INTERPRETER MAINTAINS [P6.11 AC-2]. One past the last slot
+* the two object loops walk. A pointer, for the same reason as vm_objhighp: `cmpx` is 7 cycles
+* and recovering a slot index from X is a divide.
+*
+* ★★★★★ WHAT MAINTAINS IT, AND WHY IT CANNOT GO STALE. An object is ACTIVE only when all three
+* of fAnimated|fUpdate|fDrawn are set [vm_objects.s:27]. **fUpdate alone is set at SEVEN sites**
+* -- vm_cmds.s:306, 631, 716, 839, 873, 886 and vm_run.s:369 -- and any of them completes the
+* triple if the other two already hold. ★★★★ Hooking those seven by name is precisely how a bound
+* goes stale: the eighth is added later and the failure is a sprite that silently stops moving,
+* which passes the state gate on every title whose actives stay low [§8 trigger 1].
+* ★★★★★ SO THE HOOK IS THE FUNNEL, NOT THE SITES. Every one of the seven reaches the flags through
+* vm_objflags_set [vm_state.s:335], which already has X pointing at the object. Raising the mark
+* there catches all of them BY CONSTRUCTION, and catches the eighth for free.
+* ★★★ It is deliberately CONSERVATIVE: it raises on any flag set, not only on a set that makes
+* the object active. A `set.priority` on a high slot lifts the mark and costs some of the gain;
+* it can never lose an activation. **Cheap and safe beats tight and reasoned-about.**
+* ★★★ vmop_animate_obj is hooked too, because it ASSIGNS VMO_FLAGS directly [vm_cmds.s:265]
+* rather than going through the funnel. It clears fDrawn and therefore cannot itself create an
+* ACTIVE object -- but that is a reasoning-based exemption, and §2H is a standing warning about
+* those. Ten cycles on a once-per-object opcode buys not having to be right about it.
+* ★★ IT NEVER FALLS. unanimate.all clears the flags on all 255 slots and the mark stays where it
+* is; a high-water mark that decays needs a rule for when, and a wrong rule loses objects. The
+* cost of never falling is bounded by the census (AC-7).
+* ★ Initialised to slot 0 + 1: object 0 is the ego and always exists.
+vm_objtop       fdb     VM_OBJ+VMO_SIZE
 vm_loopnr       fcb     0
 vm_celcur       fcb     0
 vm_cellast      fcb     0

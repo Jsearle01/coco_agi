@@ -16,6 +16,22 @@
 * ── start() [cycle.py start()] ────────────────────────────────────────────────────
 * ═══════════════════════════════════════════════════════════════════════════════════
 vm_start:
+* ★★★★★ THE OBJECT BOUND, RESET WITH THE REST OF THE STATE [P6.11 AC-2, vm_objects.s vm_objtop].
+* It belongs here for the same reason VP_FREE's initialisation did: a location the guest relies on
+* must have a defined power-on value from the guest, not whatever the previous run or cold-boot
+* RAM left in it. ★★★ A stale HIGH mark would only cost speed; a stale LOW one loses objects, and
+* on a re-init after restart.game that is exactly the direction it could go wrong.
+* ★★ VM_OBJ + one slot: object 0 is the ego and always exists.
+* ★★★★★ AC-4's FAULT DOES NOT CLAMP THIS VALUE -- IT DISABLES THE RAISING [vm_state.s,
+* vm_cmds.s]. Clamping here would not stick: the first vm_objflags_set would lift the mark again
+* and the "fault" build would behave exactly like the good one, which is a fault injection that
+* cannot fail [§2W -- the thing this project has now found eight times].
+* ★★★★ With raising off, the mark stays at slot 0 and the PREDICTION IS SPECIFIC: the two titles
+* whose census max is 0 -- Kingquest1 and PoliceQuest1 -- must still PASS, and the other seven
+* must FAIL. A fault that breaks everything proves the gate is connected; one that breaks exactly
+* the titles the census says it should proves the gate is measuring the bound.
+                ldx     #VM_OBJ+VMO_SIZE
+                stx     vm_objtop
 * clear vars, flags and controllers
                 ldx     #VM_VARS
                 ldb     #0
