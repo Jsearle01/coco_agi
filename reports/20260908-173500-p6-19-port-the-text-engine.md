@@ -422,4 +422,5 @@ as a failure.
 ---
 
 ### 11 — Commit
-See §11 note in the follow-up commit.
+`553c406` — pushed to origin/wip, carrying every file in §2 including this report. ★ Corrected by
+one follow-up commit, since a report cannot name the hash of the commit that contains it.
