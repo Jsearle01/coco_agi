@@ -60,9 +60,25 @@ cd "$OUT_ABS"
 # worked only because an unset variable compares false -- a fragility, not a design.
 CEL_DUMP=${CEL_DUMP:-0}
 SPRITE_DUMP=${SPRITE_DUMP:-0}
-rm -f scummvm.ini
-if [ "$CEL_DUMP" = "1" ] || [ "$SPRITE_DUMP" = "1" ] || [ -n "$ROOM" ]; then
+# ★★★★★ P6.15, patch 0010: the TEXT DECISION LOG. AC-3 needs an oracle for text and none existed
+# -- the reference has no display buffer and every text opcode is a declared no-op on both legs,
+# so a 6809 text renderer could not have been gated against anything [P6.14].
+# ★★★★ IT LOGS CALLS, NOT PIXELS. oracleDumpScreens' own note rules out diffing a rendering
+# ("would put ScummVM's upscaler inside our baseline"), and that argument transfers to text: a
+# 320x200 dump would carry the upscaler, the font file and translateFontPosToDisplayScreen into
+# the comparison. The glyph draws and the restore rectangle are the DECISIONS a reference must
+# reproduce, and they are free of all three.
+# ★★ Stale log removed before the run [L-92]: text_events.txt is APPENDED to, so one left behind
+# would silently prepend a previous game's text to this one's and the diff would point at the
+# reference.
+TEXT_DUMP=${TEXT_DUMP:-0}
+rm -f scummvm.ini text_events.txt text_events.txt.tmp
+if [ "$CEL_DUMP" = "1" ] || [ "$SPRITE_DUMP" = "1" ] || [ "$TEXT_DUMP" = "1" ] || [ -n "$ROOM" ]; then
     printf '[scummvm]\n' > scummvm.ini
+    if [ "$TEXT_DUMP" = "1" ]; then
+        printf 'coco_text_dump=true\n' >> scummvm.ini
+        echo "text     : ON  -- text_events.txt (G row col char fg bg | R x y w h)"
+    fi
     if [ "$CEL_DUMP" = "1" ]; then
         printf 'coco_view_sweep=true\n' >> scummvm.ini
         echo "cel dump : ON  -- ★ this run's vmstate.txt is NOT a valid baseline"
@@ -149,6 +165,23 @@ for t in vmstate.txt row24.txt cels.txt cels.bin; do
 done || true
 
 echo
+# ★★★★★ RENAME THE HELD-OPEN LOGS. Common::DumpFile writes to "<name>.tmp" and renames on close;
+# a log held open for the process lifetime -- patch 0002's s_vmLog pattern, which patch 0009's
+# said dump and P6.15's text log both follow -- is NEVER closed, because the run is killed on a
+# wall-clock timeout. So the data is complete and correct and sits under a name nothing looks for.
+# ★★★★ THAT IS WHY THE TEXT LOG READ AS "NOT PRODUCED" THROUGH FOUR REBUILDS. The file existed the
+# whole time at 673,270 bytes; every check was for `text_events.txt` and every write went to
+# `text_events.txt.tmp`. ★★★ It is also PRE-EXISTING: oracle_said.txt.tmp sits beside it and
+# NOTHING IN THE HARNESS READS oracle_said.txt, so patch 0009's artifact has been in the same state
+# since it was written.
+# ★★ Renamed here rather than in the patches: the engine cannot know when the run ends, and the
+# runner does.
+for t in *.tmp; do
+    [ -e "$t" ] || continue
+    mv -f "$t" "${t%.tmp}"
+    echo "renamed  : ${t%.tmp}  (Common::DumpFile leaves .tmp when the handle is never closed)"
+done
+
 echo "=== dumps produced ==="
 ls -la pic*.visual.bin pic*.priority.bin vmstate.txt row24.txt 2>/dev/null || echo "(none -- see above)"
 
