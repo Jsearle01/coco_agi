@@ -272,5 +272,6 @@ None.
 - `seeds/AGI/live/2026-09-08-the-archived-copy-of-an-instrument-drifts-from-the-instrument.md`
 
 ### 11 — Commit
-`9c4f6f7` — pushed to origin/wip. (The report file itself is in that commit; this line was added and
-amended in place, so the hash names the change it describes.)
+`b51e988` — pushed to origin/wip, and it carries every file in §2 including this report. ★ This line
+is corrected by one follow-up commit, since a report cannot name the hash of the commit that
+contains it.
