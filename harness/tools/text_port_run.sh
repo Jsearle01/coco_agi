@@ -37,6 +37,12 @@ FLAG=""
 case "$1" in
     --fault-wrap)   EXPECT_FAIL="wrap"   ; FLAG="-DTXT_FAULT_WRAP"   ; shift ;;
     --fault-printf) EXPECT_FAIL="printf" ; FLAG="-DTXT_FAULT_PRINTF" ; shift ;;
+    # ★★★★★ P6.21's arm: the substitution buffer is now sized from a census (576 B against a
+    # measured maximum of 490), and **a buffer sized from a census needs the arm that proves the
+    # census bounds it.** This shrinks it to 256 -- below the corpus maximum -- so long messages
+    # truncate at txt_put and every downstream number moves. If the gate stays green here, the
+    # census is unfalsifiable and the 576 is a number nobody checked [§2W, trigger 3].
+    --fault-pbuf)   EXPECT_FAIL="pbuf"   ; FLAG="-DTXT_FAULT_PBUF"   ; shift ;;
 esac
 
 TITLES=${TITLES:-"Kingquest1 Kingquest2 Kingquest3 SpaceQuest-1 SpaceQuest-2 PoliceQuest1 larry1 BlackCauldron MixedUpMotherGoose"}
@@ -70,13 +76,31 @@ for t in $TITLES; do
         continue
     fi
     RAN=$((RAN + 1))
+    # ★★★★★ THE pbuf ARM PREDICTS PER TITLE, AND A PASS THERE IS CORRECT RATHER THAN BLIND.
+    # Shrinking the buffer to 256 can only change a title whose longest SUBSTITUTED message
+    # exceeds 256; Kingquest1's swept maximum is 203 and Kingquest2's is 248, so those two must
+    # still agree and a "fault not caught" verdict on them would be the RUNNER being wrong.
+    # ★★★★ So this arm asserts the exact set, from harness/tools/text_bufmax.py's per-title
+    # figures: 203 248 458 334 274 275 490 222 55 against a faulted bound of 256.
+    # **An arm that merely "fails somewhere" would pass even if it failed for the wrong reason**;
+    # this one fails if a title diverges that should not, or agrees when it should not.
+    want_fail=""
+    if [ "$EXPECT_FAIL" = "pbuf" ]; then
+        case "$t" in
+            Kingquest3|SpaceQuest-1|SpaceQuest-2|PoliceQuest1|larry1) want_fail=yes ;;
+            *) want_fail=no ;;
+        esac
+    elif [ -n "$EXPECT_FAIL" ]; then
+        want_fail=yes
+    else
+        want_fail=no
+    fi
+
     if python harness/tools/text_port_gate.py --check "$GAMES/$t" \
               build/text_6809_results.bin; then
-        # ★★ On a fault arm a PASS is the failure: the faulted port agreed with the correct
-        # reference, which means the gate cannot see this stage at all.
-        [ -n "$EXPECT_FAIL" ] && FAILED="$FAILED $t(FAULT-NOT-CAUGHT)"
+        [ "$want_fail" = "yes" ] && FAILED="$FAILED $t(FAULT-NOT-CAUGHT)"
     else
-        [ -z "$EXPECT_FAIL" ] && FAILED="$FAILED $t"
+        [ "$want_fail" = "no" ] && FAILED="$FAILED $t(UNEXPECTED-DIVERGENCE)"
     fi
 done
 

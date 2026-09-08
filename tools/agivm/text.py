@@ -386,6 +386,15 @@ class TextRenderer:
         self.events = []            # ★★ gate-only; see the §2V table
         self.checksum = 0
         self._msg = None
+        # ★★★ ONE CURSOR, shared by the message path and the echo path, because the engine has
+        # exactly one (_textPos) and displayCharacter moves it for both. The first draft kept the
+        # cursor as locals inside _display_text, which works while messages are the only writer
+        # and breaks the moment get.string echoes a keystroke between two of them.
+        self.crow = 0
+        self.ccol = 0
+        self.reset_col = 0
+        self.fg = 0
+        self.bg = 0
 
     # ── the checksum patch 0010 keeps, so neither side needs the characters (§2P) ──────────
     def _hash(self, ch):
@@ -431,21 +440,42 @@ class TextRenderer:
         self._display_text(wrapped, text_row, text_col, fg, bg)
 
     def _display_text(self, text, row, column, fg, bg):
-        """text.cpp:295-342 -- displayText's loop and displayCharacter."""
-        reset_column = column
+        """text.cpp:295-342 -- displayText's loop, over the shared cursor."""
+        self.crow, self.ccol, self.reset_col = row, column, column
+        self.fg, self.bg = fg, bg
         for ch in text:
-            if ch in ("\n", "\r"):
-                if row < (FONT_ROW_CHARACTERS - 1):
-                    row += 1
-                column = reset_column
-                continue
-            self.events.append(("G", row, column, fg, bg, self._hash(ch)))
-            column += 1
-            if column > (FONT_COLUMN_CHARACTERS - 1):
-                # ★ displayCharacter recurses with 0x0D rather than wrapping inline
-                if row < (FONT_ROW_CHARACTERS - 1):
-                    row += 1
-                column = reset_column
+            self.display_character(ch)
+
+    # ══════════════════════════════════════════════════════════════════════════════════════
+    # ★★★★ display_character <- text.cpp:307. THREE ARMS, AND ONLY ONE OF THEM DRAWS.
+    # _display_text above handles CR/LF inline because a wrapped message never contains a
+    # backspace; the ECHO does, so get.string needs the real thing.
+    # ★★★★★ THE BACKSPACE ARM EMITS A 'C' EVENT AND patch 0010 DOES NOT LOG IT. text.cpp:320
+    # calls `clearBlock(...)`, a graphics call with no drawCharacter in it, so the oracle's log is
+    # SILENT on backspace [P6.20 §5]. The event is emitted here anyway -- the port must be
+    # comparable against something -- and the gate filters it out with the reason named, rather
+    # than the reference quietly not modelling it.
+    def display_character(self, ch):
+        code = ord(ch) if isinstance(ch, str) else ch
+        if code == 0x08:
+            # text.cpp:313-322 -- move back a cell, clear it, and DO NOT redraw anything
+            if self.ccol:
+                self.ccol -= 1
+            elif self.crow > 21:
+                self.ccol = FONT_COLUMN_CHARACTERS - 1
+                self.crow -= 1
+            self.events.append(("C", self.crow, self.ccol, self.bg))
+            return
+        if code in (0x0D, 0x0A):
+            if self.crow < (FONT_ROW_CHARACTERS - 1):
+                self.crow += 1
+            self.ccol = self.reset_col
+            return
+        self.events.append(("G", self.crow, self.ccol, self.fg, self.bg,
+                            self._hash(chr(code))))
+        self.ccol += 1
+        if self.ccol > (FONT_COLUMN_CHARACTERS - 1):
+            self.display_character(chr(0x0D))       # ★ the engine recurses; so does this
 
     def close_window(self):
         """text.cpp:549-564.
@@ -460,6 +490,140 @@ class TextRenderer:
         m = self._msg
         self.events.append(("R", m["bg_x"], max(0, m["bg_y"]), m["bg_w"], m["bg_h"]))
         self._msg = None
+
+
+TEXT_STRING_MAX_SIZE = 40       # text.h at the pin
+MAX_STRINGS = 24                # agi.h -- slots 0..24; the port carries 13, measured
+INPUT_STRING_MAX = 42           # text.h _inputString[42]
+
+AGI_KEY_BACKSPACE = 0x08
+AGI_KEY_ENTER = 0x0D
+AGI_KEY_ESCAPE = 0x1B
+
+
+class InputState:
+    """TextMgr's input-edit state, the ten bytes MAP_INPUTSTATE holds on the target.
+
+    ★★★ `cursor_char` is the one that changes the event stream most and is easiest to overlook:
+    when it is non-zero, EVERY inputEditOn emits a backspace and EVERY inputEditOff re-emits the
+    cursor glyph, so a single keystroke produces three events rather than one. Sierra's own default
+    is 0 for get.string and non-zero for the command-line prompt [inputSetCursorChar callers].
+    """
+
+    def __init__(self, cursor_char=0):
+        self.input_string = ""
+        self.cursor_pos = 0
+        self.max_len = 0
+        self.entered = False
+        self.cursor_char = cursor_char
+        self.edit_enabled = False
+
+
+def _edit_on(r, st):
+    """text.cpp:670."""
+    if not st.edit_enabled:
+        st.edit_enabled = True
+        if st.cursor_char:
+            r.display_character(chr(AGI_KEY_BACKSPACE))
+
+
+def _edit_off(r, st):
+    """text.cpp:679."""
+    if st.edit_enabled:
+        st.edit_enabled = False
+        if st.cursor_char:
+            r.display_character(chr(st.cursor_char))
+
+
+def string_key_press(r, st, key):
+    """text.cpp:987-1085. Returns False when the edit loop should end.
+
+    ★★★★ THE FOUR THINGS THAT ARE EASY TO GET WRONG:
+      1. **inputEditOn brackets the WHOLE function and inputEditOff closes it**, so with a cursor
+         character every branch -- including the ones that emit nothing of their own -- produces a
+         backspace/cursor pair around it.
+      2. Backspace decrements FIRST and only then draws (text.cpp:1003-1006), so a backspace at
+         column 0 of an empty string draws nothing at all.
+      3. The printable test is `_inputStringMaxLen > _inputStringCursorPos` -- strictly greater --
+         so the buffer fills to max_len and the max_len-th keystroke is DISCARDED SILENTLY.
+      4. The acceptable range is 0x20..0x7f for the default language, NOT 0x20..0xff.
+    """
+    _edit_on(r, st)
+    cont = True
+    if key in (0x03, 0x18):                      # ctrl-c / ctrl-x: clear the line
+        while st.cursor_pos:
+            st.cursor_pos -= 1
+            st.input_string = st.input_string[:st.cursor_pos]
+            r.display_character(chr(AGI_KEY_BACKSPACE))
+    elif key == AGI_KEY_BACKSPACE:
+        if st.cursor_pos:
+            st.cursor_pos -= 1
+            st.input_string = st.input_string[:st.cursor_pos]
+            r.display_character(chr(AGI_KEY_BACKSPACE))
+    elif key == AGI_KEY_ENTER:
+        st.entered = True
+        cont = False
+    elif key == AGI_KEY_ESCAPE:
+        st.input_string = ""
+        st.cursor_pos = 0
+        st.entered = False
+        cont = False
+    else:
+        if st.max_len > st.cursor_pos and 0x20 <= key <= 0x7F:
+            st.input_string += chr(key)
+            st.cursor_pos += 1
+            r.display_character(chr(key))
+    _edit_off(r, st)
+    return cont
+
+
+def string_edit(r, st, max_len):
+    """text.cpp:936-985, the non-RTL branch: echo any pre-set string, then hand over to the loop."""
+    st.cursor_pos = 0
+    for ch in st.input_string:
+        r.display_character(ch)
+        st.cursor_pos += 1
+    st.max_len = max_len
+    st.entered = False
+    _edit_off(r, st)
+
+
+def get_string(r, st, strings, dest_nr, lead_in, row, column, max_len, keys):
+    """op_cmd.cpp cmdGetString, with the inner loop driven by an explicit key list.
+
+    ★★★★★ THE INNER LOOP IS THE PART THAT DOES NOT TRANSFER, AND IT IS A VM QUESTION, NOT A TEXT
+    ONE. The engine calls cycleInnerLoopActive(CYCLE_INNERLOOP_GETSTRING) and then spins on
+    processAGIEvents until a key ends it -- **re-entering the event pump without advancing the
+    interpreter cycle.** Modelling that here would model ScummVM's event loop, not AGI, so the
+    keys arrive as a list and the loop is a `for`. The port faces the real question (§2V).
+    """
+    if max_len > TEXT_STRING_MAX_SIZE:
+        max_len = TEXT_STRING_MAX_SIZE
+    prev_edit = st.edit_enabled
+    saved = (r.crow, r.ccol, r.reset_col)        # charPos_Push
+    _edit_on(r, st)
+    if row < FONT_ROW_CHARACTERS:                # text.cpp: `if (stringRow < 25)`
+        r.crow, r.ccol = row, column
+
+    if lead_in is not None:
+        processed = string_printf(lead_in, r.printf_state)
+        # ★★ 40, not 30. The message box's default max width is 30 (text.cpp:458); get.string
+        # wraps at 40 and the engine's own comment there says "?? not absolutely sure".
+        wrapped, _, _ = string_word_wrap(processed, 40)
+        r._display_text(wrapped, r.crow, r.ccol, r.fg, r.bg)
+
+    st.input_string = ""                          # stringSet("")
+    string_edit(r, st, max_len)
+    for k in keys:
+        if not string_key_press(r, st, k):
+            break
+
+    if 0 <= dest_nr < len(strings):
+        strings[dest_nr] = st.input_string
+    r.crow, r.ccol, r.reset_col = saved            # charPos_Pop
+    if not prev_edit:
+        _edit_off(r, st)
+    return st.input_string
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════

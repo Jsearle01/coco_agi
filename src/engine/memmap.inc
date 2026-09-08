@@ -71,7 +71,50 @@ MAP_VM_VARS     equ     $0800           ;   256 vars
 MAP_VM_FLAGS    equ     $0900           ;   256 flags, 1 byte each (not packed -- see below)
 MAP_VM_CTRL     equ     $0A00           ;   controller table
 MAP_VM_OBJROOMS equ     $0A20           ;   256 inventory-item room numbers
-MAP_VM_OBJ      equ     $0B20           ;   screen objects, 16 x 42 B
+MAP_VM_OBJ      equ     $0B20           ;   screen objects, 16 x 42 B  -> ends $0DC0
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE STRING TABLE AND THE INPUT LINE LIVE HERE, IN THE VM STATE BLOCK'S TAIL [P6.21].
+*
+* ★★★★ AND THE REASON IS OWNERSHIP, NOT SPACE. `strings[]` is written by set.string,
+* word.to.string and get.string, and read by %s -- **it is VM state in exactly the way vars and
+* flags are**, and it was only ever considered for MAP_RESERVED because that is where the text
+* engine happens to live. Putting it here is right on its own merits; the 520 bytes it stops
+* costing the parser/sound reservation are a consequence, not the argument.
+*
+* ★★★★★ THIRTEEN SLOTS, MEASURED, NOT THE ORACLE'S TWENTY-FIVE. agi.h declares
+* `strings[MAX_STRINGS + 1][MAX_STRINGLEN]` = 25 x 40 = 1,000 B. harness/tools/string_census.py
+* walks the bytecode of **889 logics across nine titles at 100% coverage**, recording every slot
+* written by set.string / get.string / word.to.string and every slot read by %s<n>: the highest
+* index any title touches is **12**, so 13 slots suffice. PoliceQuest1 and larry1 are the two that
+* reach it; five titles never exceed slot 6.
+* ★★★ THE RESIDUAL RISK IS STATED RATHER THAN HIDDEN: 13 is a corpus maximum, not a bound. A title
+* outside the nine could use more, and the oracle's own bound is 25. MAP_STR_SLOTS is one constant
+* and the assertion below moves with it.
+*
+* ★★ The tail is $0DC0-$1000 = 576 B and this uses 572 of it: 520 table + 42 input line + 10 of
+* edit state. **Four bytes spare, and the assertion is what makes that safe to say.**
+MAP_STR_SLOTS   equ     13              ; measured; agi.h's own bound is 25
+MAP_STR_LEN     equ     40              ; agi.h MAX_STRINGLEN
+MAP_STRINGS     equ     $0DC0           ;   13 x 40 = 520 B
+MAP_INPUTSTR    equ     $0FC8           ;   _inputString[42], text.h at the pin
+MAP_VMSTATE_END equ     $1000
+* ★★★ THE TEN EDIT SCALARS ARE **NOT** HERE, AND THE FIRST DRAFT OF THIS BLOCK SAID THEY WERE.
+* getstring.s keeps them inline with its code, as text.s keeps its own: reaching them through a
+* MAP_ address costs indexed addressing on every touch to save ten bytes in a region that had 387.
+* ★★ Declaring an address the engine does not use is a §2F violation with no symptom -- the map
+* says one thing and the code does another, and nothing ever disagrees out loud. Removed rather
+* than left as documentation of a decision that was not taken.
+* ★ That leaves 14 bytes spare at $0FF2-$1000.
+                ifgt    MAP_STRINGS+MAP_STR_SLOTS*MAP_STR_LEN-MAP_INPUTSTR
+                error   "string table overruns the input line buffer -- MAP_STR_SLOTS too large"
+                endc
+                ifgt    MAP_INPUTSTR+42-MAP_VMSTATE_END
+                error   "input line buffer overruns the DIR tables"
+                endc
+                ifgt    MAP_VM_OBJ+16*42-MAP_STRINGS
+                error   "screen objects overrun the string table"
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 MAP_DIRS        equ     $1000           ; the game's own DIR tables -- THE resource index
 MAP_DIR_STRIDE  equ     $0400           ;   1 KB per type: 341 slots vs 216 present max
 MAP_DIRS_END    equ     $2000           ;   4 types x 1 KB = 4,096 B

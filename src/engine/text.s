@@ -69,21 +69,42 @@ TXT_ROWS        equ     25              ; text.h:68 FONT_ROW_CHARACTERS
 TXT_VW          equ     4               ; text.h:63 FONT_VISUAL_WIDTH
 TXT_VH          equ     8               ; text.h:64 FONT_VISUAL_HEIGHT
 
-* ★★★★★ THE SUBSTITUTION BUFFER IS 768 BYTES, NOT THE ORACLE'S 2,000, AND THAT IS MEASURED.
+* ★★★★★ THE SUBSTITUTION BUFFER IS 576 BYTES, AND THE NUMBER IS NOW MEASURED AT FULL COVERAGE.
 * ▲ ACTUAL vs §2V's "a FIXED 2,000-BYTE BUFFER ... the port inherits the same bound".
-* harness/tools/text_bufmax.py over the whole nine-title gate corpus, 4,595 swept messages:
-*     raw max 490   printf max 490 (larry1)   wrapped max 458 (Kingquest3)
-* and the distribution is 4,038 messages under 128 bytes and 2 over 384. **The oracle's 2,000 is a
-* bound chosen on a host with memory to spare; it is 4x the largest thing the corpus produces.**
 *
-* ★★★★ AND THE SIZE IS FORCED, NOT PREFERRED. MAP_RESERVED is 3,328 B and the parser holds 954,
-* so 2,374 remain; this engine assembles to 1,390. **2,000 would not fit and 1,024 would miss by
-* 40 bytes.** 768 fits with 216 to spare and still carries 278 bytes of headroom -- 1.57x -- over
-* the largest substitution the corpus produces.
+* ★★★★ THE FIRST MEASUREMENT DID NOT COVER THE CORPUS AND THE SECOND DOES. harness/tools/
+* text_bufmax.py (P6.18) reported "printf max 490" and P6.19 sized 768 from it -- but it walks
+* agi.cpp's SWEEP rule, the first eight non-empty texts per logic, which is **4,595 of the
+* corpus's 14,944 messages, 31%.** A buffer bound taken over a third of the inputs is not a bound
+* [L-85]. harness/tools/subst_census.py re-measures over EVERY message in every logic, and with
+* the stricter %m model -- each logic substituting from ITS OWN texts, which is what curLogicNr
+* means in gameplay, rather than the sweep's logic 0:
+*
+*     coverage 14,943 of 14,944 (99.99%)   raw max 490   SUBSTITUTED max 490   wrapped max 474
+*     13,612 messages under 128 B; 5 over 384; the longest is larry1 logic 37
+*
+* ★★★★★ TRIPLING THE COVERAGE DID NOT MOVE THE BOUND, which is the useful result: 490 was right
+* and was not known to be right. ★★★ The one message not substituted is a SpaceQuest-2 %m cycle
+* that recurses without terminating; it is COUNTED and excluded rather than silently skipped, and
+* the port's TXT_SUBMAX cap truncates it where Python cannot.
+* ★★ The stricter model earned itself: BlackCauldron's raw maximum is 222 and its SUBSTITUTED
+* maximum is 291 -- substitution genuinely expands there, and the gate's logic-0 model cannot see
+* it.
+*
+* ★★★★ SO 576, NOT 768 AND NOT 512. 576 carries 86 bytes over the measured maximum -- 1.18x -- and
+* returns 192 bytes to MAP_RESERVED, which is what P6.21 needed to build get.string in. 512 would
+* return 256 and leave 22 bytes of margin, 4.5%, on a nine-title sample of a much larger AGI
+* universe; that is a worse trade than the 64 bytes it saves.
 * ★★★ txt_put REFUSES to write past the end rather than trusting the number, so the failure mode
-* for a title outside the corpus is a TRUNCATED message, not a corrupted parser sitting 954 bytes
-* below [an overrun here is silent and lands in said()].
-TXT_PBUF_MAX    equ     768
+* for a title outside the corpus is a TRUNCATED message, not a corrupted parser sitting below it.
+* ★★★★★ AND THE TRUNCATION IS GATED: TXT_FAULT_PBUF shrinks this below the corpus maximum and the
+* text gate must go red. **A buffer sized from a census needs the arm that proves the census
+* bounds it** [§2W, and the dispatch's trigger 3].
+                ifdef   TXT_FAULT_PBUF
+TXT_PBUF_MAX    equ     256             ; ★ AC-6's arm: below the measured 490, so long messages
+                else                    ;   truncate and every downstream number moves
+TXT_PBUF_MAX    equ     576
+                endc
 
 * ★★★ Nesting cap for %s / %m. The oracle recurses without one; a 6809 with a fixed `lds` cannot.
 * Measured need in the corpus is 1 (no message's substitution introduces another %m or %s), so 4
@@ -132,6 +153,7 @@ txt_ng          fdb     0               ; glyphs emitted for this message
 * the per-glyph decision is emitted through txt_gcb and the pixels through txt_blit, and each is
 * independently switchable. **The gate and the screen run the same object code.**
 txt_gcb         fdb     0               ; per-glyph callback, 0 = none
+txt_ccb         fdb     0               ; per-cell-clear callback (backspace), 0 = none
 txt_noblit      fcb     0               ; non-zero = compute, do not draw
 txt_fbwin       fdb     0               ; -> the framebuffer window base
 txt_fbrow0      fcb     0               ; first CHARACTER row this window covers, see txt_blit
@@ -847,6 +869,18 @@ tmb_col_set:    sta     txt_tcol
 * ★★ The engine RECURSES with 0x0D rather than wrapping inline when a column runs past 39; the
 * effect is identical and this does it inline.
 txt_dispch:
+* ★★★★★ THE BACKSPACE ARM, ADDED P6.21 FOR THE ECHO. text.cpp:313-322: step back one cell (or to
+* the end of the previous row, but ONLY when row > 21), clear that cell, and draw nothing.
+* ★★★ It is safe to add here rather than in a separate routine because a WRAPPED MESSAGE NEVER
+* CONTAINS 0x08 -- the wrap emits only the message's own bytes and newlines -- so the message path
+* cannot reach this branch and the text gate's 4,594 rectangles are unaffected. The gate re-run is
+* what checks that claim rather than this sentence.
+* ★★★★ patch 0010 DOES NOT LOG THIS. The engine's backspace calls clearBlock, which contains no
+* drawCharacter, so the oracle's decision log is silent on it [P6.20 §5]. The port emits a 'C'
+* record so the two legs are comparable to each other; against the ORACLE it is ungated, and that
+* is stated rather than papered over.
+                cmpa    #$08
+                beq     tdc_bs
                 cmpa    #$0A
                 beq     tdc_nl
                 cmpa    #$0D
@@ -866,6 +900,37 @@ tdc_nl:
 tdc_col:        lda     txt_rcol
                 sta     txt_ccol
 tdc_ret:        rts
+* ── the backspace arm ──
+tdc_bs:
+                lda     txt_ccol
+                beq     tdc_bs_row
+                deca
+                sta     txt_ccol
+                bra     tdc_bs_clr
+tdc_bs_row:
+* ★★ `else if (charCurPos.row > 21)` -- STRICTLY 21, and only then does it wrap to the previous
+* row. At row 21 or above-left this does nothing at all, which is the engine's behaviour and not
+* an omission: the input line lives at rows 22-24 and cannot back up into the play area.
+                lda     txt_crow
+                cmpa    #22
+                blo     tdc_bs_done
+                lda     #TXT_COLS-1
+                sta     txt_ccol
+                dec     txt_crow
+tdc_bs_clr:
+                jsr     txt_cellcb              ; the 'C' record, for the gate
+                tst     txt_noblit
+                bne     tdc_bs_done
+                jsr     txt_clearcell
+tdc_bs_done:    rts
+
+* ★★ txt_cellcb -- the per-CLEAR callback, the backspace twin of txt_gcb.
+txt_cellcb:
+                pshs    x
+                ldx     txt_ccb
+                beq     tcc_none
+                jsr     ,x
+tcc_none:       puls    x,pc
 
 txt_putglyph:
                 ldd     txt_ng
@@ -914,6 +979,65 @@ tc_ok:          rts
 * ★ Invert: background bit 3 set means "draw the glyph inverted" -- the font bits are XOR'd, so a
 * set bit takes the BACKGROUND colour and a clear bit the foreground. (15, 8) is therefore black
 * text on the white message box, which is what a message box looks like.
+* ★★★ txt_clearcell -- clearBlock over ONE character cell (text.cpp:320's backspace). It is
+* txt_blit with the font replaced by a constant: same window bound, same address arithmetic, four
+* bytes of background per row for eight rows. ★★ Sharing the addressing rather than copying it is
+* the point -- a second copy of "(crow - fbrow0) * 8 * 160 + ccol * 4" is a second place for the
+* straddle bound to be got wrong.
+txt_clearcell:
+                pshs    a,b,x
+                lda     txt_bg
+                anda    #$07                    ; the invert bit is not a colour
+                sta     tb_acc
+                lda     tb_acc
+                lsla
+                lsla
+                lsla
+                lsla
+                ora     tb_acc
+                sta     tb_acc                  ; both nibbles = the background colour
+                jsr     txt_celladdr
+                beq     tcl_out
+                ldb     #8
+tcl_row:        lda     tb_acc
+                sta     ,x
+                sta     1,x
+                sta     2,x
+                sta     3,x
+                leax    160,x
+                decb
+                bne     tcl_row
+tcl_out:        puls    a,b,x,pc
+
+* ★★ txt_celladdr -- X = the cell's top-left byte, Z CLEAR on success and Z SET when the cell is
+* outside this window. Factored out of txt_blit so the clear cannot drift from the draw.
+txt_celladdr:
+                ldx     txt_fbwin
+                beq     tca_no
+                lda     txt_crow
+                suba    txt_fbrow0
+                bmi     tca_no
+                cmpa    txt_fbrows
+                bhi     tca_no
+                ldb     #160
+                mul
+                aslb
+                rola
+                aslb
+                rola
+                aslb
+                rola
+                std     tb_off
+                lda     txt_ccol
+                ldb     #TXT_VW
+                mul
+                addd    tb_off
+                leax    d,x
+                andcc   #$FB                    ; Z clear = usable
+                rts
+tca_no:         orcc    #$04                    ; Z set = refused
+                rts
+
 txt_blit:
                 pshs    a,b,x,y,u
                 ldx     txt_fbwin
