@@ -157,3 +157,231 @@ gfx_mode_table:
                 endc
 
                 endc                    ; HAL_GFX_MODE_SERVICE
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE KEYBOARD DECODER, AND IT IS HERE RATHER THAN IN input.s BECAUSE OF §2M. [P6.22]
+*
+* ★★★★ HAL_input_poll IS DETECTION-ONLY: it drives all eight columns low at once, reads the row
+* sense, and returns "some key is down" with B = 0 -- its own header says "directional decode
+* deferred to R-p25+". **So there is no key code anywhere in the HAL**, and AGI's input line
+* cannot be built on what exists.
+*
+* ★★★★★ AND input.s IS SHARED. Adding a decoder there would change POP's and Karateka's builds
+* for a routine neither calls -- §2M.4: "An AGI-only export in a shared file is drift even when
+* guarded." hal_globals.s is PROJECT_LOCAL (hal_sync_check.py's own PROJECT_LOCAL set names it
+* for all three repos), so this lands in AGI alone. ★★★ **POP and Karateka are not rebuilt
+* byte-identical here -- their inputs do not change at all**, which is the stronger property and
+* the one §2M actually wants.
+* ★★ HAL_input_poll is untouched: same text, same signature, same three-repo agreement.
+*
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★ THE MATRIX. $FF02 selects columns (write, a LOW bit selects); $FF00 reads rows PA0-PA6
+* (a LOW bit means pressed); PA7 is the joystick comparator and is masked off. Eight columns by
+* seven rows = 56 keys.
+*
+*        PB0   PB1   PB2   PB3   PB4   PB5   PB6   PB7
+*  PA0    @     A     B     C     D     E     F     G
+*  PA1    H     I     J     K     L     M     N     O
+*  PA2    P     Q     R     S     T     U     V     W
+*  PA3    X     Y     Z    up    dn   left right space
+*  PA4    0     1     2     3     4     5     6     7
+*  PA5    8     9     :     ;     ,     -     .     /
+*  PA6   ENT   CLR   BRK   ALT  CTRL   F1    F2   SHIFT
+*
+* ★★★ AD-134's scheme reads off that table directly: the four arrows are PA3/PB3-PB6, CTRL is
+* PA6/PB4, ALT is PA6/PB3, ENTER is PA6/PB0, and Ctrl+Q/E/Z/C are PA2/PB1, PA0/PB5, PA3/PB2 and
+* PA0/PB3. **Every key the scheme names is a distinct matrix position**, which is what "no
+* ghosting" meant -- no two of them share a row or a column in a way that aliases.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+
+* ★★★★★ BEHIND A GUARD, AND THE REASON IS MEASURED. hal_globals.s is included by every probe that
+* pulls in the HAL, and the decoder is 318 bytes -- adding it unguarded broke pic_probe.s with
+* "pic_probe code overlaps PIC_DATA", a probe that has nothing to do with the keyboard.
+* ★★★★ §2M.2's pattern applied to a PROJECT_LOCAL file: **a build pays for what it asks for.**
+* The renderer, resource, cel and composite gates never define HAL_KEYBOARD and are byte-identical
+* to what they were; the input probe defines it and gets 318 bytes.
+                ifdef   HAL_KEYBOARD
+
+HAL_KEY_ENTER   equ     $0D
+HAL_KEY_BS      equ     $08             ; CLEAR is AGI's backspace
+HAL_KEY_ESC     equ     $1B             ; BREAK
+HAL_KEY_UP      equ     $81
+HAL_KEY_DOWN    equ     $82
+HAL_KEY_LEFT    equ     $83
+HAL_KEY_RIGHT   equ     $84
+HAL_KEY_ALT     equ     $85             ; a MODIFIER, reported so the caller can see the menu key
+
+                ifdef   OBJTARGET
+                section code
+                endc
+
+* ★ EXPORT only under OBJTARGET, as the rest of the HAL does -- lwasm rejects it in --raw mode.
+                ifdef   OBJTARGET
+                export  HAL_key_scan
+                endc
+
+* ── unshifted, row-major: 8 columns x 7 rows. 0 = not a character key. ───────────
+hal_kb_lo
+        fcb     '@,'A,'B,'C,'D,'E,'F,'G
+        fcb     'H,'I,'J,'K,'L,'M,'N,'O
+        fcb     'P,'Q,'R,'S,'T,'U,'V,'W
+        fcb     'X,'Y,'Z,HAL_KEY_UP,HAL_KEY_DOWN,HAL_KEY_LEFT,HAL_KEY_RIGHT,$20
+        fcb     '0,'1,'2,'3,'4,'5,'6,'7
+        fcb     '8,'9,':,';,',,'-,'.,'/
+        fcb     HAL_KEY_ENTER,HAL_KEY_BS,HAL_KEY_ESC,HAL_KEY_ALT,0,0,0,0
+
+* ── shifted. ★★ Only the rows that DIFFER need a second table, but a full one costs 56 bytes
+* and removes a per-key branch; the branch would cost more in code than the table costs in data.
+* ★ Letters shift to lower case: AGI's parser lowercases anyway [parser.s par_clean], but the
+* ECHO must show what was typed, so the distinction is real on screen.
+hal_kb_hi
+        fcb     '`,'a,'b,'c,'d,'e,'f,'g
+        fcb     'h,'i,'j,'k,'l,'m,'n,'o
+        fcb     'p,'q,'r,'s,'t,'u,'v,'w
+        fcb     'x,'y,'z,HAL_KEY_UP,HAL_KEY_DOWN,HAL_KEY_LEFT,HAL_KEY_RIGHT,$20
+        fcb     $30,'!,'",'#,'$,'%,'&,$27
+        fcb     '(,'),'*,'+,'<,'=,'>,'?
+        fcb     HAL_KEY_ENTER,HAL_KEY_BS,HAL_KEY_ESC,HAL_KEY_ALT,0,0,0,0
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★ HAL_key_scan -- one pressed key as a code, or 0.
+*
+* Returns: A = the key code (0 = nothing), B = modifier bits: bit0 SHIFT, bit1 CTRL, bit2 ALT.
+* Clobbers A, B, CC. Preserves X, Y, U.
+*
+* ★★★ IT REPORTS ONE KEY, NOT A SET, and that is the right shape for a text input line: the
+* caller wants "what was typed", and AGI's own input model is a stream of single key events
+* [text.cpp stringKeyPress takes ONE key]. A caller that needs simultaneous keys -- a game
+* reading two arrows for a diagonal -- needs the mask, and that is what the modifier byte and
+* AD-134's Ctrl+Q/E/Z/C exist to avoid.
+* ★★ The modifiers are read FIRST and excluded from the key search, so SHIFT alone reports
+* nothing rather than reporting itself.
+HAL_key_scan:
+        pshs    x,y,u
+        clr     hal_kb_mod
+        clr     hal_kb_key
+* ★★★ RESET THE INDEX, and it is $FF rather than 0 because 0 is a legitimate index -- PA0/PB0 is
+* the '@' key. A sentinel that collides with a real value is the AD-125 shape: it assembles, it
+* runs, and it reports one specific wrong answer.
+        lda     #$FF
+        sta     hal_kb_idx
+* ── column 6 first: the modifier row lives there (PA6) but so do ENTER/CLEAR/BREAK ──
+        lda     #$FF
+        sta     $FF02
+        ldb     #0
+        stb     hal_kb_col
+hal_ks_col:
+* ★★ Select ONE column by writing a single low bit. The idle state is all-high, restored at exit
+* by HAL_input_poll's own convention.
+        ldb     hal_kb_col
+        lda     #$FF
+hal_ks_shift:
+        tstb
+        beq     hal_ks_sel
+        lsla
+        ora     #$01
+        decb
+        bra     hal_ks_shift
+hal_ks_sel:
+        sta     $FF02
+        lda     $FF00
+        ora     #$80                    ; ignore PA7, the joystick comparator
+        coma                            ; now a SET bit means pressed
+        anda    #$7F
+        beq     hal_ks_next
+        sta     hal_kb_rows
+* ── walk the seven rows of this column ──
+        ldb     #0
+hal_ks_row:
+        cmpb    #7
+        bhs     hal_ks_next
+        lda     hal_kb_rows
+        pshs    b
+hal_ks_bit:
+        tstb
+        beq     hal_ks_test
+        lsra
+        decb
+        bra     hal_ks_bit
+hal_ks_test:
+        puls    b
+        bita    #$01
+        beq     hal_ks_rownext
+* ── (row B, column hal_kb_col) is down. Modifier or key? ──
+        cmpb    #6
+        bne     hal_ks_key
+        lda     hal_kb_col
+        cmpa    #7
+        bne     hal_ks_ctrl
+        lda     hal_kb_mod              ; PA6/PB7 = SHIFT
+        ora     #$01
+        sta     hal_kb_mod
+        bra     hal_ks_rownext
+hal_ks_ctrl:
+        cmpa    #4
+        bne     hal_ks_alt
+        lda     hal_kb_mod              ; PA6/PB4 = CTRL
+        ora     #$02
+        sta     hal_kb_mod
+        bra     hal_ks_rownext
+hal_ks_alt:
+        cmpa    #3
+        bne     hal_ks_key
+        lda     hal_kb_mod              ; PA6/PB3 = ALT -- recorded AND reported as a key,
+        ora     #$04                    ;   because AD-134 opens the menu with it
+        sta     hal_kb_mod
+hal_ks_key:
+* ★ index = row*8 + column. The FIRST key found wins; a second is ignored, which is what
+* "one key" means and is why the modifier row is tested before this branch.
+* ★★ The test is on the INDEX, not on hal_kb_key -- the key code is not resolved until after the
+* whole matrix is walked, so testing it here would always see 0 and the LAST key would win
+* instead of the first.
+        lda     hal_kb_idx
+        cmpa    #$FF
+        bne     hal_ks_rownext
+        pshs    b
+        lda     #8
+        mul
+        addb    hal_kb_col
+        stb     hal_kb_idx
+        puls    b
+hal_ks_rownext:
+        incb
+        bra     hal_ks_row
+hal_ks_next:
+        inc     hal_kb_col
+        lda     hal_kb_col
+        cmpa    #8
+        lblo    hal_ks_col
+* ── deselect, then resolve the index through the right table ──
+        lda     #$FF
+        sta     $FF02
+        lda     hal_kb_idx
+        cmpa    #$FF
+        beq     hal_ks_none
+        ldx     #hal_kb_lo
+        ldb     hal_kb_mod
+        bitb    #$01
+        beq     hal_ks_tbl
+        ldx     #hal_kb_hi
+hal_ks_tbl:
+        ldb     hal_kb_idx
+        abx
+        lda     ,x
+        sta     hal_kb_key
+hal_ks_none:
+        lda     hal_kb_key
+        ldb     hal_kb_mod
+        puls    x,y,u,pc
+
+hal_kb_col      fcb     0
+hal_kb_rows     fcb     0
+hal_kb_idx      fcb     $FF
+hal_kb_key      fcb     0
+hal_kb_mod      fcb     0
+
+                ifdef   OBJTARGET
+                endsection
+                endc
+
+                endc                    ; HAL_KEYBOARD

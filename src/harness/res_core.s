@@ -42,7 +42,20 @@ RES_DIRS        equ     $2000           ; four DIR tables, resident (see RES_DIR
 RES_ARENA       equ     $3000           ; the residency arena -- 12 KB
 RES_ARENA_END   equ     $6000
                 endc
-RES_DIR_STRIDE  equ     $0400           ; 1 KB per type: 341 slots, against 216 present max
+* ★★★★★ 768, NOT 1,024, AND THE OLD COMMENT MEASURED THE WRONG THING [P6.22]. It said "341 slots,
+* against 216 present max" -- but 216 is the count of PRESENT resources and the table is addressed
+* directly (entry N at offset 3N), so what bounds it is the highest INDEX. dir_census.py over 156
+* v2 titles finds that index is **255** in 66 of them, PoliceQuest1 included.
+* ★★★★ 256 x 3 = 768 is the FORMAT's ceiling -- an AGI resource number is a byte -- so this is
+* exact with no waste and no margin needed.
+* ★★★ THIS CONSTANT HAS THREE HOMES: here, MAP_DIR_STRIDE in memmap.inc, and DIR_STRIDE in
+* p3b_run.lua. **The resource gate is what proves they agree**, and -DRES_FAULT_STRIDE is the arm
+* that proves the gate would notice if they did not.
+                ifdef   RES_FAULT_STRIDE
+RES_DIR_STRIDE  equ     $02C0           ; ★ AC-5's arm: 704 B = 234 slots, the dispatch's proposed
+                else                    ;   cut, which truncates every DIR above slot 233
+RES_DIR_STRIDE  equ     $0300           ; 768 B per type = 256 slots = the format's ceiling
+                endc
 RES_SLOT        equ     RES_ARENA       ; a depth-0 fetch lands here; kept as a name for AC-2
 RES_SLOT_END    equ     RES_ARENA_END
 RES_MAXDEPTH    equ     8               ; ★ against a MEASURED maximum LOGIC call depth of 3

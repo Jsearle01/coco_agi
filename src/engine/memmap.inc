@@ -116,8 +116,49 @@ MAP_VMSTATE_END equ     $1000
                 endc
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 MAP_DIRS        equ     $1000           ; the game's own DIR tables -- THE resource index
-MAP_DIR_STRIDE  equ     $0400           ;   1 KB per type: 341 slots vs 216 present max
-MAP_DIRS_END    equ     $2000           ;   4 types x 1 KB = 4,096 B
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE STRIDE IS 768 AND THE BOUND IS STRUCTURAL, NOT STATISTICAL [P6.22].
+*
+* ★★★★ THE OLD COMMENT HERE SAID "1 KB per type: 341 slots vs 216 present max" AND IT MEASURED
+* THE WRONG THING. 216 is the count of PRESENT resources; what the table must hold is the highest
+* INDEX, because a DIR is addressed directly -- entry N at offset 3N. harness/tools/dir_census.py
+* over **9 Sierra titles and 147 fan titles, 156 v2 games**: the highest present index is **255**
+* in 66 of them, including PoliceQuest1, whose viewdir carries a real entry at slot 255.
+*
+* ★★★★★ AND 256 SLOTS IS THE FORMAT'S OWN CEILING: an AGI resource number is a BYTE, so a v2 DIR
+* can never exceed 256 entries x 3 = 768 bytes. **This is not a censused maximum with AD-143's
+* one-slot-of-margin hazard; it is the width of the index.** Every DIR file on disk is padded to
+* exactly 768, and the census confirms what the format already guarantees.
+*
+* ★★★ SO THE DISPATCH'S PROPOSED 704 WOULD HAVE TRUNCATED 66 TITLES, ONE OF THEM A GATE TITLE --
+* and it was proposed in good faith from the comment above, which is why the comment is replaced
+* rather than corrected in passing.
+*
+* ★★★★ FREED: 4 types x 256 B = 1,024 B, at $1C00-$2000, and NOTHING ELSE MOVES. Growing
+* MAP_RESERVED instead would mean sliding MAP_CODE down to $1C00, and p3b_run.lua pokes 0x2000 and
+* p3b_probe.s orgs MAP_CODE -- disturbing the integration probe to gain the same 1,024 bytes.
+MAP_DIR_STRIDE  equ     $0300           ;   768 B per type = 256 slots = the format's ceiling
+MAP_DIRS_END    equ     $1C00           ;   4 types x 768 B = 3,072 B
+* ★★★★★ THE ASSERTION AC-4 ASKS FOR, and it is checkable at assembly because the bound is a
+* property of the FORMAT rather than of the corpus: a stride that cannot hold 256 entries cannot
+* hold some real game's DIR, and no census has to stay current for that to be true.
+                ifgt    256*3-MAP_DIR_STRIDE
+                error   "MAP_DIR_STRIDE cannot hold 256 DIR entries -- an AGI resource number is a byte, so 256 x 3 = 768 is the format's ceiling and 66 of 156 v2 titles reach it"
+                endc
+* ★★ res_core.s carries RES_DIR_STRIDE and p3b_run.lua carries DIR_STRIDE, and all three must
+* agree. **That is a §2F violation this task inherited rather than introduced** -- three homes for
+* one fact -- and the resource gate is what proves they agree (1,264/1,264 across ten volumes).
+* ★ Recorded as a follow-up rather than fixed here: res_core.s is harness, and the harness keeps
+* its own addresses by this file's own header.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★ THE INPUT SUBSYSTEM LIVES IN WHAT THE STRIDE FREED. get.string and the key decoder are
+* input, not text rendering, and MAP_RESERVED is the parser/sound reservation -- so putting them
+* here keeps the reservation for what it was reserved for and gives sound back its 320 bytes.
+MAP_INPUT       equ     $1C00           ; get.string + the AD-134 key decoder
+MAP_INPUT_END   equ     $2000           ;   1,024 B
+                ifgt    MAP_DIRS_END-MAP_INPUT
+                error   "DIR tables overrun the input subsystem region"
+                endc
 * ★★★ §2F.3: THE RESOURCE MAP IS THE GAME'S OWN DIR TABLES. There is no second index. The
 * arena's occupancy is tracked in MAP_STATUS, not by building a parallel directory.
 
@@ -294,8 +335,8 @@ MAP_ARENA_BYTES equ     24576           ; ★ 3 blocks, CHOSEN FROM THE EVICTION
                 ifgt    MAP_DIRS+4*MAP_DIR_STRIDE-MAP_DIRS_END
                 error   "DIR tables overrun their region"
                 endc
-                ifgt    MAP_DIRS_END-MAP_CODE
-                error   "DIR tables overrun the code region"
+                ifgt    MAP_INPUT_END-MAP_CODE
+                error   "input subsystem region overruns the code region"
                 endc
                 ifgt    MAP_CODE_END-MAP_RESERVED
                 error   "engine code overruns the parser/sound reservation"

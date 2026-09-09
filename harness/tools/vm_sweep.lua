@@ -38,7 +38,14 @@ os.execute('mkdir "' .. OUT:gsub("/", "\\") .. '" 2>nul')
 
 local LOAD      = 0x0700
 local RES_DIRS  = 0x3000        -- vm_probe.s overrides res_core's default map
-local DIR_STRIDE= 0x0400
+-- ★★★★★ 768, matching RES_DIR_STRIDE [P6.22]. **THIS IS THE FIFTH HOME OF ONE NUMBER** --
+-- memmap.inc, res_core.s, res_sweep.lua, p3b_run.lua and here. Four of them were changed and this
+-- one was not, and the VM gate went from 9/9 to 0/9 across every title: the guest looked up DIR
+-- entry N at 768 and the host had staged at 1,024, so every resource fetch after the first type
+-- read the wrong table.
+-- ★★★★ The gate said "all nine titles diverge", which is what a broken interpreter looks like.
+-- **The cause was a constant in a Lua host** [L-54: attribute separately].
+local DIR_STRIDE= 0x0300
 local WINDOW    = 0xC000
 local MMU_SLOT  = 0xFFA6
 local VM_FLAGS  = 0x4100

@@ -25,7 +25,11 @@ os.execute('mkdir "' .. OUT:gsub("/", "\\") .. '" 2>nul')
 
 local LOAD      = 0x2000        -- MAP_CODE
 local RES_DIRS  = 0x1000        -- MAP_DIRS
-local DIR_STRIDE= 0x0400
+-- ★★★★ 768, matching MAP_DIR_STRIDE and RES_DIR_STRIDE [P6.22]. A v2 DIR is at most 256 entries
+-- of 3 bytes because a resource number is a byte, and 66 of 156 v2 titles reach slot 255 -- so
+-- 1,024 reserved 256 bytes per type that no game can ever use. ★★ THREE FILES CARRY THIS NUMBER
+-- and they must agree; the resource gate is what proves it.
+local DIR_STRIDE= 0x0300
 local WINDOW    = 0xC000        -- MAP_PHASE_WIN, the volume window in the VM phase
 local MMU_SLOT  = 0xFFA6
 local FB_BASE   = 0xC000        -- MAP_PHASE_WIN, the framebuffer slice in a draw phase

@@ -22,28 +22,48 @@
 GS_STR_SLOTS    equ     MAP_STR_SLOTS
 GS_STR_LEN      equ     MAP_STR_LEN
 
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ TWO REGIONS NOW, AND THE SPLIT IS THE P6.22 RESULT. get.string and the key decoder are
+* INPUT, not text rendering, and they live in MAP_INPUT -- the 1,024 bytes the DIR stride freed.
+* MAP_RESERVED goes back to holding what it was reserved for: the parser, the text engine and its
+* substitution buffer, with the remainder for sound.
                 org     MAP_RESERVED
 
 RF_PARSER       equ     *
                 include "src/engine/parser.s"
 RF_TEXT         equ     *
                 include "src/engine/text.s"
+RF_RES_END      equ     *
+
+* ★★ The substitution buffer is not code and is not emitted here, so it is added explicitly.
+RF_RES_TOTAL    equ     RF_RES_END-MAP_RESERVED+TXT_PBUF_MAX
+
+                ifgt    RF_RES_TOTAL-(MAP_RESERVED_END-MAP_RESERVED)
+                error   "MAP_RESERVED OVERFLOW -- parser + text + substitution buffer exceed the reservation."
+                endc
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ RF_NO_GETSTRING IS THE GREEN DIRECTION, AND IT IS NOT A CONVENIENCE FLAG. §2W: an
 * assertion nobody has seen pass is as untrustworthy as one nobody has seen fail. Without
-* getstring.s this is exactly P6.19's shipped engine, which is KNOWN to fit with 195 bytes spare
-* -- so the flag turns the check into a two-sided instrument instead of a line that is red today
-* and might be red for a reason nobody checked.
+* getstring.s this is P6.19's shipped engine, which is KNOWN to fit -- so the flag turns the check
+* into a two-sided instrument instead of a line that is green today and might be green for a
+* reason nobody checked.
+                org     MAP_INPUT
 RF_GETSTRING    equ     *
                 ifndef  RF_NO_GETSTRING
                 include "src/engine/getstring.s"
                 endc
-RF_END          equ     *
+RF_INPUT_END    equ     *
 
-* ★★ The substitution buffer is not code and is not emitted here, so it is added explicitly.
-RF_TOTAL        equ     RF_END-MAP_RESERVED+TXT_PBUF_MAX
-
-                ifgt    RF_TOTAL-(MAP_RESERVED_END-MAP_RESERVED)
-                error   "MAP_RESERVED OVERFLOW -- parser + text + getstring + substitution buffer exceed the reservation. This is the stop, not a nudge: M-48 is spent, MAP_CODE has 5 bytes, and growing the region is a map change."
+* ★★★ RF_INPUT_BUDGET exists so the MAP_INPUT assertion can be SEEN TO FIRE. It is green today
+* with 620 bytes spare, and an assertion that has only ever been green is an assertion nobody has
+* tested -- the same reason RF_NO_GETSTRING exists for the other direction. Setting it below what
+* get.string occupies must produce the error below.
+                ifndef  RF_INPUT_BUDGET
+RF_INPUT_BUDGET equ     MAP_INPUT_END-MAP_INPUT
+                endc
+                ifgt    RF_INPUT_END-MAP_INPUT-RF_INPUT_BUDGET
+                error   "MAP_INPUT OVERFLOW -- get.string plus the key decoder exceed the 1,024 bytes the DIR stride freed."
                 endc
 
                 end

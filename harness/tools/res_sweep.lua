@@ -23,7 +23,18 @@ os.execute('mkdir "' .. OUT:gsub("/", "\\") .. '" 2>nul')
 
 local LOAD      = 0x0700
 local RES_DIRS  = 0x2000
-local DIR_STRIDE= 0x0400
+-- ★★★★★ 768, matching RES_DIR_STRIDE in res_core.s [P6.22]. **THIS IS THE FOURTH HOME OF ONE
+-- NUMBER** -- memmap.inc, res_core.s, p3b_run.lua and here -- and changing three of them took the
+-- resource gate from 1,264/1,264 to 348/1,264 with "empty-slot" on every PICTURE above 65. The
+-- guest looked up entry N at the new stride and the host had staged it at the old one, so the
+-- lookup landed in the previous type's table and found padding.
+-- ★★★★ That is the §2F violation making itself felt: the gate did exactly its job and named a
+-- symptom three files from the cause. ★★ Fixing the duplication is a follow-up, not this task.
+-- ★★★★ FROM THE ENVIRONMENT, so AC-5's arm can move BOTH sides at once. A fault that moved only
+-- the guest's stride would test whether the two agree -- which the accident above already proved
+-- the gate catches -- and not whether 768 is big enough. Setting both to 704 truncates every DIR
+-- above slot 233 on both legs, so what fails is the BOUND rather than the bookkeeping.
+local DIR_STRIDE= tonumber(os.getenv("RES_STRIDE") or "768")
 -- ★★ RES_SLOT is now used ONLY by the RES_STALE_READ fault arm. The live gate reads the address
 -- the guest publishes at PBASE; see the readback below for why the literal stopped being true.
 local RES_SLOT  = 0x3000
