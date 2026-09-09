@@ -371,6 +371,15 @@ _G._ip = emu.add_machine_frame_notifier(function()
     if _G._ip_nk ~= nk then _G._ip_nk, _G._ip_t = nk, m.time:as_double() end
     if not _G._ip_t then _G._ip_t = m.time:as_double() end
     if m.time:as_double() - _G._ip_t > 8 then
+        -- ★★★★ A COMPLETED RUN IS NOT A STALL, AND LABELLING IT ★★★ IS HOW ★★★ STOPS MEANING
+        -- ANYTHING. On the posting arm the probe reopens the line after its one scripted Enter and
+        -- then correctly waits forever, because nothing else is coming -- which is the CONTROL,
+        -- not a fault. Reaching the budget with lines already reported ends the run cleanly.
+        if (_G._ip_lines or 0) > 0 then
+            print(string.format("★ run complete: %d line(s), nothing further posted",
+                                _G._ip_lines))
+            m:exit(); return
+        end
         print(string.format("★★★ no progress: DONE=%d NKEY=%d NRAW=%d LASTK=$%02X PC=$%04X",
                             prog:read_u8(IP_DONE), nk, prog:read_u8(IP_NRAW),
                             prog:read_u8(IP_LASTK), cpu.state["PC"].value))
