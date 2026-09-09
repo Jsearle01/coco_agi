@@ -28,6 +28,10 @@ param(
   # script AGI's backspace -- natkeyboard posts characters and CLEAR has no character mapping, so
   # the line that diverged under Jay's hands could not be produced by any instrument until now.
   [switch]$Repro,
+  # ★★★★ -Rollover: the P6.27 arm. Closes TWO matrix fields at once -- the one difference P6.26
+  # left uncontrolled between a typed line and a scripted one -- and dumps IP_INBUF as the GUEST
+  # sees it at `jsr par_parse`, not as the host sees it frames later on the far side of the doubt.
+  [switch]$Rollover,
   [string]$Title = $(if ($env:IP_TITLE) { $env:IP_TITLE } else { "Kingquest1" }),
   [string]$Text  = "look at rock"
 )
@@ -71,6 +75,29 @@ $env:IP_MAP   = "build/input_probe.map"
 $env:IP_VOCAB = ($vocab -replace '\\','/')
 $env:IP_WATCH = "1"
 $env:IP_LOOP  = "1"
+
+if ($Rollover) {
+  # ═══════════════════════════════════════════════════════════════════════════════════════
+  # ★★★★ P6.27. Two matrix fields closed at once -- the one difference P6.26 left between the
+  # line a person typed and the line an instrument typed -- plus IP_SNAP, the guest's own copy
+  # of IP_INBUF taken at `jsr par_parse`. ★★ -nothrottle: every output is a byte comparison.
+  Remove-Item Env:IP_NOPOST -ErrorAction SilentlyContinue
+  C:\mame\mame.exe coco3 -window -nomaximize -skip_gameinfo -nothrottle `
+    -video none -sound none -seconds_to_run 180 `
+    -rompath C:/mame/roms `
+    -autoboot_script harness/tools/rollover_probe.lua -autoboot_delay 0 2>$null |
+    # ★★★★ ASCII ANCHORS ONLY, AND THAT IS NOT A STYLE CHOICE. Windows PowerShell 5.1 parses a
+    # UTF-8 .ps1 without a BOM as ANSI, so a star inside a -Pattern here is mojibake by the time
+    # Select-String sees it and matches nothing. The first run of this arm silently dropped the
+    # driver's dropped-key report AND the final verdict -- the two lines that decide the task --
+    # while printing every table around them, which reads exactly like a run that had no verdict.
+    Select-String -Pattern @('===','vocabulary','IP_SNAP','driver','dropped','ignature',
+                             'snapshot','SNAPSHOT','negative','trigger','FAULT arm',
+                             'keys=','both down','A released','step \d','^\s+[0-9A-F][0-9A-F] ',
+                             '^\s+(snap|after)\s+\|','^(F|B\d|S\d|P) ') |
+    ForEach-Object { $_.Line }
+  exit 0
+}
 
 if ($Repro) {
   # ═══════════════════════════════════════════════════════════════════════════════════════

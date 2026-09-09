@@ -45,6 +45,9 @@ IP_PBUF         equ     $4300           ; txt_pbuf
 IP_VOCAB        equ     $6000           ; WORDS.TOK
 IP_CLNBUF       equ     $5F00           ; par_clean's output
 IP_EGOLOG       equ     $4600           ; the parsed word numbers, for the host
+* ★★ IP_SNAP: IP_INBUF as par_parse is about to read it. $4700 is clear -- IP_PBUF ends at $4540
+* (TXT_PBUF_MAX 576) and IP_EGOLOG at $4650 (20 words x 2) -- and nothing reads it but the host.
+IP_SNAP         equ     $4700           ; the parse-boundary snapshot, 48 B
 
 IP_FB           equ     $8000
 IP_FB_LEN       equ     32000
@@ -241,6 +244,23 @@ ip_dly:         leax    -1,x
 * buffer gs_keypress filled is the buffer par_parse reads, in place, with no copy between them.
 ip_entered:
                 jsr     gs_finish
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE PARSE BOUNDARY, CAPTURED BY THE GUEST. Every buffer reading on record was taken by the
+* HOST, frames later, after the line had been submitted and the guest had gone back to scanning.
+* **That reading cannot answer the question P6.26 left open** -- whether par_parse saw a buffer the
+* host's later read does not show -- because it is taken on the far side of the thing in doubt.
+* ★★★★ 48 bytes, past the 42-byte field, matching the host's dump exactly so the two are comparable
+* byte for byte. Copied immediately before `jsr par_parse` and after `gs_finish`, so it is the
+* bytes the parser is about to read and not an approximation of them.
+* ★★★ This is instrumentation, not a change to behaviour: nothing downstream reads IP_SNAP, and the
+* buffer, the parser and the boundary are all exactly where they were [AD-169 untouched].
+                ldx     #IP_INBUF
+                ldy     #IP_SNAP
+                ldb     #48
+ip_snap:        lda     ,x+
+                sta     ,y+
+                decb
+                bne     ip_snap
                 jsr     par_parse
                 lda     par_egon
                 sta     IP_EGON
