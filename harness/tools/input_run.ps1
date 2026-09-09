@@ -24,6 +24,10 @@ param(
   # ★★★★ -Post, NOT -Interactive. The eye gate is the DEFAULT because §4A puts it first on an
   # integration task, and a default that has to be asked for is a default that gets skipped.
   [switch]$Post,
+  # ★★★★ -Repro: the P6.26 arm. Drives CLEAR by ioport field assertion, which is the ONLY way to
+  # script AGI's backspace -- natkeyboard posts characters and CLEAR has no character mapping, so
+  # the line that diverged under Jay's hands could not be produced by any instrument until now.
+  [switch]$Repro,
   [string]$Title = $(if ($env:IP_TITLE) { $env:IP_TITLE } else { "Kingquest1" }),
   [string]$Text  = "look at rock"
 )
@@ -67,6 +71,21 @@ $env:IP_MAP   = "build/input_probe.map"
 $env:IP_VOCAB = ($vocab -replace '\\','/')
 $env:IP_WATCH = "1"
 $env:IP_LOOP  = "1"
+
+if ($Repro) {
+  # ═══════════════════════════════════════════════════════════════════════════════════════
+  # ★★★★ -nothrottle: every output of this arm is a byte comparison, not a human judgement
+  # (§2U). ★★ IP_NOPOST is irrelevant here -- backspace_repro.lua never touches natkeyboard,
+  # it asserts matrix fields directly, so nothing can own the port and clear the other.
+  Remove-Item Env:IP_NOPOST -ErrorAction SilentlyContinue
+  C:\mame\mame.exe coco3 -window -nomaximize -skip_gameinfo -nothrottle `
+    -video none -sound none -seconds_to_run 120 `
+    -rompath C:/mame/roms `
+    -autoboot_script harness/tools/backspace_repro.lua -autoboot_delay 0 2>$null |
+    Select-String -Pattern 'arm|===|vocabulary|plain|backsp|FAULT|inbuf|parse |★|^\s+[0-9A-F][0-9A-F] ' |
+    ForEach-Object { $_.Line }
+  exit 0
+}
 
 if ($Post) {
   # ═══════════════════════════════════════════════════════════════════════════════════════
