@@ -53,28 +53,44 @@ local function poke(addr, data)
     for i = 1, #data do prog:write_u8(addr + i - 1, data:byte(i)) end
 end
 
--- ★★★★★ MODE AND A BLACK PALETTE ASSERTED AT TAKEOVER, not when the guest gets around to it.
--- p3b_show.lua's header records the alternative: the display showed whatever the previous mode
--- was pointing at until the guest ran, which Jay saw as garbage before the title screen.
-prog:write_u8(0xFF98, 0x80)
-prog:write_u8(0xFF99, 0x3E)
-for i = 0, 15 do prog:write_u8(0xFFB0 + i, 0x00) end
-
+-- ★★★★★ ASSERTED AT TAKEOVER, AND THIS FILE HAD IT AT SCRIPT LOAD. Written here -- before the
+-- machine has booted -- every one of these is overwritten by DECB's own initialisation. Measured
+-- on the sibling probe after a full run: **MMU slots 56-63, VOFFSET and the mode registers all
+-- DECB's, none of them mine**, so the GIME scanned DECB's memory through DECB's palette. That is
+-- the pink screen Jay saw [T-P0-081].
 -- ★★★★ THE PLANE IS MAPPED FLAT ACROSS SLOTS 4-7 and VOFFSET points at the same blocks. 32,000
 -- bytes needs four 8 KB blocks; the guest addresses them at $8000-$FCFF and the GIME scans them
 -- from block 32 upward. **Both halves have to agree or the guest draws into memory nobody is
 -- looking at** -- which is invisible, and looks exactly like a text engine that draws nothing.
-local BLK = 32
-for s = 0, 3 do prog:write_u8(0xFFA4 + s, BLK + s) end
-prog:write_u8(0xFF9D, ((BLK * 1024) >> 8) & 0xFF)
-prog:write_u8(0xFF9E, (BLK * 1024) & 0xFF)
+-- ★★★ Mode before palette [gfx.s Constraint B]; $FF98/$FF99/$FF9D/$FF9E are WRITE-ONLY, so this
+-- cannot be confirmed by reading them back -- only the MMU and the palette are readable.
+local function assert_display()
+    prog:write_u8(0xFF98, 0x80)
+    prog:write_u8(0xFF99, 0x3E)
+    for i = 0, 15 do prog:write_u8(0xFFB0 + i, 0x00) end
+    local BLK = 32
+    for s = 0, 3 do prog:write_u8(0xFFA4 + s, BLK + s) end
+    prog:write_u8(0xFF9D, ((BLK * 1024) >> 8) & 0xFF)
+    prog:write_u8(0xFF9E, (BLK * 1024) & 0xFF)
+end
 
 local booted, shown, held = false, 0, 0
 
+-- ★★★★★ READINESS COMES FROM harness/tools/decb_ready.lua, NOT FROM A FIXED DELAY. This file
+-- used `if m.time:as_double() < 0.3 then return end` -- a guess at when the machine became ready
+-- rather than a reading of whether it had -- and took DECB over mid-boot. Jay's standing rule,
+-- broken here and in six sibling files at once [T-P0-060, T-P0-081].
+local decb_ready = dofile("harness/tools/decb_ready.lua").new{ hold = 120 }
+
 _G._ts = emu.add_machine_frame_notifier(function()
     if not booted then
-        if m.time:as_double() < 0.3 then return end
+        do
+            local st = decb_ready(m, cpu, prog)
+            if st == "timeout" then m:exit(); return end
+            if st ~= "go" then return end
+        end
         booted = true
+        assert_display()                -- ★ now, with DECB's boot finished
         local blob = slurp(PROG)
         if not blob then print("★★★ no program at " .. PROG); m:exit(); return end
         poke(0x2000, blob)

@@ -62,9 +62,19 @@ prog:write_u8(0xFF9E, (BLK * 1024) & 0xFF)
 
 local booted, t0, done = false, nil, false
 
+-- ★★★★★ READINESS COMES FROM harness/tools/decb_ready.lua, NOT FROM A FIXED DELAY. This file
+-- used `if m.time:as_double() < 0.3 then return end` -- a guess at when the machine became ready
+-- rather than a reading of whether it had -- and took DECB over mid-boot. Jay's standing rule,
+-- broken here and in six sibling files at once [T-P0-060, T-P0-081].
+local decb_ready = dofile("harness/tools/decb_ready.lua").new{ hold = 0 }
+
 _G._tc = emu.add_machine_frame_notifier(function()
     if not booted then
-        if m.time:as_double() < 0.3 then return end
+        do
+            local st = decb_ready(m, cpu, prog)
+            if st == "timeout" then m:exit(); return end
+            if st ~= "go" then return end
+        end
         booted = true
         local blob = slurp(PROG)
         if not blob then print("★★★ no program at " .. PROG); m:exit(); return end
