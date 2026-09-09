@@ -27,7 +27,14 @@ IP_DONE         equ     $0021           ; probe: 1 = a line was entered and pars
 IP_NKEY         equ     $0022           ; probe: how many keys it decoded
 IP_EGON         equ     $0023           ; probe: how many words the parser found
 IP_LASTK        equ     $0024           ; probe: the last key code decoded (host diagnostic)
-IP_NRAW         equ     $0025           ; probe: how many raw scans saw ANY key down
+* ★★★★★ IP_NRAW DID NOT DISCRIMINATE AND ITS NAME LIED. It was incremented where HAL_key_scan
+* RETURNS A KEY, so zero meant "no key was decoded" and not "no key was pressed" -- and those are
+* the two causes it was added to separate [§2W]. It is now incremented on RAW PRESSURE, from the
+* row mask the scan read, before any table lookup.
+IP_NRAW         equ     $0025           ; probe: scans that saw ANY row low, BEFORE decoding
+IP_LASTM        equ     $0026           ; probe: the modifier byte from the last decode
+IP_ITER         equ     $0027           ; AC-5: timing iterations after the line, 0 = none
+IP_PHASE        equ     $0028           ; AC-5: 2 = timing started, $FF = finished
 
 IP_FONT         equ     $3400           ; 2,048 B
 IP_VARS         equ     $3C00           ; 256 B
@@ -116,6 +123,11 @@ ip_clr:         std     ,x++
                 blo     ip_clr
                 jsr     agi_pal_load
 
+* ★★★★ AC-5's TIMING ARM SKIPS THE INPUT LINE ENTIRELY. It measures HAL_key_scan, which needs no
+* line, no vocabulary and no parser -- and routing it through the full path made it depend on
+* par_parse running against an UNSTAGED vocabulary, which is a runaway rather than a measurement.
+                lda     IP_ITER
+                lbne    ip_fin
 * ── open the input line: no lead-in, row 22, column 0, 40 characters ──
                 ldd     #0
                 std     gs_leadin
@@ -140,13 +152,22 @@ ip_clr:         std     ,x++
 ip_loop:
                 jsr     HAL_key_scan
                 sta     ip_key
+                stb     IP_LASTM
+* ★★★★ RAW PRESSURE FIRST, from hal_kb_idx -- which the scan sets whenever ANY row bit was found,
+* before the table is consulted. Counting it here rather than after the decode is what makes the
+* counter answer the question it was named for.
+                pshs    a
+                lda     hal_kb_idx
+                cmpa    #$FF
+                beq     ip_noraw
+                inc     IP_NRAW
+ip_noraw:       puls    a
                 tsta
                 bne     ip_down
 * ── nothing down: clear the repeat latch and go round ──
                 clr     ip_last
                 bra     ip_next
 ip_down:
-                inc     IP_NRAW
                 cmpa    ip_last
                 beq     ip_next                 ; still the same key: not a new event
                 sta     ip_last
@@ -185,9 +206,32 @@ ip_cp:          lda     ,x+
                 decb
                 bne     ip_cp
 ip_fin:
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ AC-5's TIMING LOOP. **The input line does NOT block**, unlike a message box: the engine
+* keeps cycling while the player types, so this cost lands in the frame rather than inside a stall
+* the player is already in [§3].
+* ★★★★ TWO ARMS, differing in ONE thing: whether a key is decoded or the scan comes back empty.
+* The idle arm is what every frame pays whether or not anyone is typing; the difference is what a
+* keystroke costs on top.
+* ★★★ N iterations, no handshake inside the interval, so a fixed overhead cannot be divided into
+* the answer [P6.19's "84,626 cycles per glyph for a three-glyph message" lesson].
+                lda     IP_ITER
+                beq     ip_halt
+                sta     ip_n
+                lda     #2
+                sta     IP_PHASE
+ip_time_lp:
+                jsr     HAL_key_scan
+                dec     ip_n
+                bne     ip_time_lp
+                lda     #$FF
+                sta     IP_PHASE
+ip_halt:
                 lda     #1
                 sta     IP_DONE
 ip_end:         bra     ip_end
+
+ip_n            fcb     0
 
 ip_key          fcb     0
 ip_last         fcb     0

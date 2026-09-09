@@ -78,10 +78,60 @@ _G._ip = emu.add_machine_frame_notifier(function()
             local v = slurp(VOCAB)
             if v and #v <= 8192 then poke(IP_VOCAB_A, v) end
         end
+        -- ★★★ IP_ITER explicitly zero: a direct-page byte has no default, and a leftover here
+        -- sends the probe to its timing loop instead of its input line [see key_coverage.lua].
+        prog:write_u8(0x0027, 0)
         cpu.state["PC"].value = 0x2000
         prog:write_u8(IP_GO, 1)
         print(string.format("staged: program %d B; typing %d characters", #blob, #TEXT))
         return
+    end
+
+    -- ★★★★★ KEEP RAISING GO UNTIL THE GUEST MOVES, and this is the whole of P6.23's blockage.
+    -- input_probe.s does `clr IP_GO` in its own initialisation -- correctly, because $0020 is in
+    -- the direct page and DECB was there a moment ago [parser_probe.s's recorded lesson]. The host
+    -- set GO in the SAME frame it set the PC, so the guest erased it and spun at ip_wait forever.
+    -- ★★★★ EVERY SYMPTOM FOLLOWED FROM THAT: NRAW=0, NKEY=0, and every byte of HAL_key_scan's
+    -- state still at its assembler initialiser. **The decoder was never reached and key delivery
+    -- was never at fault** -- P6.23 read `$FF02=$EF` as "the guest is strobing" when it was a value
+    -- DECB left behind [L-97: a reading consistent with several causes is not a diagnosis].
+    -- ★★★ text_cost.lua hit this exact race in P6.19 and its fix is copied here rather than
+    -- re-derived.
+    if prog:read_u8(IP_GO) == 0 and prog:read_u8(IP_DONE) == 0 and (_G._ip_nk or 0) == 0 then
+        prog:write_u8(IP_GO, 1)
+    end
+
+    -- ★★★★★ A HOST-SIDE SCAN OF THE SAME MATRIX, ONCE, so guest and host are compared on the same
+    -- frame rather than across two runs. keymatrix_check.lua proved delivery reaches $FF00; if the
+    -- host sees a key here and the guest's NRAW stays 0, the guest is the variable [L-103].
+    if posted and (_G._ip_hs or 0) < 4 then
+        local cra = prog:read_u8(0xFF01)
+        prog:write_u8(0xFF01, (cra & 0xFC) | 0x04)
+        local crb = prog:read_u8(0xFF03)
+        prog:write_u8(0xFF03, (crb & 0xFC) | 0x04)
+        local seen = {}
+        for col = 0, 7 do
+            prog:write_u8(0xFF02, (~(1 << col)) & 0xFF)
+            local r = (~prog:read_u8(0xFF00)) & 0x7F
+            if r ~= 0 then seen[#seen + 1] = string.format("col%d=%02X", col, r) end
+        end
+        prog:write_u8(0xFF02, 0xFF)
+        if #seen > 0 then
+            _G._ip_hs = (_G._ip_hs or 0) + 1
+            -- ★★★★★ AND THE GUEST'S OWN SCAN STATE, because IP_NRAW TURNED OUT NOT TO
+            -- DISCRIMINATE: it is incremented after HAL_key_scan RETURNS A KEY, so zero is equally
+            -- consistent with "the matrix was silent" and "the matrix spoke and the decode
+            -- resolved 0". **The counter I built to separate two causes sat downstream of both**
+            -- [§2W: an instrument must be able to fail; this one could not tell the cases apart].
+            -- hal_kb_rows is the mask the guest last read, hal_kb_idx the position it resolved.
+            local function u8(n) return sym[n] and prog:read_u8(sym[n]) or -1 end
+            print(string.format("  HOST sees %s | guest NRAW=%d NKEY=%d "
+                                .. "rows=$%02X idx=$%02X mod=$%02X col=%d | CRA=$%02X CRB=$%02X",
+                                table.concat(seen, " "), prog:read_u8(IP_NRAW),
+                                prog:read_u8(IP_NKEY), u8("hal_kb_rows"), u8("hal_kb_idx"),
+                                u8("hal_kb_mod"), u8("hal_kb_col"),
+                                prog:read_u8(0xFF01), prog:read_u8(0xFF03)))
+        end
     end
 
     if not posted then

@@ -258,6 +258,33 @@ hal_kb_hi
 * nothing rather than reporting itself.
 HAL_key_scan:
         pshs    x,y,u
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE ALL-COLUMNS PRE-TEST, AND IT IS 30x ON THE COMMON PATH. Measured before it existed:
+* a full walk is **896 cycles**, and the input line polls EVERY FRAME because it does not block --
+* **6.0% of a 14,915-cycle frame at 0.894 MHz spent asking whether anybody is typing**, whether or
+* not anybody is.
+* ★★★★ Driving all eight columns low at once and reading the rows answers "is ANY key down" in a
+* few instructions, which is exactly what HAL_input_poll already does in the SHARED input.s. The
+* 56-position walk then runs only when the answer is yes.
+* ★★★ It cannot change what the routine RETURNS: if no row is low with every column selected, no
+* row can be low with one column selected, so the walk would have found nothing. **The early-out
+* is exact, not an approximation** -- the same argument as the 16-bit checksum in text.s.
+* ★★ Written here rather than by calling HAL_input_poll because that routine is SHARED and returns
+* its answer in CC.C with A clobbered; duplicating four instructions is cheaper than changing a
+* three-repo contract for a caller only AGI has [§2M.4].
+        lda     #$00
+        sta     $FF02                   ; select ALL columns
+        lda     $FF00
+        ora     #$80                    ; ignore PA7, the joystick comparator
+        coma
+        anda    #$7F
+        bne     hal_ks_go
+        lda     #$FF
+        sta     $FF02                   ; restore the idle state
+        clra
+        clrb
+        puls    x,y,u,pc                ; nothing down: A = 0, B = 0
+hal_ks_go:
         clr     hal_kb_mod
         clr     hal_kb_key
 * ★★★ RESET THE INDEX, and it is $FF rather than 0 because 0 is a legitimate index -- PA0/PB0 is
