@@ -273,8 +273,16 @@ HAL_key_scan:
 hal_ks_col:
 * ★★ Select ONE column by writing a single low bit. The idle state is all-high, restored at exit
 * by HAL_input_poll's own convention.
+* ★★★★★ START FROM $FE, NOT $FF, AND THE FIRST VERSION STARTED FROM $FF. Selecting column N means
+* driving exactly bit N LOW: $FE, $FD, $FB, $F7 ... Starting at $FF and shifting produces
+* $FF << 1 = $FE, then `ora #$01` puts the bit straight back -- **$FF for every column, which
+* selects nothing at all.** No column was ever strobed, $FF00 read all-high on every scan, and the
+* probe reported NRAW=0.
+* ★★★★ It looked exactly like a keyboard that was not connected, and the code reads plausibly:
+* the loop shifts once per column and ORs in the vacated bit, which is right for every starting
+* value except the one it used.
         ldb     hal_kb_col
-        lda     #$FF
+        lda     #$FE
 hal_ks_shift:
         tstb
         beq     hal_ks_sel

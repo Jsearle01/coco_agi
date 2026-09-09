@@ -909,15 +909,22 @@ tdc_bs:
                 bra     tdc_bs_clr
 tdc_bs_row:
 * ★★ `else if (charCurPos.row > 21)` -- STRICTLY 21, and only then does it wrap to the previous
-* row. At row 21 or above-left this does nothing at all, which is the engine's behaviour and not
-* an omission: the input line lives at rows 22-24 and cannot back up into the play area.
+* row. At row 21 or above-left the POSITION does not move: the input line lives at rows 22-24 and
+* cannot back up into the play area.
                 lda     txt_crow
                 cmpa    #22
-                blo     tdc_bs_done
+                blo     tdc_bs_clr              ; ★ fall through to the CLEAR, do not skip it
                 lda     #TXT_COLS-1
                 sta     txt_ccol
                 dec     txt_crow
 tdc_bs_clr:
+* ★★★★★ THE CLEAR IS UNCONDITIONAL, AND THE FIRST DRAFT MADE IT CONDITIONAL. text.cpp:313-322 puts
+* `clearBlock(...)` AFTER the if/else-if, not inside either arm -- so a backspace at column 0 of
+* row 0, where neither arm moves the cursor, still clears the cell it is sitting on.
+* ★★★★ The gate found it on case 0 event 0: the reference emitted a cell-clear at (0,0) and the
+* port emitted the first GLYPH instead, because get.string's opening inputEditOn sends a backspace
+* whenever a cursor character is set. **A branch that skipped the clear looked like a missing
+* event and was a missing SIDE EFFECT** -- the position was right either way.
                 jsr     txt_cellcb              ; the 'C' record, for the gate
                 tst     txt_noblit
                 bne     tdc_bs_done

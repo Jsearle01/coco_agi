@@ -145,9 +145,20 @@ MAP_DIRS_END    equ     $1C00           ;   4 types x 768 B = 3,072 B
                 ifgt    256*3-MAP_DIR_STRIDE
                 error   "MAP_DIR_STRIDE cannot hold 256 DIR entries -- an AGI resource number is a byte, so 256 x 3 = 768 is the format's ceiling and 66 of 156 v2 titles reach it"
                 endc
-* ★★ res_core.s carries RES_DIR_STRIDE and p3b_run.lua carries DIR_STRIDE, and all three must
-* agree. **That is a §2F violation this task inherited rather than introduced** -- three homes for
-* one fact -- and the resource gate is what proves they agree (1,264/1,264 across ten volumes).
+* ★★★★★ FIVE HOMES, NOT THREE, AND THIS COMMENT SAID THREE UNTIL P6.23 [AC-9]. The full set:
+*     src/engine/memmap.inc      MAP_DIR_STRIDE   (here)
+*     src/harness/res_core.s     RES_DIR_STRIDE
+*     harness/tools/res_sweep.lua   DIR_STRIDE
+*     harness/tools/p3b_run.lua     DIR_STRIDE
+*     harness/tools/vm_sweep.lua    DIR_STRIDE     <-- the fifth, found by the VM gate at 0/9
+* ★★★★ I WROTE "three" IN THE SAME TASK THAT DISCOVERED THE FOURTH AND FIFTH -- the comment was
+* stale before the commit that introduced it landed. **That is the exact failure this file's own
+* header warns about** (a number in a comment has no producer), committed by the person warning
+* about it.
+* ★★★ AC-9 searched for a SIXTH and found none: addr_census.py names RES_DIR_STRIDE only in a
+* comment explaining why `_STRIDE` suffixes are EXCLUDED as sizes rather than addresses, and
+* p3b_probe.s / p3b_boot_test.s inherit `RES_DIRS equ MAP_DIRS` rather than restating the stride.
+* ★★ The resource gate and the VM gate are what prove the five agree; nothing else does.
 * ★ Recorded as a follow-up rather than fixed here: res_core.s is harness, and the harness keeps
 * its own addresses by this file's own header.
 * ═══════════════════════════════════════════════════════════════════════════════════════════
