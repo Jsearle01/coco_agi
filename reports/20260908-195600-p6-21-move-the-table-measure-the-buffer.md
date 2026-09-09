@@ -374,4 +374,5 @@ rather than at the arithmetic.
 ---
 
 ### 11 — Commit
-See the follow-up commit.
+`6a96379` — pushed to origin/wip, carrying every file in §2 including this report. ★ Corrected by
+one follow-up commit, since a report cannot name the hash of the commit that contains it.
