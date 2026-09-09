@@ -255,4 +255,5 @@ None.
 ---
 
 ### 11 — Commit
-See the follow-up commit.
+`8df390d` — pushed to origin/wip. ★ Corrected by one follow-up commit, since a report cannot name
+the hash of the commit that contains it.
