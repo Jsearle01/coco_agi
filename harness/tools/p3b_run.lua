@@ -374,6 +374,32 @@ _G._n = emu.add_machine_frame_notifier(function()
         else
             w("program %d bytes at $%04X; MMU slots pre-set $38..$3F", #blob, LOAD)
         end
+        -- ═══════════════════════════════════════════════════════════════════════════════
+        -- ★★★★★ THE FONT, STAGED INTO P3_FONT [T-P0-084d §5C]. text.s reaches every glyph through
+        -- txt_font, which the probe points at P3_FONT -- the top of MAP_RESERVED, in slot 2,
+        -- resident in both phases and untouched by the flat window.
+        -- ★★★★★ IT IS **NOT** MAP_FONT, AND THE FIRST VERSION USED THAT AND HUNG THE RUN.
+        -- memmap.inc puts the engine's font at $E0B8; this probe orgs the PARSER at $E000, so
+        -- $E0B8 is 184 bytes into parser code. Staging 2,048 bytes there overwrote the parser and
+        -- the run reported STUCK in cycle 6 [AD-179's class: an ENGINE address reused inside a
+        -- probe whose own map already claimed it].
+        -- ★★★★ WITHOUT A FONT THE PANEL DRAWS FROM WHATEVER IS THERE -- 2 KB of arbitrary bytes
+        -- rendered as 8x8 cells. **A wrong font and a wrong blit look the same to a person**, so
+        -- staging it is a precondition of the eye gate meaning anything.
+        -- ★★★ Optional: a build with no P3_FONT symbol (the cel configuration) skips it silently.
+        local FONT = os.getenv("P3B_FONT") or "build/text_font.bin"
+        if SYM.P3_FONT then
+            local fd = slurp(FONT)
+            if not fd then
+                w("★★★ no font at %s -- the text gate needs one [P3B_FONT]", FONT)
+                m:exit(); return
+            end
+            if #fd ~= 2048 then
+                w("★★★ font is %d bytes, expected 2048", #fd); m:exit(); return
+            end
+            for i = 1, #fd do prog:write_u8(SYM.P3_FONT + i - 1, fd:byte(i)) end
+            w("font %d bytes -> P3_FONT $%04X", #fd, SYM.P3_FONT)
+        end
         prog:write_u8(GO, 1)
         cpu.state["PC"].value = LOAD
         state = "boot"; return

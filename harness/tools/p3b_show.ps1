@@ -28,6 +28,9 @@ param(
   # duplicating the build/stage into a second script is how the two would drift into testing
   # different programs. ★★ Headless also gets -nothrottle (§2U); the eye gate never does (§2U.2).
   [switch]$Headless,
+  # ★★ The text-gate configuration and its fault arm; see the flag block below.
+  [switch]$Text,
+  [switch]$Fault,
   [double]$Hold   = 3.0
 )
 $ErrorActionPreference = "Stop"
@@ -40,6 +43,14 @@ $LW    = "C:\WIN_LWTools\lwasm.exe"
 # ★★ THE FLAG SET IS gates.manifest's p3b ROW, NOT A GUESS. PLANE_WIN_MMU comes from the SOURCE
 # (p3b_probe.s:65) and passing it here is a multiply-defined error [gates.manifest].
 $FLAGS = @("-DHAL_GFX_MODE_SERVICE","-DHAL_SYS_FAST_CLOCK","-DPLANE_WINDOWED","-DPRI_PACKED")
+# ★★★★★ -Text builds the TEXT-GATE configuration [T-P0-084d]: cel/composite stripped so
+# MAP_RESERVED can hold src/engine/text.s, and the nine text opcodes wired.
+# ★★★★ -Fault adds -DTEXT_MODELLED, which aliases all nine handler labels back to
+# vm_op_modelled. **That is AC-2's validator and it is a BUILD, not a reconstruction** -- the
+# table entries resolve to the same address the pre-wiring probe used, so a black panel here is
+# the behaviour that existed before the wiring rather than an imitation of it [L-113].
+if ($Text)  { $FLAGS += "-DP3B_NO_CEL" }
+if ($Fault) { $FLAGS += @("-DP3B_NO_CEL","-DTEXT_MODELLED") }
 & $LW --format=raw --output=build/p3b_probe_pk_fresh.bin --map=build/p3b_probe_pk.map -I. @FLAGS src/harness/p3b_probe.s
 if ($LASTEXITCODE -ne 0) { throw "p3b assemble failed" }
 "p3b_probe: $((Get-Item build\p3b_probe_pk_fresh.bin).Length) bytes"
@@ -51,6 +62,9 @@ if ($LASTEXITCODE -ne 0) { throw "p3b assemble failed" }
 New-Item -ItemType Directory -Force build\p3b | Out-Null
 $WANT = @("res_volbase","res_slicebase","res_curblk","vm_quit","vm_badop","vm_cycle","vm_tdelay",
           "res_err","ph_blk_fb","ph_blk_pri","par_vocab","P3_INBUF","P3_FEED","P3_VOCAB_BAD","P3_VOCAB","P3_VOCAB_END","P3_CODE_END","P3_PARSER_BASE","P3_PARSER_TOTAL")
+# ★★★ MAP_FONT only exists in the text configuration, and vm_symbols.py fails on a missing name,
+# so it is appended rather than added to the list every build shares.
+if ($Text -or $Fault) { $WANT += "P3_FONT" }
 python harness\tools\vm_symbols.py build\p3b_probe_pk.map --out build\p3b\symbols.txt --want @WANT
 if ($LASTEXITCODE -ne 0) { throw "symbols missing" }
 

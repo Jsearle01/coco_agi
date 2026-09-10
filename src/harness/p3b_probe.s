@@ -195,6 +195,19 @@ PIC_DATA        equ     MAP_ARENA_WIN
 * which is included below, and lwasm needs a condition to be constant on pass 1.
                 ifdef   P3B_NO_CEL
 P3_PBUF         equ     MAP_INPUT
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE FONT IS **NOT** AT MAP_FONT IN THIS PROBE, AND THE FIRST ATTEMPT PUT IT THERE.
+* memmap.inc puts the authored font at MAP_FONT ($E0B8) in slot 7 -- correct for the ENGINE. This
+* probe orgs the PARSER at $E000 (slot 5 is its priority slice, so the engine's vocabulary window
+* is unavailable here), so $E0B8 is 184 bytes INTO parser code and the vocabulary follows at
+* $E3BA. **Staging 2,048 bytes of font there overwrote the parser and the run hung in cycle 6.**
+* ★★★★ Same class as CP_CEL [AD-179]: an ENGINE address reused by a probe whose own map already
+* claimed it. memmap.inc's header says the harness keeps its own addresses, and twice now the
+* thing that bit was taking an engine constant at face value inside a probe.
+* ★★★ $5800 = MAP_RESERVED_END - 2048, the top of the reservation, above the code (which ends at
+* $5597). It is in slot 2 -- engine code, never remapped -- so it is resident in both phases and
+* the flat window (slots 4-6) does not disturb it, which is what a per-glyph fetch needs.
+P3_FONT         equ     MAP_RESERVED_END-2048
                 endc
 
                 org     MAP_CODE
@@ -348,7 +361,7 @@ p3_vt_done:     std     P3_VOCAB_BAD
                 ifdef   P3B_NO_CEL
                 ldx     #P3_PBUF
                 stx     txt_pbuf
-                ldx     #MAP_FONT
+                ldx     #P3_FONT
                 stx     txt_font
                 ldx     #VM_VARS
                 stx     txt_vars
@@ -1147,6 +1160,12 @@ CP_CEL_END      equ     CP_CEL+4784
 * text.s and lwasm needs pass-1 constants. §2V.2: "a 6809 array does not grow -- state the maximum."
                 ifgt    P3_PBUF+TXT_PBUF_MAX-MAP_INPUT_END
                 error   "the text substitution buffer overruns MAP_INPUT ($1C00-$2000)"
+                endc
+* ★★★★★ AND THE ONE THAT WOULD HAVE CAUGHT THE FONT COLLISION HAD IT EXISTED. The font sits at the
+* top of MAP_RESERVED and the code grows up toward it; without this, code reaching $5800 would
+* overwrite glyphs and the panel would render garbage that looks like a blitter defect.
+                ifgt    P3_CODE_END-P3_FONT
+                error   "P3b code has grown into the font at P3_FONT (MAP_RESERVED_END-2048) -- shrink the code or move the font, do not let them overlap"
                 endc
                 endc
 
