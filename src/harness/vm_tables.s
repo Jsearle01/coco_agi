@@ -236,19 +236,19 @@ VMOP_TAB:
                 fdb     vm_op_modelled          ; 62 load.sound(n)  [modelled]
                 fdb     vm_op_modelled          ; 63 sound(nn)  [modelled]
                 fdb     vm_op_modelled          ; 64 stop.sound()  [modelled]
-                fdb     vm_op_modelled          ; 65 print(s)  [modelled]
-                fdb     vm_op_modelled          ; 66 print.v(v)  [modelled]
-                fdb     vm_op_modelled          ; 67 display(nns)  [modelled]
-                fdb     vm_op_modelled          ; 68 display.v(vvv)  [modelled]
-                fdb     vm_op_modelled          ; 69 clear.lines(nns)  [modelled]
+                fdb     vmop_print              ; 65 print(s)
+                fdb     vmop_print_f            ; 66 print.v(v)
+                fdb     vmop_display            ; 67 display(nns)
+                fdb     vmop_display_f          ; 68 display.v(vvv)
+                fdb     vmop_clear_lines        ; 69 clear.lines(nns)
                 fdb     vmop_text_screen        ; 6A text.screen()
                 fdb     vmop_graphics           ; 6B graphics()
-                fdb     vm_op_modelled          ; 6C set.cursor.char(s)  [modelled]
-                fdb     vm_op_modelled          ; 6D set.text.attribute(nn)  [modelled]
+                fdb     vmop_set_cursor_char    ; 6C set.cursor.char(s)
+                fdb     vmop_set_text_attribute ; 6D set.text.attribute(nn)
                 fdb     vm_op_modelled          ; 6E shake.screen(n)  [modelled]
                 fdb     vm_op_modelled          ; 6F configure.screen(nnn)  [modelled]
-                fdb     vm_op_modelled          ; 70 status.line.on()  [modelled]
-                fdb     vm_op_modelled          ; 71 status.line.off()  [modelled]
+                fdb     vmop_status_line_on     ; 70 status.line.on()
+                fdb     vmop_status_line_off    ; 71 status.line.off()
                 fdb     vmop_set_string         ; 72 set.string(ns)
                 fdb     vm_op_unimpl            ; 73 get.string(nsnnn)
                 fdb     vm_op_unimpl            ; 74 word.to.string(nn)

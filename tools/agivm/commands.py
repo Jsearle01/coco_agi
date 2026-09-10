@@ -875,6 +875,84 @@ def cmdGraphics(vm, p):
 COMMAND_IMPLS = {}
 
 
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ THE NINE TEXT OPCODES [T-P0-084d §5B]. Until this task all nine were declared no-ops on
+# BOTH legs -- the assembly reached vm_op_modelled and the list below named them -- so AD-156's
+# prediction about the KQ1 scroll panel had never been testable.
+#
+# ★★★★ §2V: THESE MOVE IN THE SAME COMMIT AS src/harness/vm_text_ops.s. A reference that still
+# no-ops while the 6809 renders is a split state, and the nine-title state diff CANNOT SEE IT --
+# rendering touches no variable, flag or object [idiom 19j]. The eye gate is the only instrument
+# that distinguishes the two, which is why it is this task's AC-1.
+#
+# ★★★ print does NOT BLOCK, on either leg. The engine's print waits for a keypress before closing
+# the window; the port's probe has no key path wired in this configuration, so a blocking print
+# would hang the cycle loop. **The rendering is full and the wait is omitted, deliberately and on
+# both legs**, so the two remain the same program.
+
+@_impl()
+def cmdPrint(vm, p):
+    """op_cmd.cpp cmdPrint -- render the message box. Does not wait for a key; see above."""
+    text = vm.get_message(vm.state.cur_logic_nr, p[0] - 1)
+    vm.text_render("cmdPrint", lambda r: r.draw_message_box(text))
+
+
+@_impl()
+def cmdPrintF(vm, p):
+    """print.v -- the message number comes from a variable."""
+    text = vm.get_message(vm.state.cur_logic_nr, vm.get_var(p[0]) - 1)
+    vm.text_render("cmdPrintF", lambda r: r.draw_message_box(text))
+
+
+# ★★ White on black is AGI's display default and is passed explicitly rather than inherited:
+# an attribute left at 0/0 draws black on black, which is a silence the port already paid for
+# once [AD-160, get.string's twelve invisible glyphs].
+@_impl()
+def cmdDisplay(vm, p):
+    """op_cmd.cpp cmdDisplay -- row, column, message number."""
+    text = vm.get_message(vm.state.cur_logic_nr, p[2] - 1)
+    vm.text_render("cmdDisplay", lambda r: r._display_text(text, p[0], p[1], 15, 0))
+
+
+@_impl()
+def cmdDisplayF(vm, p):
+    """display.v -- all three operands are variable-indexed."""
+    row, col, nr = vm.get_var(p[0]), vm.get_var(p[1]), vm.get_var(p[2])
+    text = vm.get_message(vm.state.cur_logic_nr, nr - 1)
+    vm.text_render("cmdDisplayF", lambda r: r._display_text(text, row, col, 15, 0))
+
+
+# ── the five secondary opcodes ───────────────────────────────────────────────────────────
+# ★★★ COUNTED, NOT RENDERED, AND THE 6809 SIDE MATCHES. vm_text_ops.s gives these five bare `rts`
+# bodies because none is needed to reach the scroll panel; counting them here rather than
+# rendering keeps the two legs the same program. ★★ They are NOT in the modelled list any more --
+# a modelled call and a wired call that happens to do little are different claims, and AC-4 asks
+# which one each opcode is.
+@_impl()
+def cmdClearLines(vm, p):
+    vm.text_calls["cmdClearLines"] = vm.text_calls.get("cmdClearLines", 0) + 1
+
+
+@_impl()
+def cmdSetCursorChar(vm, p):
+    vm.text_calls["cmdSetCursorChar"] = vm.text_calls.get("cmdSetCursorChar", 0) + 1
+
+
+@_impl()
+def cmdSetTextAttribute(vm, p):
+    vm.text_calls["cmdSetTextAttribute"] = vm.text_calls.get("cmdSetTextAttribute", 0) + 1
+
+
+@_impl()
+def cmdStatusLineOn(vm, p):
+    vm.text_calls["cmdStatusLineOn"] = vm.text_calls.get("cmdStatusLineOn", 0) + 1
+
+
+@_impl()
+def cmdStatusLineOff(vm, p):
+    vm.text_calls["cmdStatusLineOff"] = vm.text_calls.get("cmdStatusLineOff", 0) + 1
+
+
 def _register():
     g = globals()
     for name, obj in list(g.items()):
@@ -889,10 +967,10 @@ def _register():
         "cmdAddToPic", "cmdAddToPicF", "cmdSetPriBase", "cmdShakeScreen",
         "cmdConfigureScreen", "cmdSetUpperLeft", "cmdClearTextRect",
         "cmdSetSimple",
-        # text
-        "cmdPrint", "cmdPrintF", "cmdDisplay", "cmdDisplayF", "cmdClearLines",
-        "cmdSetCursorChar", "cmdSetTextAttribute", "cmdStatusLineOn",
-        "cmdStatusLineOff", "cmdPrintAt", "cmdPrintAtV", "cmdCloseWindow",
+        # text -- ★★★★ the NINE wired in T-P0-084d are no longer here; they are @_impl above.
+        # cmdPrintAt / cmdPrintAtV / cmdCloseWindow stay modelled: they were not in this task's
+        # nine and wiring them unasked would move the reference without a gate behind it.
+        "cmdPrintAt", "cmdPrintAtV", "cmdCloseWindow",
         "cmdOpenDialogue", "cmdCloseDialogue", "cmdStatus", "cmdShowObj",
         "cmdShowObjV", "cmdShowMem", "cmdVersion", "cmdEchoLine", "cmdCancelLine",
         # sound

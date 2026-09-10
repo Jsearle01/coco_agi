@@ -545,6 +545,13 @@ vp_feed_nonf:
 * gate would be a claim about a different file. The wiring is vm_tests.s's vmtest_said and
 * vp_feed above, both of which are new code in the HARNESS.
                 include "src/engine/parser.s"
+* ★★★★ REQUIRED, NOT OPTIONAL, AND IT EMITS NOTHING HERE [AD-176]. gen_vm_tables.py binds VMOP_TAB
+* by a GLOBAL scan for handler labels, so once src/harness/vm_text_ops.s defines vmop_print the
+* generated table names it in EVERY build -- and a probe that omits the file fails to assemble
+* with `Undefined symbol vmop_print`. ★★★ This probe does not link the text engine, so it takes
+* the file's modelled branch: nine `equ`s to vm_op_modelled, zero bytes emitted, and vm_probe.bin
+* is byte-identical to what it was before the wiring existed.
+                include "src/harness/vm_text_ops.s"
 
                 include "src/hal/coco3-dsk/hal_globals.s"
                 include "src/hal/coco3-dsk/sys.s"

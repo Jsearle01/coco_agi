@@ -185,6 +185,18 @@ CP_CEL          equ     MAP_RESERVED    ; decoded cel staging, 4,784 B corpus ma
 * and this is the AC-2 it was kept for.
 PIC_DATA        equ     MAP_ARENA_WIN
 
+* ★★★★ THE SUBSTITUTION BUFFER GOES IN MAP_INPUT, AND THE REGION IS FREE FOR THE SAME REASON
+* MAP_RESERVED IS: this probe has no input subsystem. memmap.inc gives MAP_INPUT $1C00-$2000 to
+* get.string and the key decoder, neither of which is linked here.
+* ★★★ It must be resident in EVERY phase, because tx_emit blits from it while slots 4-6 hold the
+* framebuffer -- $1C00 is slot 0, which nothing remaps. That is the property that makes the flat
+* window safe [vm_text_ops.s, hazard 1].
+* ★ The size assertion is at the FOOT of this file, not here: TXT_PBUF_MAX is defined by text.s,
+* which is included below, and lwasm needs a condition to be constant on pass 1.
+                ifdef   P3B_NO_CEL
+P3_PBUF         equ     MAP_INPUT
+                endc
+
                 org     MAP_CODE
 
 p3b_entry:
@@ -326,6 +338,33 @@ p3_vt_done:     std     P3_VOCAB_BAD
                 jsr     p3_black_visible
 * ★★★★★ NOW the palette, with the plane already black beneath it (see the block above).
                 jsr     agi_pal_load
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★ THE TEXT ENGINE'S POINTERS, SET ONCE AT INIT [T-P0-084d §5B]. text.s takes every base as a
+* POINTER rather than inlining an address, so the probe says where things are and the engine does
+* not need to know the map. ★★★ A pointer left at zero is not inert here: txt_printf would
+* substitute from address 0, which is the HAL's direct page -- the same null-base read that walked
+* the seed stack when par_vocab was zeroed [p3b_probe.s's CP_CEL collision]. They are set together
+* so none can be forgotten individually.
+                ifdef   P3B_NO_CEL
+                ldx     #P3_PBUF
+                stx     txt_pbuf
+                ldx     #MAP_FONT
+                stx     txt_font
+                ldx     #VM_VARS
+                stx     txt_vars
+* ★★ The %-code bases this probe does NOT supply are left zero DELIBERATELY: logic 0's table
+* (%g), the object names (%0), the parsed words (%w) and the string table (%s) need resolving
+* work the title screen does not exercise. **If a title-screen message uses one, the eye gate is
+* what will show it** -- and that is the right instrument for a substitution that renders wrong.
+                ldd     #0
+                std     txt_l0base
+                std     txt_curbase
+                std     txt_objbase
+                std     txt_wordbase
+                std     txt_strbase
+                clr     txt_l0n
+                clr     txt_curn
+                endc
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ CLOCK CALIBRATION — A GUARD, NOT A DECORATION, AND ITS ABSENCE COST THIS TASK ITS
@@ -937,6 +976,19 @@ phase_draw_enter:
 * P6.1 allocated 12,288 B for engine code against vm_probe.bin's MEASURED 9,089 -- but that was
 * the VM plus the HAL only, and P6.1's §7 flagged it as "an allocation to be checked, not a
 * measurement". This is the check, and it fires at assembly time.
+* ★★★ The text engine and the nine command handlers [T-P0-084d §5B]. Only in the stripped
+* configuration: MAP_RESERVED is where text.s lives, and CP_CEL is what used to be there.
+                ifdef   P3B_NO_CEL
+                include "src/engine/text.s"
+* ★★ TEXT_WIRED says the engine is LINKED AND CALLED. -DTEXT_MODELLED links it and declines to
+* call it, which is AC-2's fault arm; the cel configuration does not link it at all.
+                ifndef  TEXT_MODELLED
+TEXT_WIRED      equ     1
+                endc
+                endc
+* ★★★ UNCONDITIONAL, because the generated table names the nine labels in every build [AD-176].
+* Under anything but TEXT_WIRED this emits nothing but nine `equ`s to vm_op_modelled.
+                include "src/harness/vm_text_ops.s"
 P3_CODE_END     equ     *
 * ★★★★★ -DP3B_ACCEPT_OVERRUN NOW SUPPRESSES THIS GUARD TOO, FOR THE SAME REASON IT SUPPRESSES THE
 * DRAW-PHASE ONE BELOW: **you cannot measure an overrun with a build that refuses to produce a
@@ -1089,6 +1141,12 @@ P3_VOCAB_END    equ     $FF00           ; ★ $FF00-$FFFF is the I/O page and is
 CP_CEL_END      equ     CP_CEL+4784
                 ifgt    CP_CEL_END-P3_PARSER_BASE
                 error   "the decoded-cel buffer runs into the parser -- CP_CEL is 4,784 B from MAP_RESERVED"
+                endc
+                else
+* ★★ The substitution buffer against MAP_INPUT, asserted HERE because TXT_PBUF_MAX comes from
+* text.s and lwasm needs pass-1 constants. §2V.2: "a 6809 array does not grow -- state the maximum."
+                ifgt    P3_PBUF+TXT_PBUF_MAX-MAP_INPUT_END
+                error   "the text substitution buffer overruns MAP_INPUT ($1C00-$2000)"
                 endc
                 endc
 

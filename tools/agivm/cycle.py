@@ -18,6 +18,7 @@ The state diff is the instrument that says how far that gets, and it is not fudg
 import sys
 
 from . import blit, commands, motion, objects, tests
+from . import text as text_mod
 from .dispatch import DispatchTable, OpcodeError, UNIMPLEMENTED
 from .optable import (VM_VAR_CURRENT_ROOM, VM_VAR_PREVIOUS_ROOM,
                       VM_VAR_BORDER_TOUCH_OBJECT, VM_VAR_BORDER_CODE,
@@ -113,6 +114,17 @@ class Vm:
         self.modelled_calls = {}
         self.motion_modes_seen = {}
         self.instruction_counter = 0
+        # ★★★★★ T-P0-084d: THE TEXT RENDERER, INSTANTIATED HERE FOR THE FIRST TIME. text.py has
+        # been gated since AD-155 (9/9 titles, 4,594 rectangles, 293,648 glyphs) and was driven
+        # ONLY by its own sweep -- nothing in this file had ever constructed one, so `display` and
+        # `print` were declared no-ops on both legs. **§2V: the 6809 handlers and this move in one
+        # commit**, because a reference that still no-ops while the port renders is a split state
+        # the state diff cannot see [idiom 19j].
+        # ★★★ The printf state is rebound per call, not here: cur_logic_nr changes with every
+        # call/return, and a state captured at construction would substitute %m against whichever
+        # logic happened to be resident when the Vm was built.
+        self._text = text_mod.TextRenderer()
+        self.text_calls = {}         # opcode name -> count, for the wiring's own coverage number
 
         self.table = DispatchTable(version, platform, game_id, features)
         self.table.bind(commands.COMMAND_IMPLS, tests.TEST_IMPLS)
@@ -222,6 +234,33 @@ class Vm:
         if lg is None or text_nr < 0 or text_nr >= len(lg.messages):
             return ""
         return lg.messages[text_nr]
+
+    def text_state(self):
+        """The PrintfState for the CURRENT logic. [T-P0-084d §5B]
+
+        ★★★ Rebuilt per call rather than cached: cur_logic_nr changes on every call and return,
+        and %m resolves against the resident logic's own table -- a state captured once would
+        substitute against whichever logic happened to be loaded first.
+        ★★ logic0_texts is the %g source and is a different table from %m's; both are read
+        through the cache rather than copied, which is the shape text.py's header predicts for
+        the 6809 (a resource in banked memory, not a dict).
+        """
+        lg0 = self._logic_cache.get(0)
+        cur = self._logic_cache.get(self.state.cur_logic_nr)
+        return text_mod.PrintfState(
+            get_var=self.get_var,
+            logic0_texts=(lg0.messages if lg0 is not None else []),
+            cur_logic_nr=self.state.cur_logic_nr,
+            cur_logic_texts=(cur.messages if cur is not None else []),
+            get_string=lambda i: self.state.strings[i] if i < len(self.state.strings) else "",
+        )
+
+    def text_render(self, name, fn):
+        """Run one text opcode against the renderer, counting it. ★ The count is this wiring's
+        own coverage number -- 'display fired N times' is the first thing a black panel needs."""
+        self.text_calls[name] = self.text_calls.get(name, 0) + 1
+        self._text.printf_state = self.text_state()
+        return fn(self._text)
 
     def load_view(self, view_nr):
         """Decode a VIEW resource, cached. ★ P4.1 could not do this and declared the gap;
