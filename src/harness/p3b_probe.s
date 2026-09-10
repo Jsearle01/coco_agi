@@ -918,9 +918,30 @@ P3_CODE_END     equ     *
 * lwasm had written no .map, because it errored. The advice pointed at a file the failure prevents
 * from existing. ★★ The guard still fires by default and still fails the build; the escape exists
 * only so the SIZE can be read, which is the first thing anyone needs when it goes off.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE SPAN IS MAP_RESERVED_END, NOT MAP_CODE_END [T-P0-084c ruling 2]. The probe may run
+* from MAP_CODE through the parser/sound reservation, giving 16,384 B instead of 13,056.
+* memmap.inc is unchanged and no boundary moves: this is the probe declaring how far IT reaches,
+* which is memmap.inc's own header ("the harness keeps its own addresses").
                 ifndef  P3B_ACCEPT_OVERRUN
-                ifgt    P3_CODE_END-MAP_CODE_END
-                error   "P3b code overruns the map's code region -- see the .map for the size"
+                ifgt    P3_CODE_END-MAP_RESERVED_END
+                error   "P3b code overruns MAP_RESERVED_END -- see the .map for the size"
+                endc
+* ★★★★★ AND THE ASSERTION THAT MAKES THE SPAN HONEST, BECAUSE MAP_RESERVED IS NOT EMPTY HERE.
+* `CP_CEL equ MAP_RESERVED` (line 174): the decoded-cel staging buffer starts at $5300 and is
+* 4,784 bytes. **Code growing past $5300 does not overrun a free region -- it overwrites the cel
+* buffer**, and the span assertion above cannot see that because both live inside $2000-$6000.
+* ★★★★ THE COLLISION WOULD BE SILENT AND WORSE THAN SILENT: room 83 stages ZERO sprites, so
+* nothing decodes a cel and the p3b gate's 160 cycles would pass with the buffer already
+* overwritten. Room 1 has four, and the first decode would write cel pixels over executing code.
+* **A gate that is green because the corpus never exercises the broken path is the failure this
+* project has now named twice** [L-86, and this file's own par_vocab/CP_CEL collision at line 980,
+* which was found by the eye gate a room away from its cause].
+* ★★★ P6.28's placement measurement was taken for text_vm_probe.s, which DROPS view_cel.s and
+* composite.s -- there MAP_RESERVED genuinely is free. §2 of T-P0-084c keeps both linked here, so
+* the precondition that made the region free does not hold for this probe.
+                ifgt    P3_CODE_END-CP_CEL
+                error   "P3b code has grown into the decoded-cel buffer at CP_CEL ($5300, 4,784 B) -- the span reaches MAP_RESERVED_END but CP_CEL is already there; move CP_CEL or shrink the code, do not let them overlap"
                 endc
                 endc
 
