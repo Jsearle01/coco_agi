@@ -255,6 +255,21 @@ ro_room:
                 std     ,x
                 inc     res_depth
                 clr     res_err
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ CARRY = "THIS WAS A CACHE HIT", AND IT IS THE WHOLE OF ROUTE (b)'s SIGNALLING [T-P0-084h].
+* res_open's CONTRACT IS UNCHANGED -- it still returns Sierra's raw bytes to every caller, so the
+* resource gate's 1,264/1,264 against tools/volread/ is untouched. What is added is one bit telling
+* the caller whether it received a FRESH fetch or a cached one, which is what the oracle's own
+* guard tests: `if (~dirLogic.flags & RES_LOADED)` [agi.cpp:489 at 9d9b9e93].
+* ★★★★ A FLAG, NOT A BYTE, BECAUSE THE BYTE DOES NOT FIT. A memory flag is ~17 bytes across the
+* two files and the cel configuration has 15 to spend; this is 2 here and 5 at the bind.
+* ★★★ AND IT IS THIS FILE'S EXISTING CONVENTION, not a new one: res_cache_find already returns
+* hit/miss in Z (`orcc #$04` at rcf_hit). Carry is used here because the caller's `lda res_err`
+* between the return and the test destroys Z and N -- **`lda` does not touch C** -- so Z would have
+* been read after it had already been overwritten.
+* ★★ The MISS path needs no counterpart: `clr res_err` clears C, so it returns C=0 for free.
+                orcc    #$01
+* ═══════════════════════════════════════════════════════════════════════════════════════════
                 rts
 
 ro_fetch:

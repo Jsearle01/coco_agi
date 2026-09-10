@@ -48,7 +48,23 @@ vm	src/harness/vm_probe.s	build/vm_probe.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FA
 # [P4.6], which is the ablation class, not PIC_NOCOUNT's 2.16x "your figure is not comparable"
 # class. ★★ A P6.10 figure quoted from this row therefore carries counters, and carries a stated
 # 1.4-3.4% instrumentation share rather than a silent one.
-vm_timed	src/harness/vm_probe.s	build/vm_probe.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK	VM_TIMED=N free-run; P6.10: 67.802 ms/cycle room 83 (0 obj), 113.495 room 1 (4 obj), counters IN	purpose=timing
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ THIS ROW'S FIGURES ARE RETIRED AT T-P0-084h, AND THE PRODUCER IS WHY.
+#     retired:  67.802 ms/cycle room 83 (0 obj), 113.495 room 1 (4 obj)   [P6.10]
+#     producer: vm_probe.bin 9,660 B EC8991A5...  ->  9,667 B 771F147D...
+# ★★★★ Route (b) put the LOGIC decode at vm_bind_logic in vm_run.s, which vm_probe.s links -- so
+# the binary moved by 7 bytes AND the VM now does work it did not do before: a fresh LOGIC bind
+# decrypts its message strings. **The old medians describe a VM that never decoded.** Leaving them
+# here live would be AD-96 exactly -- a figure whose producer has changed -- and this arc has
+# already walked into that once.
+# ★★★ NOT RE-MEASURED, AND SAYING SO RATHER THAN GUESSING. A VM_TIMED free-run publishes no
+# per-cycle trace, so vm_run.ps1's diff reports FAIL on it; reading a median needs a driver path
+# T-P0-084h did not work out. **A retired figure with a named retiring task beats a fresh figure
+# nobody can reproduce** [L-45's shape applied to a measurement].
+# ★★ The `vm` row above is unaffected in MEANING: it is purpose=correctness and survives on its 9/9
+# state diff, which was re-run on the new binary and is byte-identical on every compared cycle for
+# all nine titles.
+vm_timed	src/harness/vm_probe.s	build/vm_probe.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK	VM_TIMED=N free-run; binary 771F147D 9,667 B; P6.10's medians RETIRED at T-P0-084h -- producer moved, not re-measured	purpose=timing
 # ★★★★★ T-P0-054 AC-3: p3b WAS THE ONE PROBE THIS FILE DID NOT LIST, and it is the integration
 # probe -- 48,537 bytes of source and sixteen p3_* routines built by no gate at all. Every defect
 # of the last four tasks lived here (p3_clear_planes' 2-byte clear, the shadow buffer, the byte in
@@ -72,7 +88,19 @@ vm_timed	src/harness/vm_probe.s	build/vm_probe.bin	-DHAL_GFX_MODE_SERVICE -DHAL_
 # is the same inert-flag confusion that made three of P3b.15/16's results meaningless [AD-119].
 # ★★ Contrast the pic_win row above, which passes -DPLANE_WINDOWED and NOT -DPLANE_WIN_MMU and
 # therefore genuinely does NOT window: the same two symbols mean opposite things in the two files.
-p3b	src/harness/p3b_probe.s	build/p3b_probe_pk_fresh.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED	integration probe -- PLANE_WIN_MMU comes from the SOURCE (line 65), never the command line	purpose=timing
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ THIS ROW'S BINARY IS RE-BASELINED AT T-P0-084h, AND THE OLD IDENTITY IS RETIRED, NOT LOST.
+#     retired:  F51FF8482D0B07E49F46B18612D20B06  13,925 B   (valid to P6.28g)
+#     current:  58AD3C27164BD63FDE17E18041160B28  13,918 B
+# ★★★★ WHY IT MOVED: the LOGIC decode landed at vm_bind_logic [vm_run.s], and p3b links it. It got
+# 7 bytes SMALLER on balance -- the decode costs 7 and T-P0-084g/h removed p3_zero_timers, 14 bytes
+# of dead code this file's own header had described as dead since P3b.1.
+# ★★★ A reader who meets F51FF848 in P6.28b-g is looking at a RETIRED baseline, not a broken build.
+# That distinction is why the old value stays written down [§2F: one home, including for the thing
+# that is no longer true].
+# ★★ THE FLAGS AND THE PURPOSE ARE UNCHANGED, so this is NOT AD-96's shape: the row still builds
+# the same program under the same flags, and it carries no median in column 5 to invalidate.
+p3b	src/harness/p3b_probe.s	build/p3b_probe_pk_fresh.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED	integration probe -- PLANE_WIN_MMU comes from the SOURCE (line 65), never the command line; binary 58AD3C27 13,918 B, re-baselined T-P0-084h	purpose=timing
 # ═══════════════════════════════════════════════════════════════════════════════════════════
 # ★★★★★ p3b_text -- THE SAME SOURCE, A SECOND CONFIGURATION [ruling C, T-P0-084f].
 #
@@ -86,12 +114,14 @@ p3b	src/harness/p3b_probe.s	build/p3b_probe_pk_fresh.bin	-DHAL_GFX_MODE_SERVICE 
 #
 # ★★★★ WHAT THIS ROW BUILDS: -DP3B_NO_CEL strips view_cel.s and composite.s [ruling A, AD-180], so
 # MAP_RESERVED is free for src/engine/text.s and the nine text opcodes.
-# ★★★★★ IT DOES NOT YET RENDER READABLE TEXT, AND THE ROW SAYS SO RATHER THAN IMPLYING OTHERWISE.
-# res_decode is still absent from res_open's miss path -- the 3-byte call does not fit the `p3b`
-# row's cel configuration and the fix is held pending a ruling [AD-188]. Until it lands this row
-# gates HEALTH (no stall, err 0) over a build whose messages are ciphertext. **The row is right and
-# the binary is temporarily wrong**; the eye gate is what knows the difference, and it has been run
-# both ways [AD-187: readable with the fix, garbage without].
+# ★★★★★ AND IT RENDERS READABLE TEXT AS OF T-P0-084h. The LOGIC decode is at vm_bind_logic on a
+# fresh open -- where the oracle puts it [agi.cpp:489-500, logic.cpp:56 at 9d9b9e93] -- so a
+# LOGIC's messages reach the renderer as text rather than ciphertext. Jay, on the eye gate: "the
+# text appreaed was readable and stayed in the sroll box" [AD-187]; the fault arm, all nine opcodes
+# aliased back to vm_op_modelled, showed a black panel [AD-185].
+# ★★★ Held OUT of run_gates.sh for two tasks, deliberately: until the decode landed this row would
+# have gated HEALTH over a ciphertext build -- green for the wrong reason. It is in the suite now.
+# ★★ binary FA7F2FB9, 14,582 B.
 # ★★★ Room 83 stages ZERO sprites, so nothing is lost by stripping the compositing path HERE --
 # and that is scoped to this row, not a claim about the engine.
 # ★★ purpose=correctness: this row is gated on health and on what a person sees, not on a clock.

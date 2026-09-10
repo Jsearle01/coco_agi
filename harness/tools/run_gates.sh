@@ -188,9 +188,27 @@ if [ "$WHICH" = "p3b" ] || [ "$WHICH" = "all" ]; then
     echo
 fi
 
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ p3b_text: THE CORRECTNESS CONFIGURATION OF THE SAME PROBE [ruling C; run from T-P0-084h].
+# ★★★★ TWO ROWS, NOT ONE CHANGED ROW. `p3b` is purpose=timing and keeps its flags; this row strips
+# cel/composite so MAP_RESERVED can hold the text engine and wires the nine text opcodes.
+# **Both must be green; neither substitutes for the other.**
+# ★★★ HELD OUT OF THE SUITE FOR TWO TASKS, DELIBERATELY: until the decode landed this row would
+# have gated HEALTH over a build whose messages were ciphertext -- green for the wrong reason. It
+# runs now because the thing it gates is finally correct [AD-187].
+# ★★ Same driver and the same health criteria as `p3b`: a stall, a non-zero err or a missing
+# completion line fails it. It differs only in the flag set, which is what this suite makes visible.
+if [ "$WHICH" = "p3b_text" ] || [ "$WHICH" = "all" ]; then
+    echo "═══ p3b_text (correctness probe: text opcodes, no cel, ${P3B_CYCLES:-120} cycles) ═══"
+    powershell -NoProfile -ExecutionPolicy Bypass -File harness/tools/p3b_show.ps1 \
+        -Title "${P3B_TITLE:-Kingquest1}" -Cycles "${P3B_CYCLES:-120}" -Text -Headless \
+        || note_fail p3b_text
+    echo
+fi
+
 if [ -n "$FAILED" ]; then
     echo "★★★ GATES FAILED:$FAILED"
     exit 1
 fi
-echo "★ gates run:$([ "$WHICH" = "all" ] && echo " pic res cel comp p3b" || echo " $WHICH")  -- all green"
+echo "★ gates run:$([ "$WHICH" = "all" ] && echo " pic res cel comp p3b p3b_text" || echo " $WHICH")  -- all green"
 exit 0

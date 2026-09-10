@@ -52,17 +52,15 @@ $FLAGS = @("-DHAL_GFX_MODE_SERVICE","-DHAL_SYS_FAST_CLOCK","-DPLANE_WINDOWED","-
 # the behaviour that existed before the wiring rather than an imitation of it [L-113].
 if ($Text)  { $FLAGS += "-DP3B_NO_CEL" }
 if ($Fault) { $FLAGS += @("-DP3B_NO_CEL","-DTEXT_MODELLED") }
-# ★★★★★ -DecodeFault WAS AC-3's arm and its consumer IS NOT IN THE TREE [T-P0-084f]. It adds
-# -DRES_FAULT_DECODE_HIT, which res_core.s reads only while the decode fix is applied -- and that
-# fix is held pending the 2-byte ruling [AD-188], so the flag currently reaches no `ifdef`.
-# ★★★★ KEPT, AND SAYING SO, rather than removed: it is three lines, AC-3 was demonstrated with it
-# (clean 16/16 printable, fault 18/32), and deleting it would mean re-deriving the arm when the
-# fix lands. **A control that does nothing must SAY it does nothing** -- a silent dead switch is
-# how a later reader concludes the fault arm ran when it did not.
-if ($DecodeFault) {
-    Write-Host "★★★ -DecodeFault: RES_FAULT_DECODE_HIT has no consumer until the decode fix lands (AD-188)"
-    $FLAGS += @("-DP3B_NO_CEL","-DRES_FAULT_DECODE_HIT")
-}
+# ★★★★★ -DecodeFault IS AC-4's ARM AND ITS CONSUMER IS NOW vm_run.s [T-P0-084h]. The decode moved
+# off res_open's miss path to the LOGIC bind, so the fault moved with it: -DRES_FAULT_DECODE_HIT
+# drops the `bcs vbl_nodec`, and the decode then runs on EVERY bind including cached ones.
+# ★★★★ res_decode XORs IN PLACE, so a cached resource is re-encrypted on every re-bind: the first
+# bind is right and every later one is garbage. L-66 measured 3.01 binds per cycle.
+# ★★★ It exists so the fresh-open placement can be FALSIFIED rather than trusted, and it is RUN in
+# both directions: clean 16 of 16 printable (DECODED), fault NOT DECODED [§2W, L-62 -- re-shown on
+# the build that shipped].
+if ($DecodeFault) { $FLAGS += @("-DP3B_NO_CEL","-DRES_FAULT_DECODE_HIT") }
 & $LW --format=raw --output=build/p3b_probe_pk_fresh.bin --map=build/p3b_probe_pk.map -I. @FLAGS src/harness/p3b_probe.s
 if ($LASTEXITCODE -ne 0) { throw "p3b assemble failed" }
 "p3b_probe: $((Get-Item build\p3b_probe_pk_fresh.bin).Length) bytes"

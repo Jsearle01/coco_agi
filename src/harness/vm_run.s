@@ -57,6 +57,39 @@ vm_bind_logic:
                 jsr     res_open
                 lda     res_err
                 lbne    vm_res_fail
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ DECODE AT THE BIND, ON A FRESH OPEN ONLY -- AND THE ORACLE PUTS IT HERE [T-P0-084h §4A].
+* At the pin 9d9b9e93, agi.cpp's RESOURCETYPE_LOGIC case reads:
+*     489    if (~_game.dirLogic[resourceNr].flags & RES_LOADED) {
+*     493        data = _loader->loadVolumeResource(&_game.dirLogic[resourceNr]);
+*     500        ec = decodeLogic(resourceNr);
+* and logic.cpp:56 -- `decrypt(logic.data + stringsPos, stringsSize)` -- is the ONLY LOGIC decrypt
+* in the engine. ★★★★ Decryption belongs to LOADING A LOGIC, above the raw fetch, and runs ONLY
+* when the resource was not already loaded. **loadVolumeResource returns undecrypted bytes**, which
+* is exactly the contract res_open keeps -- so the res gate's raw reference is untouched.
+* ★★★ AUTHORITY: §2 tier 3 (ScummVM -- best secondary evidence, not the original). Per §2.1 this
+* is ScummVM's STRUCTURE, not a claim about Sierra's interpreter. What is structural rather than
+* stylistic is the ONCE-per-load part: the decrypt is in place, so any implementation running it
+* twice re-encrypts. That constraint is not a ScummVM choice.
+* ★★★★ OUR OWN ORACLE DUMP CORROBORATES THE SEAM. agi.cpp:456 takes the raw dump "immediately
+* after loadVolumeResource() returns and BEFORE any decode", because "decodeLogic() DECRYPTS THE
+* MESSAGE STRINGS IN PLACE. Dumping after it would compare our pre-decode bytes against their
+* post-decode bytes and fail everywhere" [P1.1]. **The res gate's raw reference was aligned to this
+* seam deliberately, four phases ago** -- which is precisely what decoding inside res_open broke,
+* measured at 959/1,264 [P6.28g].
+*
+* ★★ C set = res_open served this from its cache, so the bytes were decoded by the fetch that first
+* brought them in. C clear = fresh fetch, decode now. `lda res_err` above does not touch C.
+                ifndef  RES_FAULT_DECODE_HIT
+                bcs     vbl_nodec
+                endc
+* ★★★★★ AC-4's FAULT ARM, MOVED WITH THE DECODE. -DRES_FAULT_DECODE_HIT drops the `bcs`, so the
+* decode runs on EVERY bind including cached ones -- the same defect as the old decode-on-hit arm,
+* at the new site. L-66 measured 3.01 binds per cycle, so it re-encrypts almost immediately.
+* ★★ A fault arm that cannot fire is not a fault arm; this one is run in both directions [§2W].
+                jsr     res_decode
+vbl_nodec:
+* ═══════════════════════════════════════════════════════════════════════════════════════════
                 ldx     res_base
                 ldb     ,x                      ; LITTLE-endian low byte
                 lda     1,x

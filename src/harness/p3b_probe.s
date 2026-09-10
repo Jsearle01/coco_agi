@@ -420,7 +420,20 @@ p3_wait:        lda     P3_GO
 * ★★ p3_room_check is AFTER staging because it may switch phase, and staging must not be split
 * across a remap.
 p3_do_cycle:
-                jsr     p3_zero_timers
+* ★★★★★ p3_zero_timers IS GONE, AND THIS FILE'S OWN HEADER IS THE EVIDENCE [T-P0-084g §4B].
+* The block at P3_T_VM says it in as many words: "P3_T_VM..P3_T_RENDER have existed since P3b.1 and
+* are ZEROED EVERY CYCLE AND NEVER WRITTEN -- declared, cleared, dead." Verified rather than taken
+* on the comment's word [AD-95: a comment is not a producer]: the guest's ONLY reference to any
+* P3_T_* was the `ldx #P3_T_VM` inside the clear itself, and the host defines the five addresses at
+* p3b_run.lua:43 and never reads one.
+* ★★★★ So this cleared 22 bytes nothing writes and nothing reads, every cycle. **Removing it is a
+* dead-code deletion, not a behaviour change** -- there is no observer to change.
+* ★★★ 14 BYTES, AND THEY PAY FOR THE DECODE. Route (b) costs 7 (2 in res_core.s, 5 here in
+* vm_run.s) and this configuration had 1 spare against CP_CEL. §4A's decomposition found no padding
+* anywhere in $2000-$5300 -- the largest single emission in the whole region is 8 bytes -- so a
+* dead routine was the only structural saving available.
+* ★★ The P3_T_* equs are KEPT: they document that MAP_STATUS+8..+27 is reserved and unused, which
+* is worth more than the zero bytes deleting them would save.
                 jsr     phase_vm                ; ★ AC-7: no plane mapped
 * ★★★★ RESTORE SLOT 5 TO THE OBJECT TABLE, AND THIS IS A GAP IN THE ENGINE'S PHASE MODEL.
 * mmu_phase.s's phase_vm touches slot 6 ONLY, and says so deliberately: *"SLOT 5 IS LEFT ALONE,
@@ -477,13 +490,6 @@ p3_z1:          clr     ,x+
                 bne     p3_z1
                 rts
 
-p3_zero_timers:
-                ldx     #P3_T_VM
-                ldb     #22
-p3_z2:          clr     ,x+
-                decb
-                bne     p3_z2
-                rts
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★ THE CYCLE GLUE. This is what P3b.1 could not build because the phase did not fit.
