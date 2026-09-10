@@ -330,5 +330,5 @@ One, to `seeds/AGI/live/`:
 
 ### 11 — Commit
 
-`<hash>` — this report only. ★★ **No source commit**: the tree is byte-identical to `2253145`, and
+`7e96072` — this report only. ★★ **No source commit**: the tree is byte-identical to `2253145`, and
 committing a report about work that was not done is the one thing route accounting exists to prevent.
