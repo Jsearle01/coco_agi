@@ -171,7 +171,12 @@ CP_CTRLSTEP     equ     MAP_STATUS+84
 * foot of this file: the arithmetic does not work and it is reported rather than patched.
 CP_VIS          equ     FB_BASE
 CP_PRI          equ     PRI_BASE
+* ★★★★★ NOT DEFINED UNDER -DP3B_NO_CEL, AND THAT IS THE POINT OF THE FLAG. CP_CEL is what occupies
+* MAP_RESERVED; leaving the `equ` in place while stripping its consumers would keep the region
+* nominally claimed and the collision guard below would still fire against a buffer nothing uses.
+                ifndef  P3B_NO_CEL
 CP_CEL          equ     MAP_RESERVED    ; decoded cel staging, 4,784 B corpus max
+                endc
 
 * ★★★ PIC_DATA IS THE ARENA, NOT A POKED BUFFER -- this is AC-2's "real path" in one line.
 * pic_probe.s pokes the picture to a fixed $1200 window; here the PICTURE is fetched by
@@ -803,6 +808,19 @@ pss_done:
 * ★★ The VIEW resource is fetched here, per sprite, from the arena -- which is resident in this
 * phase. The decoded cel goes to CP_CEL, one at a time, because a single 4,784-byte staging
 * buffer is all the map has for it.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ -DP3B_NO_CEL STRIPS THE WHOLE COMPOSITING PATH [T-P0-084d ruling A]. Room 83 stages ZERO
+* sprites (`final room 83, sprites 0`), so the text gate needs no cel decode -- and CP_CEL is what
+* occupies MAP_RESERVED, the region the text engine has to live in.
+* ★★★★ A FLAG, NOT A DELETION, AND RULING A SAYS WHY: *"this is a probe configuration, not an
+* engine change ... cel and composite are restored when a task requires sprite staging."* The
+* default build is untouched and byte-identical, so the existing p3b gate keeps testing the
+* binary it has always tested; the text gate is a second configuration of the same probe.
+* ★★★ p3_stage_sprites is deliberately NOT stripped: it runs in the VM phase, reads VM_OBJ before
+* the remap, and writes an array. With nothing consuming that array it is a few wasted cycles --
+* and keeping it means the phase discipline the cycle body documents is the same in both
+* configurations, which is worth more than the cycles.
+                ifndef  P3B_NO_CEL
 p3_composite_all:
                 lda     p3_nspr
                 beq     pca_out
@@ -843,6 +861,12 @@ pca_skip:       puls    y
                 cmpa    p3_nspr
                 blo     pca_lp
 pca_out:        rts
+                else
+* ★★ The stripped configuration still needs the symbol: the cycle body calls it unconditionally,
+* and a guarded CALL as well as a guarded BODY would put the strip in two places [§2F].
+p3_composite_all:
+                rts
+                endc
 
 p3_lastroom     fcb     $FF             ; ★ $FF: no room yet, so the first cycle always renders
 p3_picptr       fdb     0
@@ -897,8 +921,10 @@ phase_draw_enter:
                 include "src/harness/plane_win.s"
                 endc
                 include "src/harness/pic_core.s"
+                ifndef  P3B_NO_CEL
                 include "src/harness/view_cel.s"
                 include "src/harness/composite.s"
+                endc
 
                 include "src/hal/coco3-dsk/hal_globals.s"
                 include "src/hal/coco3-dsk/sys.s"
@@ -940,8 +966,20 @@ P3_CODE_END     equ     *
 * ★★★ P6.28's placement measurement was taken for text_vm_probe.s, which DROPS view_cel.s and
 * composite.s -- there MAP_RESERVED genuinely is free. §2 of T-P0-084c keeps both linked here, so
 * the precondition that made the region free does not hold for this probe.
+* ★★★★ THE GUARD IS CONDITIONAL ON THE BUFFER EXISTING. Under -DP3B_NO_CEL there is no CP_CEL, so
+* MAP_RESERVED is free for code exactly as P6.28 §5A measured for text_vm_probe.s -- the span
+* assertion above is then the only bound, and it is the right one.
+                ifndef  P3B_NO_CEL
                 ifgt    P3_CODE_END-CP_CEL
                 error   "P3b code has grown into the decoded-cel buffer at CP_CEL ($5300, 4,784 B) -- the span reaches MAP_RESERVED_END but CP_CEL is already there; move CP_CEL or shrink the code, do not let them overlap"
+                endc
+                else
+* ★★★★★ AND THE ASSERTION RULING A ASKS FOR, IN THE OTHER DIRECTION: if the compositing path is
+* ever re-linked while the text engine occupies MAP_RESERVED, the build must fail rather than
+* silently re-occupy the region. `ifdef CP_CEL` under P3B_NO_CEL means someone defined it anyway.
+                ifdef   CP_CEL
+                error   "CP_CEL is defined in a -DP3B_NO_CEL build -- the compositing path has been re-linked into a configuration whose MAP_RESERVED holds the text engine. Drop -DP3B_NO_CEL or drop the cel path; they cannot share $5300."
+                endc
                 endc
                 endc
 
@@ -1047,9 +1085,11 @@ P3_VOCAB_END    equ     $FF00           ; ★ $FF00-$FFFF is the I/O page and is
 * MAP_RESERVED; the parser must start above where it ends. An overlap claim checked by a human
 * reading a table is the state these exist to end [AD-78] -- and this file had no assertion
 * covering CP_CEL against anything at all.
+                ifndef  P3B_NO_CEL
 CP_CEL_END      equ     CP_CEL+4784
                 ifgt    CP_CEL_END-P3_PARSER_BASE
                 error   "the decoded-cel buffer runs into the parser -- CP_CEL is 4,784 B from MAP_RESERVED"
+                endc
                 endc
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════
