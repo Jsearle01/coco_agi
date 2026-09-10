@@ -577,6 +577,42 @@ _G._n = emu.add_machine_frame_notifier(function()
               prog:read_u8(SYM.res_err or 0))
             w("    final room %d, sprites %d, err %d, status=$%02X",
               prog:read_u8(ROOM), prog:read_u8(NSPR), prog:read_u8(ERR), prog:read_u8(STATUS))
+            -- ═══════════════════════════════════════════════════════════════════════════════
+            -- ★★★★★ AC-3's OBSERVABLE, AS A PROPERTY RATHER THAN THE TEXT [§2P].
+            -- P3_PBUF holds the last message the text engine substituted. With res_decode on the
+            -- cache-MISS path those bytes are plaintext, so nearly all are printable ASCII. Under
+            -- -DRES_FAULT_DECODE_HIT the decode ALSO runs on the hit path, re-encrypting every
+            -- cached re-bind, so the same buffer fills with cipher bytes and the count collapses.
+            -- ★★★★ COUNTED, NEVER PRINTED. §2P forbids committing game text; a count says
+            -- everything AC-3 needs and discloses nothing.
+            -- ★★★ ON THE COMPLETION PATH, AND THE FIRST VERSION PUT IT ON THE STALL PATH beside
+            -- the vocabulary readout -- which runs only when the watchdog fires, so on a healthy
+            -- run it printed nothing. **An observable emitted only when the run has already failed
+            -- cannot compare a good arm against a bad one.**
+            -- ★★ It also discharges P6.28d §7.1: it answers "did the bytes reaching the renderer
+            -- decode" from the guest's own memory rather than from a person reading the screen.
+            -- ★★★★★ COUNT THE STRING, NOT THE BUFFER, AND THE FIRST VERSION COUNTED THE BUFFER.
+            -- txt_printf writes a NUL-terminated string into a 576-byte scratch that is never
+            -- cleared, so bytes past the terminator are whatever an EARLIER, LONGER message left.
+            -- Counting all 64 mixed live text with dead tail and reported "NOT DECODED" for the
+            -- very build a person had just read off the screen as legible.
+            -- ★★★★ **An instrument that contradicts a confirmed observation is the instrument's
+            -- problem until proven otherwise** -- the eye gate is tier-1 evidence here and this
+            -- readout is tier-3 [§2W; and L-88: count the artifacts the run produces against the
+            -- artifacts the comparison reads].
+            if SYM.P3_PBUF then
+                local pr, n = 0, 0
+                for i = 0, 575 do
+                    local c = prog:read_u8(SYM.P3_PBUF + i)
+                    if c == 0 then break end
+                    n = n + 1
+                    if c >= 0x20 and c < 0x7F then pr = pr + 1 end
+                end
+                w("    P3_PBUF $%04X: %d of %d bytes to the terminator are printable ASCII -- %s",
+                  SYM.P3_PBUF, pr, n,
+                  n == 0 and "buffer empty"
+                        or (pr * 100 // n >= 90 and "DECODED" or "★★★ NOT DECODED"))
+            end
             if DUMP then
                 -- ★★★★★ READ THE PLANES THROUGH THEIR WINDOWS. This read 26,880 bytes flat from
                 -- $C000 -- i.e. $C000..$128FF, wrapping past $FFFF. That was correct while the

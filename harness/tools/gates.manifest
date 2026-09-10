@@ -73,3 +73,27 @@ vm_timed	src/harness/vm_probe.s	build/vm_probe.bin	-DHAL_GFX_MODE_SERVICE -DHAL_
 # ★★ Contrast the pic_win row above, which passes -DPLANE_WINDOWED and NOT -DPLANE_WIN_MMU and
 # therefore genuinely does NOT window: the same two symbols mean opposite things in the two files.
 p3b	src/harness/p3b_probe.s	build/p3b_probe_pk_fresh.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED	integration probe -- PLANE_WIN_MMU comes from the SOURCE (line 65), never the command line	purpose=timing
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ p3b_text -- THE SAME SOURCE, A SECOND CONFIGURATION [ruling C, T-P0-084f].
+#
+# ★★★★★ IT IS A NEW ROW RATHER THAN AN EDIT TO THE ONE ABOVE, AND THIS FILE IS WHY. The decode fix
+# (res_decode on the LOGIC cache-miss path) costs THREE BYTES, and the `p3b` row's cel
+# configuration had ONE byte of headroom against CP_CEL -- so it landed 2 over and the collision
+# guard refused the build. **Re-pointing the row above would have made everything green and
+# invalidated every published p3b timing figure**, which is this file's own header ("Flags are
+# load-bearing ... is a different program") and AD-96 recorded in the file that would have been
+# edited. The timing binary keeps its identity: F51FF8482D0B07E49F46B18612D20B06, 13,925 B.
+#
+# ★★★★ WHAT THIS ROW BUILDS: -DP3B_NO_CEL strips view_cel.s and composite.s [ruling A, AD-180], so
+# MAP_RESERVED is free for src/engine/text.s and the nine text opcodes.
+# ★★★★★ IT DOES NOT YET RENDER READABLE TEXT, AND THE ROW SAYS SO RATHER THAN IMPLYING OTHERWISE.
+# res_decode is still absent from res_open's miss path -- the 3-byte call does not fit the `p3b`
+# row's cel configuration and the fix is held pending a ruling [AD-188]. Until it lands this row
+# gates HEALTH (no stall, err 0) over a build whose messages are ciphertext. **The row is right and
+# the binary is temporarily wrong**; the eye gate is what knows the difference, and it has been run
+# both ways [AD-187: readable with the fix, garbage without].
+# ★★★ Room 83 stages ZERO sprites, so nothing is lost by stripping the compositing path HERE --
+# and that is scoped to this row, not a claim about the engine.
+# ★★ purpose=correctness: this row is gated on health and on what a person sees, not on a clock.
+# **No timing figure may be quoted from it** -- the row above is the timing build.
+p3b_text	src/harness/p3b_probe.s	build/p3b_probe_text.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL	correctness probe: text opcodes, no cel staging, room 83	purpose=correctness

@@ -31,6 +31,7 @@ param(
   # ★★ The text-gate configuration and its fault arm; see the flag block below.
   [switch]$Text,
   [switch]$Fault,
+  [switch]$DecodeFault,
   [double]$Hold   = 3.0
 )
 $ErrorActionPreference = "Stop"
@@ -51,6 +52,17 @@ $FLAGS = @("-DHAL_GFX_MODE_SERVICE","-DHAL_SYS_FAST_CLOCK","-DPLANE_WINDOWED","-
 # the behaviour that existed before the wiring rather than an imitation of it [L-113].
 if ($Text)  { $FLAGS += "-DP3B_NO_CEL" }
 if ($Fault) { $FLAGS += @("-DP3B_NO_CEL","-DTEXT_MODELLED") }
+# ★★★★★ -DecodeFault WAS AC-3's arm and its consumer IS NOT IN THE TREE [T-P0-084f]. It adds
+# -DRES_FAULT_DECODE_HIT, which res_core.s reads only while the decode fix is applied -- and that
+# fix is held pending the 2-byte ruling [AD-188], so the flag currently reaches no `ifdef`.
+# ★★★★ KEPT, AND SAYING SO, rather than removed: it is three lines, AC-3 was demonstrated with it
+# (clean 16/16 printable, fault 18/32), and deleting it would mean re-deriving the arm when the
+# fix lands. **A control that does nothing must SAY it does nothing** -- a silent dead switch is
+# how a later reader concludes the fault arm ran when it did not.
+if ($DecodeFault) {
+    Write-Host "★★★ -DecodeFault: RES_FAULT_DECODE_HIT has no consumer until the decode fix lands (AD-188)"
+    $FLAGS += @("-DP3B_NO_CEL","-DRES_FAULT_DECODE_HIT")
+}
 & $LW --format=raw --output=build/p3b_probe_pk_fresh.bin --map=build/p3b_probe_pk.map -I. @FLAGS src/harness/p3b_probe.s
 if ($LASTEXITCODE -ne 0) { throw "p3b assemble failed" }
 "p3b_probe: $((Get-Item build\p3b_probe_pk_fresh.bin).Length) bytes"
@@ -64,7 +76,7 @@ $WANT = @("res_volbase","res_slicebase","res_curblk","vm_quit","vm_badop","vm_cy
           "res_err","ph_blk_fb","ph_blk_pri","par_vocab","P3_INBUF","P3_FEED","P3_VOCAB_BAD","P3_VOCAB","P3_VOCAB_END","P3_CODE_END","P3_PARSER_BASE","P3_PARSER_TOTAL")
 # ★★★ MAP_FONT only exists in the text configuration, and vm_symbols.py fails on a missing name,
 # so it is appended rather than added to the list every build shares.
-if ($Text -or $Fault) { $WANT += "P3_FONT" }
+if ($Text -or $Fault -or $DecodeFault) { $WANT += @("P3_FONT","P3_PBUF") }
 python harness\tools\vm_symbols.py build\p3b_probe_pk.map --out build\p3b\symbols.txt --want @WANT
 if ($LASTEXITCODE -ne 0) { throw "symbols missing" }
 
@@ -121,7 +133,11 @@ if ($Headless) {
   if (-not (Test-Path $log)) { "★★★ p3b: no run.log -- the launch produced nothing"; exit 1 }
   $stuck = Select-String -Path $log -Pattern '★★★ STUCK|★★★ STUCK' -Quiet
   $done  = Select-String -Path $log -Pattern 'cycles complete|cycles in ' -Quiet
-  Select-String -Path $log -Pattern 'OK prompt|program \d+ bytes|vocabulary |par_vocab written|COMMAND TYPED|STUCK|cycles in|final room' |
+  # ★★★ P3_PBUF IS IN THE PATTERN BECAUSE IT IS A VERDICT LINE. An allowlist filter drops what it
+  # does not name, and what it does not name is always the newest thing -- here AC-3's whole
+  # observable printed to the log and never to the console [the same shape as the star-in-a-pattern
+  # loss two tasks ago: the filter kept every table and removed the conclusion].
+  Select-String -Path $log -Pattern 'OK prompt|program \d+ bytes|vocabulary |par_vocab written|COMMAND TYPED|STUCK|cycles in|final room|P3_PBUF' |
     ForEach-Object { $_.Line }
   if ($stuck) { "★★★ p3b FAILED -- the watchdog fired"; exit 1 }
   if (-not $done) { "★★★ p3b FAILED -- no completion line; the run did not reach $Cycles cycles"; exit 1 }
