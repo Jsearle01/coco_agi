@@ -104,6 +104,14 @@ if ($LASTEXITCODE -ne 0) { throw "symbols missing" }
 # words into this one, and the screen would be wrong for a reason nobody would look for here.
 Remove-Item -Force -ErrorAction SilentlyContinue "$stage\input.txt", "$stage\words.tok", "$stage\input.gen.txt"
 $stageArgs = @((Join-Path $GAMES $Title), "--out", $stage, "--cycles", "$Cycles")
+# ★★★★★ THE STAGE MUST KNOW ABOUT THE JUMP [T-P0-086 §4B]. vm_stage.py picks which volumes to
+# stage by asking the reference which ones its run touches; a run that jumps to a room touches
+# resources a no-jump run never does. Staging without it gave PoliceQuest1 volumes [0,1] and the
+# guest reported `err 1` in room 97. **One environment variable feeds both legs**, so the stage and
+# the run cannot disagree about where the guest is going [§2F, §2O.1].
+if ($env:P3B_ROOM -and [int]$env:P3B_ROOM -gt 0) {
+  $stageArgs += @("--room", "$($env:P3B_ROOM)", "--room-at", "$(if ($env:P3B_ROOM_AT) { $env:P3B_ROOM_AT } else { 8 })")
+}
 if ($WithInput) {
   # ★★★★ --eye, NOT the byte gate's schedule. It keeps only lines whose said() branch produces
   # a change a PERSON can see -- measured per line against the reference, not assumed -- and it

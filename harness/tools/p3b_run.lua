@@ -282,6 +282,41 @@ local AUTOCLOSE = tonumber(os.getenv("P3B_VAR21") or "0")
 local vms_prev, vms_max, vms_max_at = nil, 0, 0
 
 -- ═══════════════════════════════════════════════════════════════════════════════════════════
+-- ★★★★★ THE ROOM JUMP, SO THE BLOCKING BOX CAN BE REACHED AT ALL [T-P0-086 §4B].
+-- P6.29c measured that no title executes print from its intro -- NEVER at 3,000 cycles. Every
+-- measurement had run in the intro room. **A room jump reaches it in one write pair**: AGI routes
+-- a room change through VAR_CURRENT_ROOM (var 0) and FLAG_NEW_ROOM_EXEC (flag 5), and logic.0
+-- tests flag 5 every cycle, so the GAME dispatches the room itself [AD-99, T-P0-048 B].
+-- ★★★★ Deliberately the same two writes p3b_room.lua:49-51 makes, and the same two
+-- print_first_cycle.py makes offline [§2F]. Three callers, one mechanism; if they diverge, the
+-- offline confirmation stops predicting the MAME run.
+-- ★★★ Confirmed offline before being used here: PoliceQuest1 room 97 is `print.v(v131); return()`
+-- -- unconditional, no quit, no unimplemented opcode -- and prints 112 times from cycle 8, the
+-- same on both runs.
+-- ★★★★★ AND THE JUMP IS VERIFIED TO HAVE LANDED, BOTH WAYS [L-56]. p3b_room.lua's own header
+-- records a jump written to the wrong address reading as "the room jump does nothing". Writing it
+-- back is not enough on its own -- a write nothing consumes looks identical to a working jump --
+-- so flag 5 being CLEARED later is what says logic.0 actually saw it.
+local JUMP_ROOM = tonumber(os.getenv("P3B_ROOM") or "0")
+local JUMP_AT   = tonumber(os.getenv("P3B_ROOM_AT") or "8")
+-- ★★★★★ P3B_SETVAR -- GAME STATE THE ROOM NEEDS, WRITTEN WITH THE JUMP [T-P0-086 §4C].
+-- Every room reachable by a cold jump that prints on entry is AGI's ERROR ROOM:
+-- `print.v(v17); quit(1); return()`. print.v resolves message number var17 - 1, so with var 17 at
+-- its cold value of 0 the index is -1, no message is found, and print returns WITHOUT drawing a
+-- box. ★★★★ That is why the first port run reached `quit` (vm_quit=1) with var 21 still armed:
+-- **the opcode executed and no box was drawn, which are different facts.**
+-- ★★★ Setting var 17 is what the GAME does before sending itself here -- same class of poke as
+-- var 0 and flag 5, the game's own state written by the host and acted on by the game [AD-99].
+-- format: P3B_SETVAR="17=1" or "17=1,20=3"
+local SETVAR = {}
+for pair in (os.getenv("P3B_SETVAR") or ""):gmatch("[^,]+") do
+    local k, v = pair:match("^%s*(%d+)%s*=%s*(%d+)%s*$")
+    if k then SETVAR[#SETVAR+1] = { tonumber(k), tonumber(v) } end
+end
+local VM_FLAGS  = 0x0900        -- MAP_VM_FLAGS; flag 5 is byte 0, bit 5
+local jumped, jump_seen_clear = false, false
+
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
 -- ★★★★★ WAIT FOR DECB'S "OK" PROMPT, NOT FOR A FRAME COUNT. [Jay, T-P0-060]
 -- This file poked the image and set PC at FRAME 4 -- while DECB is still booting. The machine
 -- is not ready to be taken over until it has finished its own start-up and printed `OK`, and a
@@ -631,6 +666,10 @@ _G._n = emu.add_machine_frame_notifier(function()
                                       or "★★★ the box did not hold for its timer")
                 end
             end
+            if JUMP_ROOM > 0 then
+                w("    room jump: asked %d, landed %s, dispatched %s, final room %d",
+                  JUMP_ROOM, tostring(jumped), tostring(jump_seen_clear), prog:read_u8(ROOM))
+            end
             if SYM.tx_wt_key then
                 w("    var21 now %d (0 = a box was entered and left), tx_wt_key=%d (1 = ESC)",
                   prog:read_u8(VAR_AUTOCLOSE), prog:read_u8(SYM.tx_wt_key))
@@ -666,8 +705,17 @@ _G._n = emu.add_machine_frame_notifier(function()
                     n = n + 1
                     if c >= 0x20 and c < 0x7F then pr = pr + 1 end
                 end
-                w("    P3_PBUF $%04X: %d of %d bytes to the terminator are printable ASCII -- %s",
-                  SYM.P3_PBUF, pr, n,
+                -- ★★★★★ A CHECKSUM, BECAUSE THE COUNT CANNOT TELL TWO MESSAGES APART [T-P0-086].
+                -- "26 of 26 printable" read identically before and after var 17 was set, which
+                -- looks like print substituting a message and is equally consistent with the
+                -- buffer holding a STALE one from the intro's display. **A property that does not
+                -- change when the input changes is not measuring the input** [§2W].
+                -- ★★ §2P: a sum over the bytes is a property; the bytes are the game's.
+                local ck = 0
+                for i = 0, n - 1 do ck = (ck * 31 + prog:read_u8(SYM.P3_PBUF + i)) % 65536 end
+                w("    P3_PBUF $%04X: %d of %d bytes to the terminator are printable ASCII,"
+                  .. " checksum $%04X -- %s",
+                  SYM.P3_PBUF, pr, n, ck,
                   n == 0 and "buffer empty"
                         or (pr * 100 // n >= 90 and "DECODED" or "★★★ NOT DECODED"))
             end
@@ -749,6 +797,37 @@ _G._n = emu.add_machine_frame_notifier(function()
                 prog:write_u8(SYM.P3_FEED, 1)
                 w("  ★ COMMAND TYPED at cycle %d (%d chars) -- watch the screen", n + 1, #feed)
             end
+        end
+
+        -- ★★★ THE JUMP, one release before the cycle that should dispatch it -- the same seam the
+        -- feed and the var-21 arm use, for the same reason: the guest reads this state inside the
+        -- cycle this write releases.
+        if JUMP_ROOM > 0 and not jumped and n >= JUMP_AT then
+            prog:write_u8(VM_VARS + 0, JUMP_ROOM)
+            local b = prog:read_u8(VM_FLAGS + 0)
+            prog:write_u8(VM_FLAGS + 0, b | 0x20)
+            for _, kv in ipairs(SETVAR) do
+                prog:write_u8(VM_VARS + kv[1], kv[2])
+                w("  ★ var %d <- %d (reads %d)", kv[1], kv[2],
+                  prog:read_u8(VM_VARS + kv[1]))
+            end
+            local rb_room = prog:read_u8(VM_VARS + 0)
+            local rb_flag = (prog:read_u8(VM_FLAGS + 0) & 0x20) ~= 0
+            jumped = true
+            w("  %s room jump at cycle %d: var0 <- %d (reads %d), flag 5 set (reads %s)",
+              (rb_room == JUMP_ROOM and rb_flag) and "★" or "★★★",
+              n, JUMP_ROOM, rb_room, tostring(rb_flag))
+            if not (rb_room == JUMP_ROOM and rb_flag) then
+                w("★★★ THE JUMP DID NOT LAND -- not a negative result, a broken write [L-56]")
+                m:exit(); return
+            end
+        end
+        -- ★★ flag 5 CLEARED means logic.0 consumed it and dispatched the room. Sampled every
+        -- cycle after the jump because it is cleared within a cycle or two and a single late look
+        -- would miss it.
+        if jumped and not jump_seen_clear and (prog:read_u8(VM_FLAGS + 0) & 0x20) == 0 then
+            jump_seen_clear = true
+            w("  ★ flag 5 cleared by cycle %d -- logic.0 DISPATCHED the room", n)
         end
 
         -- ★★★ ARM THE AUTO-CLOSE BEFORE RELEASING THE CYCLE, not after: the guest runs print

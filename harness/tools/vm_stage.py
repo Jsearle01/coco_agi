@@ -55,6 +55,9 @@ def main():
     ap.add_argument("--cycles", type=int, default=600)
     ap.add_argument("--volbase", type=int, default=8)
     ap.add_argument("--blocks", type=int, default=56, help="free physical blocks (L-44: stated)")
+    # ★★ The jump must be declared to the STAGER, not only to the runner -- see below.
+    ap.add_argument("--room", type=int, default=0, help="stage for a run that jumps to this room")
+    ap.add_argument("--room-at", type=int, default=8, help="cycle the jump happens at")
     # ★★★★ T-P0-060: THE SCRIPTED INPUT. Off by default, so every existing gate invocation stages
     # exactly what it staged before and the nine-title result is unmoved [L-79: an arm that is
     # supposed to change nothing must be shown to change nothing].
@@ -113,7 +116,26 @@ def main():
     # ★ Confirmed against the reference itself: run(max_cycles=20) on KQ1 ends at virtual_ms
     # 1925 with TIME_DELAY=2 and SECONDS=1 -- i.e. the second boundary really is crossed inside
     # the sampled window, and the guest's cycle 11 is where it belongs.
+    # ═══════════════════════════════════════════════════════════════════════════════════════
+    # ★★★★★ THE SAME ROOM JUMP THE RUN WILL MAKE, OR THE STAGING IS FOR A DIFFERENT RUN
+    # [T-P0-086 §4B]. `touched` is the set of volumes THIS reference run loaded, and the staging is
+    # built from it. A run that jumps to a room reaches resources this one never does -- so staging
+    # without the jump stages the wrong volumes, and the guest reports a resource error for a room
+    # it was deliberately sent to.
+    # ★★★★ MEASURED, NOT PREDICTED: PoliceQuest1 staged volumes [0,1] from a no-jump run, and the
+    # jump to room 97 then gave `err 1` and no print on the 6809 side while the offline reference
+    # printed 112 times. **Both legs must be fed identically** -- §2O.1's rule, applied to staging
+    # rather than to input.
+    # ★★★ Same two writes as p3b_run.lua and p3b_room.lua: var 0 and flag 5, the game's own dispatch.
+    if a.room:
+        vm.run(max_cycles=min(a.room_at, a.cycles))
+        vm.set_var(0, a.room)                     # VAR_CURRENT_ROOM
+        vm.state.set_flag(5, True)                # FLAG_NEW_ROOM_EXEC
+        print("room jump    : var0 <- %d, flag 5 set, at cycle %d" % (a.room, a.room_at))
     vm.run(max_cycles=a.cycles)
+    if a.room:
+        print("room jump    : landed %s, dispatched %s, final room %d"
+              % (vm.get_var(0) == a.room, not vm.state.get_flag(5), vm.get_var(0)))
 
     touched = set()
     for nr in vm._logic_cache:
