@@ -260,6 +260,28 @@ local per = {}
 local last_timed = -1           -- ★ the last cycle number this file has timed; see below
 
 -- ═══════════════════════════════════════════════════════════════════════════════════════════
+-- ★★★★★ THE BLOCKING MESSAGE BOX, AND HOW A HEADLESS RUN GETS PAST ONE [T-P0-085c].
+-- print now BLOCKS inside the opcode until ENTER, ESC, or var 21's timer expires. A headless gate
+-- has no one to press a key, so it arms VAR 21 -- **the reference's own auto-close control**, not a
+-- harness-only build flag [T-P0-085 §3: the oracle already carried the control we were inventing].
+-- ★★★★ THE SAME TECHNIQUE p3b_room.lua USES TO WRITE VAR 0 [AD-99]: the host writes a VM variable
+-- through the build's symbols and the guest reads it as its own state. No second code path, so the
+-- gate exercises the shipping program.
+-- ★★★ RE-ARMED EVERY CYCLE, DELIBERATELY. messageBox zeroes var 21 on exit [text.cpp:411], so an
+-- arm written once auto-closes exactly ONE box and every later box hangs. Re-arming is the harness
+-- standing in for a player who keeps pressing a key, and it is stated rather than hidden.
+-- ★★ VM_VARS is $0800 (the flag/var readout below already reads var 0 there); var 21 is $0815.
+local VM_VARS  = 0x0800
+local VAR_AUTOCLOSE = VM_VARS + 21
+local AUTOCLOSE = tonumber(os.getenv("P3B_VAR21") or "0")
+-- ★★★★★ AC-4's INSTRUMENT: the GAME clock across a held box. vm_vms is advanced ONLY by
+-- vm_step_clock, so the per-cycle delta is the number of ticks the guest counted -- and a cycle that
+-- held a box for var21 * 30 ticks must show a delta that large. **A frozen clock and a box that
+-- never closes are the same defect** [vm_text_ops.s], which is what -NoTick demonstrates.
+-- ★ 32-bit big-endian; the low half is what moves over a run this short.
+local vms_prev, vms_max, vms_max_at = nil, 0, 0
+
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
 -- ★★★★★ WAIT FOR DECB'S "OK" PROMPT, NOT FOR A FRAME COUNT. [Jay, T-P0-060]
 -- This file poked the image and set PC at FRAME 4 -- while DECB is still booting. The machine
 -- is not ready to be taken over until it has finished its own start-up and printed `OK`, and a
@@ -516,6 +538,17 @@ _G._n = emu.add_machine_frame_notifier(function()
             local now = m.time:as_double()
             per[#per+1] = now - tprev
             tprev = now
+            -- ★★★★ THE GAME CLOCK'S PER-CYCLE DELTA [AC-4]. Keyed on the same "a new cycle
+            -- completed" event as the timing above, for the same reason: sampled per FRAME it
+            -- would report zero on most frames and mean nothing.
+            if SYM.vm_vms then
+                local v = rd32(SYM.vm_vms)
+                if vms_prev then
+                    local d = v - vms_prev
+                    if d > vms_max then vms_max, vms_max_at = d, n end
+                end
+                vms_prev = v
+            end
             if n <= 3 or n == NCYC then
                 w("  cycle %3d  %.4f s  room %3d  sprites %2d  remaps %d  err %d",
                   n, per[#per], prog:read_u8(ROOM), prog:read_u8(NSPR),
@@ -577,6 +610,31 @@ _G._n = emu.add_machine_frame_notifier(function()
               prog:read_u8(SYM.res_err or 0))
             w("    final room %d, sprites %d, err %d, status=$%02X",
               prog:read_u8(ROOM), prog:read_u8(NSPR), prog:read_u8(ERR), prog:read_u8(STATUS))
+            -- ═══════════════════════════════════════════════════════════════════════════════
+            -- ★★★★★ THE BLOCKING BOX's OBSERVABLES [AC-4, AC-5, AC-7]. All three are properties,
+            -- never text [§2P].
+            -- ★★★★ var 21 reading 0 at the end is text.cpp:411's zeroing, which happens ONLY on the
+            -- path that actually left the wait -- so a non-zero value here means the last armed box
+            -- was never entered, and that is a different failure from a hang.
+            -- ★★★ tx_wt_key distinguishes ESC from ENTER-or-timer. It is the port's
+            -- _messageBoxCancelled and **nothing consumes it yet** [T-P0-085 §7.3]; it is read here
+            -- so AC-7 is a measurement rather than an eye-only claim.
+            if SYM.vm_vms then
+                w("    game clock: vm_vms=%d, largest per-cycle delta %d ticks at cycle %d"
+                  .. " (%.2f s at 16.667 ms/tick)",
+                  rd32(SYM.vm_vms), vms_max, vms_max_at, vms_max * 0.016667)
+                if AUTOCLOSE > 0 then
+                    local want = AUTOCLOSE * 30
+                    w("    var21 armed %d -> expected hold >= %d ticks; observed %d -- %s",
+                      AUTOCLOSE, want, vms_max,
+                      vms_max >= want and "the clock ADVANCED across the box"
+                                      or "★★★ the box did not hold for its timer")
+                end
+            end
+            if SYM.tx_wt_key then
+                w("    var21 now %d (0 = a box was entered and left), tx_wt_key=%d (1 = ESC)",
+                  prog:read_u8(VAR_AUTOCLOSE), prog:read_u8(SYM.tx_wt_key))
+            end
             -- ═══════════════════════════════════════════════════════════════════════════════
             -- ★★★★★ AC-3's OBSERVABLE, AS A PROPERTY RATHER THAN THE TEXT [§2P].
             -- P3_PBUF holds the last message the text engine substituted. With res_decode on the
@@ -692,6 +750,11 @@ _G._n = emu.add_machine_frame_notifier(function()
                 w("  ★ COMMAND TYPED at cycle %d (%d chars) -- watch the screen", n + 1, #feed)
             end
         end
+
+        -- ★★★ ARM THE AUTO-CLOSE BEFORE RELEASING THE CYCLE, not after: the guest runs print
+        -- inside the cycle this write releases, and tx_wait_dismiss reads var 21 at the moment it
+        -- enters the wait. Written one release early for exactly the reason the feed above is.
+        if AUTOCLOSE > 0 then prog:write_u8(VAR_AUTOCLOSE, AUTOCLOSE) end
 
         n = n + 1
         prog:write_u8(MODE, 1)

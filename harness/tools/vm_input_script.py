@@ -71,6 +71,18 @@ def main():
     # and one that demonstrates that something happened.
     ap_.add_argument("--eye", action="store_true",
                      help="keep only lines that change VAR_CURRENT_ROOM and do not quit")
+    # ★★★★★ --wants-print: KEEP ONLY LINES WHOSE RUN ACTUALLY EXECUTES print [T-P0-085c].
+    # ★★★★ MEASURED, BECAUSE THE OBVIOUS ASSUMPTION IS FALSE. print now BLOCKS, so AC-4..AC-8 need
+    # a run that reaches it -- and vm_opcov.py says $65 and $66 are in the NEVER-REACHED list for
+    # all nine gated titles over 600 cycles. **Without input an AGI game sits in attract mode**, and
+    # the intro text is display ($67/$68), not print. --eye's own lines do not help either: it keeps
+    # lines that move VAR_CURRENT_ROOM or var 10, and Kingquest1's two are the speed words.
+    # ★★★ So "feed a command and a box appears" is exactly the kind of thing that must be measured
+    # rather than assumed [§2W]. The first headless run with var 21 armed read `var21 now 2` -- the
+    # arm was never consumed -- which is the instrument correctly refusing to claim a box was shown.
+    # ★★ Same machinery as --eye: one probe run per candidate, classified by what it DID.
+    ap_.add_argument("--wants-print", action="store_true",
+                     help="keep only lines whose run executes print/print.v ($65/$66)")
     a = ap_.parse_args()
 
     game = resource.load_from_files(a.game_dir)
@@ -208,6 +220,60 @@ def main():
         # ★ At most ONE terminal line, and it goes last: two would make the second unreachable
         # and a script whose file does not describe what runs is the defect this tool avoids.
         chosen = quiet + terminal[:1]
+
+    # ── 2a. --wants-print: which lines actually reach the blocking opcode? ──────────────
+    # ★★★ THE HANDLER IS RESTORED AFTER EACH PROBE. vm_opcov.py wraps handlers and never unwraps,
+    # which is fine for a one-shot census; here there is a probe run per candidate, and if the
+    # optable is shared between Vm instances the wrappers would stack and every later line would
+    # inherit the earlier ones' counts. Restoring makes the measurement independent of that.
+    if a.wants_print:
+        PRINT_OPS = (0x65, 0x66)
+        at = max(2, a.cycles // 4)
+        keep, missed, raised2 = [], 0, []
+        for cyc, pat, text in chosen:
+            probe = cycle_mod.Vm(game, 0x2917)
+            probe.load_vocabulary(entries)
+            probe.input_script = {at: text}
+            hits = [0]
+            saved = {}
+            for num in PRINT_OPS:
+                op = probe.table.commands[num]
+                if op is None or op.handler is None:
+                    continue
+                saved[num] = op.handler
+
+                def make(h=op.handler, hits=hits):
+                    def wrapped(*args, **kw):
+                        hits[0] += 1
+                        return h(*args, **kw)
+                    return wrapped
+                op.handler = make()
+            try:
+                probe.start()
+                probe.run(max_cycles=a.cycles)
+            except Exception as exc:                        # noqa: BLE001
+                raised2.append((pat, str(exc).split("(")[0].strip()))
+                continue
+            finally:
+                for num, h in saved.items():
+                    probe.table.commands[num].handler = h
+            if hits[0]:
+                keep.append((cyc, pat, text, hits[0]))
+            else:
+                missed += 1
+        print("--wants-print: %d line(s) execute print/print.v, %d do not, %d raise"
+              % (len(keep), missed, len(raised2)))
+        for pat, why in raised2:
+            print("   ★★★ said(%-12s %s" % (",".join(str(x) for x in pat) + ")", why))
+        # ★★ §2P: the COUNT of print executions, never the message.
+        for _c, pat, _t, k in keep:
+            print("   said(%-12s executes print x%d" % (",".join(str(x) for x in pat) + ")", k))
+        if not keep:
+            print("★★★ NO LINE REACHES print ON THIS TITLE in %d cycles. That is a result:" % a.cycles)
+            print("    the blocking-box gate needs a different title, more cycles, or a line")
+            print("    this census cannot synthesise. Report it rather than feeding a guess.")
+            return 1
+        chosen = [(c, p, t) for c, p, t, _k in keep]
 
     # ── 2b. --eye: measure each candidate's effect, one line per run ────────────────────
     if a.eye:

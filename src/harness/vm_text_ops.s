@@ -200,11 +200,9 @@ tx_disp_out:
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★ $65 print / $66 print.v -- op_cmd.cpp cmdPrint. Renders the message BOX.
 *
-* ★★★★★ IT DOES NOT BLOCK, AND THAT IS A STATED DIVERGENCE RATHER THAN AN OVERSIGHT. The engine's
-* print waits for a keypress before closing the window; this probe has no key path wired in this
-* configuration, so a blocking print would hang the cycle loop and the eye gate would report a
-* stall that is not a defect in the text engine. **The rendering is full; the wait is omitted and
-* said out loud** -- an unstated omission here is exactly what §6's route accounting exists for.
+* ★★★★★ IT BLOCKS, WHERE THE ORACLE BLOCKS -- inside the opcode, inside the cycle [T-P0-085c §1.1].
+* Nothing unwinds, so §1.3's invariant holds BY CONSTRUCTION: the cycle counter is never reached,
+* nothing re-dumps, and res_cache_flush is never called under a running logic.
 vmop_print:
                 jsr     vm_p0
                 bra     tx_print_common
@@ -222,7 +220,169 @@ tx_print_common:
                 jsr     tx_window_enter
                 jsr     txt_msgbox
                 jsr     tx_window_exit
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ FLAG 15 SITS ABOVE THE WAIT, AND THE ORDER IS THE ORACLE'S [text.cpp:373-380]:
+*     if (_vm->getFlag(VM_FLAG_OUTPUT_MODE)) { setFlag(..., false); nonBlockingText_IsShown();
+*                                              return true; }
+* ★★★ The check is ABOVE the loop, not inside it, and it CLEARS the flag as it passes -- the flag
+* is one-shot, so a game that wants a second non-blocking box must set it again.
+* ★★ `nonBlockingText_IsShown()` has no counterpart here: it feeds ScummVM's own redraw
+* bookkeeping, which this port does not have. Stated, not invented [§2.1].
+                lda     #VM_FLAG_OUTPUT_MODE
+                jsr     vm_getflag
+                beq     tx_print_wait           ; flag clear -> blocking window
+                lda     #VM_FLAG_OUTPUT_MODE
+                clrb
+                jsr     vm_setflag              ; one-shot: consume it
+                rts                             ; ★ box stays up, no wait, no close
+tx_print_wait:
+                jsr     tx_wait_dismiss
+                jsr     txt_close
 tx_print_out:
+                rts
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ tx_wait_dismiss -- THE LOOP, AND IT SERVICES WHAT THE CYCLE WOULD HAVE [§1.3, §4A].
+*
+* ★★★★★ A BLOCK THAT STARVES THE IN-GAME TIMER CANNOT AUTO-CLOSE, because var 21 is measured in
+* elapsed time and nothing else advances the game clock inside a cycle. The oracle services it every
+* pass -- `inGameTimerUpdate()` at text.cpp:399 -- and so does this.
+*
+* ★★★★★ THE DEADLINE IS MEASURED ON THE GAME CLOCK, NOT ON WALL TIME, AND THAT IS READ FROM THE
+* ORACLE RATHER THAN CHOSEN [text.cpp:395-409]:
+*     inGameTimerResetPassedCycles();          <- entry
+*     do { processAGIEvents(); inGameTimerUpdate();
+*          if (windowTimer > 0 && inGameTimerGetPassedCycles() >= windowTimer) ...close
+*     } while (...);
+*     inGameTimerResetPassedCycles();          <- exit
+* ★★★★ So the counter the box counts in IS the in-game timer's, and the loop advances it itself.
+* **That makes "a block that starves the game clock" and "a box that never auto-closes" the SAME
+* defect**, which is what AC-8's fault arm exercises [§2W].
+*
+* ★★★★★ AND cycle.cpp:558 SETTLES WHICH COUNTER: `if (_passedPlayTimeCycles >= timeDelay)` then
+* `inGameTimerResetPassedCycles()` -- **the pacing gate and this deadline are the same variable**,
+* which here is vm_passed (vm_pace tests it against vm_tdelay and clears it, vm_cycle.s:316-322).
+* ★★★★ §4A's census called vm_passed "a counter this loop must not disturb, because advancing it
+* would make the next vm_pace short". **The oracle disturbs it deliberately, on both sides.** A
+* short next pace is not a side effect to be avoided here, it is text.cpp:409's behaviour -- so
+* vm_step_clock is called whole rather than having its parts copied out.
+*
+* ★★★★ WHAT IS SERVICED, AND WHAT IS DELIBERATELY NOT [§4A's census, as corrected]:
+*   vm_step_clock                       CALLED WHOLE, once per VBL tick -- the game clock
+*                                       (vm_vms), vm_passed, vm_timer_update and the tdelay
+*                                       recompute, which is the set the oracle's loop advances
+*   the key scan                        SERVICED -- it is the dismissal
+*   hal_frame_hi/lo                     SELF-SERVICING -- the $010C IRQ advances it through a
+*                                       block, so it is the TICK SOURCE here and never the deadline
+*   motion / sprites / the cycle body   NOT serviced, and harmless: the oracle's cycle is suspended
+*                                       across a blocking box too, so freezing them is fidelity
+*   sound                               nothing to starve -- every sound opcode is vm_op_modelled
+*
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE TIMER TICK BELONGS TO THE MESSAGE BOX AND MUST NOT BE HOISTED [Amendment 1].
+* `print` is NOT the only opcode that blocks. op_cmd.cpp:736-746 -- **and it names this target**:
+*     if (platform == kPlatformApple2 || platform == kPlatformCoCo3) {
+*         // Sound playback is a blocking operation on these platforms.
+*         startSound(...); waitAnyKeyOrFinishedSound(); stopSound(); }
+*     setFlagOrVar(flagNr, true);
+* ★★★★ waitAnyKeyOrFinishedSound (keyboard.cpp:685-694) is a plain `while` INSIDE the opcode -- not
+* a cycleInnerLoop -- so it is the same shape as this loop and the host handshake covers both.
+* ★★★★★ BUT IT DOES **NOT** CALL inGameTimerUpdate(). The game clock advances across a message box
+* and does NOT advance across a blocking sound. **So a shared "block until a key" helper with the
+* tick inside it would give sound a tick the oracle does not have.** The tick stays here, in print's
+* own loop, and that is now a reason rather than an accident.
+* ★★★ Nothing to do today -- 62/63/64 are vm_op_modelled and src/engine/sound/ is empty -- and the
+* finding is recorded at the seam for whoever implements it [§4A's census: not applicable because
+* unimplemented, with the shape named].
+*
+* ★★★★ VAR 21's TIMEBASE, DERIVED [§4D]. The data-format fact is **1 = 0.5 seconds**; ScummVM's
+* `* 20` at text.cpp:392 is ITS OWN correction -- its passed-cycles unit is 25 ms (global.cpp:262,
+* `curPlayTimeMilliseconds / 25`) and 0.5 s / 25 ms = 20. Ours is the VERTICAL SYNC: vm_step_clock's
+* header calls its unit "one VERTICAL-SYNC tick" and vm_cycle.s:364 fixes it at 16.667 ms, so
+*     0.5 s / 16.667 ms = 30 ticks per unit   ->   timeout = var21 * 30
+* ★★★ 30 against the oracle's 20 for the SAME half-second: the unit differs, the semantics do not.
+TX_TICKS_PER_UNIT equ   30
+
+* ★★ §2V.2: the oracle holds passed-cycles in a uint32 and compares it to windowTimer. On the 6809
+* vm_passed is a BYTE and var21*30 reaches 7,650, so the deadline cannot live in it. It is held
+* instead as an ABSOLUTE 16-bit mark on vm_vms' low half -- one fdb, no second counter to keep in
+* step, and the comparison below is wrap-safe.
+tx_wt_end       fdb     0               ; vm_vms+2 value at which the box auto-closes
+tx_wt_timed     fcb     0               ; non-zero = var 21 was set, so a deadline exists
+tx_wt_last      fcb     0               ; hal_frame_lo as last seen, for edge detection
+tx_wt_key       fcb     0
+
+tx_wait_dismiss:
+                clr     tx_wt_key
+* ── the deadline, if var 21 is non-zero ──
+                lda     #VM_VAR_WINDOW_AUTO_CLOSE_TIMER
+                jsr     vm_getvar
+                sta     tx_wt_timed
+                beq     tx_wt_notimed
+                ldb     #TX_TICKS_PER_UNIT
+                mul                             ; D = var21 * 30, game-clock ticks
+                addd    vm_vms+2                ; ★ absolute mark on the clock vm_step_clock moves
+                std     tx_wt_end
+tx_wt_notimed:
+* ★★★ inGameTimerResetPassedCycles() [text.cpp:395]. Cleared on BOTH sides, so whatever vm_passed
+* reaches inside the loop -- it can wrap past 255 on a long box -- is irrelevant to vm_pace.
+                clr     vm_passed
+                lda     <hal_frame_lo
+                sta     tx_wt_last
+tx_wt_loop:
+* ── the key scan: ENTER dismisses, ESC dismisses and cancels [text.cpp:421-443] ──
+* ★★ Nothing else dismisses. A build that took any key would pass an eye gate and be wrong.
+                jsr     HAL_key_scan
+                tsta
+                beq     tx_wt_tick
+                cmpa    #HAL_KEY_ENTER
+                beq     tx_wt_done
+                cmpa    #HAL_KEY_ESC
+                bne     tx_wt_tick
+* ★★★ ESC sets the cancel. **Our port has no consumer for it** -- the oracle's messageBox returns
+* false and its caller acts on that; nothing here reads it yet. Recorded rather than invented
+* [T-P0-085 §7.3]: the byte is set so the next task has it, and nothing depends on it today.
+                lda     #1
+                sta     tx_wt_key
+                bra     tx_wt_done
+tx_wt_tick:
+* ── one pass per VBL tick: advance the game clock, then test the deadline ──
+* ★★ The VBL counter is the TICK SOURCE and never the deadline. It is IRQ-driven, so it keeps
+* running through the block whatever this loop does -- which is what makes it a usable edge, and
+* exactly why it must not be what the timeout is measured against [see the fault arm below].
+                lda     <hal_frame_lo
+                cmpa    tx_wt_last
+                beq     tx_wt_loop              ; same tick, nothing to service yet
+                sta     tx_wt_last
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE SERVICING -- vm_step_clock WHOLE [text.cpp:399's inGameTimerUpdate()]. It advances
+* vm_vms, vm_passed and vars 11-14 and recomputes vm_tdelay; the oracle's loop advances the same
+* set, and vm_passed's reset on both sides is text.cpp:395/409.
+* ★★★★★ AC-8's FAULT ARM, AND IT IS ONE OMISSION WITH BOTH CONSEQUENCES [§2W.1]. -DTEXT_FAULT_NOTICK
+* drops this call, so the loop still polls the key and still redraws nothing -- but the game clock
+* stops, and because the deadline is a mark ON that clock, **var 21 can never be reached and the box
+* hangs forever.** The headless arm's watchdog is then the thing under test: it must fire.
+* ★★★★ A fault arm that hung by some other means (a `bra *`, a deadline that never loads) would
+* prove the watchdog fires and nothing about THIS loop. This one is the defect §4A's census named.
+                ifndef  TEXT_FAULT_NOTICK
+                jsr     vm_step_clock
+                endc
+* ── the deadline ──
+* ★★★ Signed difference, not `cmpd`: both sides are 16-bit counters that wrap together and the span
+* between them is at most 7,650, so `now - end` stays well inside +/-32,768 and `bmi` means "the
+* mark is still ahead" across the wrap. An unsigned compare would close the box early at the wrap.
+                tst     tx_wt_timed
+                beq     tx_wt_loop
+                ldd     vm_vms+2
+                subd    tx_wt_end
+                bmi     tx_wt_loop              ; not yet
+tx_wt_done:
+* ★★★ inGameTimerResetPassedCycles() [text.cpp:409], then var 21 zeroed [text.cpp:411] -- the
+* auto-close is one-shot and a game that wants another must set it again.
+                clr     vm_passed
+                lda     #VM_VAR_WINDOW_AUTO_CLOSE_TIMER
+                clrb
+                jsr     vm_setvar
                 rts
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════

@@ -121,9 +121,39 @@ p3b	src/harness/p3b_probe.s	build/p3b_probe_pk_fresh.bin	-DHAL_GFX_MODE_SERVICE 
 # aliased back to vm_op_modelled, showed a black panel [AD-185].
 # ★★★ Held OUT of run_gates.sh for two tasks, deliberately: until the decode landed this row would
 # have gated HEALTH over a ciphertext build -- green for the wrong reason. It is in the suite now.
-# ★★ binary FA7F2FB9, 14,582 B.
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ RE-BASELINED AT T-P0-085c, AND THE OLD IDENTITY IS RETIRED, NOT LOST [AD-96].
+#     retired:  FA7F2FB9...  14,582 B   (valid to P6.29b)
+#     now:      AF0B2A027A960DF4...  15,036 B
+# ★★★★ THE FLAG SET GAINED -DHAL_KEYBOARD, AND THAT IS THE WHOLE REASON THE ROW MOVED. print now
+# BLOCKS until ENTER or ESC [T-P0-085c], so this configuration must link the key decoder; it did
+# not link ANY key input before, in either configuration. ~318 B [P6.24] plus 148 B of wait loop,
+# out of 624 bytes of headroom -- P3_CODE_END $5590 -> $5756, leaving 170 B to P3_FONT $5800.
+# ★★★★★ -DHAL_KEYBOARD SELECTS EXISTING HAL CODE AND IS NOT A HAL CHANGE. hal_sync_check.py is
+# clean on all three siblings; no shared file was touched [§2M].
+# ★★★★★ `p3b` IS UNTOUCHED AND WAS VERIFIED SO, NOT ASSUMED: it reassembles to 58AD3C27... at
+# 13,918 B, byte-identical, with P3_CODE_END still $52F8 and 8 bytes of spare against CP_CEL
+# $5300. The nine `equ vm_op_modelled` aliases emit no bytes, which is what keeps that true.
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ WHAT THIS ROW CANNOT GATE, MEASURED AND STATED [T-P0-085c §7]. The blocking path is NOT
+# exercised by this gate, because **no title in the pinned set reaches print at all**:
+#   - vm_opcov.py: $65/$66 in the NEVER-REACHED list for all nine titles at 600 cycles
+#   - print_first_cycle.py: nine titles, 3,000 cycles, no input -- print NEVER executes
+#   - vm_input_script.py --wants-print: six titles, every synthesisable said() line -- zero reach it
+# ★★★★ So a green run of this row says the wired opcodes and the decode still work; it says
+# NOTHING about the wait loop, which is dead code under this corpus. **Recorded here rather than
+# left for a reader to infer from a pass** [L-86: a sample that always passes is evidence about
+# the sample first]. AC-4..AC-8 and AC-11 are blocked on this and are reported unmet.
 # ★★★ Room 83 stages ZERO sprites, so nothing is lost by stripping the compositing path HERE --
 # and that is scoped to this row, not a claim about the engine.
 # ★★ purpose=correctness: this row is gated on health and on what a person sees, not on a clock.
 # **No timing figure may be quoted from it** -- the row above is the timing build.
-p3b_text	src/harness/p3b_probe.s	build/p3b_probe_text.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL	correctness probe: text opcodes, no cel staging, room 83	purpose=correctness
+p3b_text	src/harness/p3b_probe.s	build/p3b_probe_text.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD	correctness probe: text opcodes, no cel staging, room 83; binary AF0B2A02 15,036 B, re-baselined T-P0-085c	purpose=correctness
+# ★★★★★ AC-8's FAULT ARM, AND IT IS NOT IN THE SUITE BECAUSE IT CANNOT YET BE RUN. -DTEXT_FAULT_NOTICK
+# drops ONE `jsr vm_step_clock` from print's wait loop, so the game clock stops and var 21's mark --
+# which sits ON that clock -- is never reached: the box hangs and the headless watchdog must fire.
+# ★★★★ 15,033 B, exactly 3 bytes smaller than the row above, which is the `jsr` and nothing else.
+# ★★★ IT HAS NEVER BEEN SEEN TO GO RED, because no title reaches print (see the block above), so
+# **the wait loop's instrument is unproven and is reported as such** [§2W: a green check is evidence
+# only once the same check has been seen red]. Do not quote a p3b_text pass as covering it.
+p3b_notick	src/harness/p3b_probe.s	build/p3b_probe_notick.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DTEXT_FAULT_NOTICK	fault arm for print's wait loop -- NOT in run_gates.sh; unexercised, see above	purpose=fault

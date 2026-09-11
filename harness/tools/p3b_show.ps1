@@ -32,6 +32,7 @@ param(
   [switch]$Text,
   [switch]$Fault,
   [switch]$DecodeFault,
+  [switch]$NoTick,
   [double]$Hold   = 3.0
 )
 $ErrorActionPreference = "Stop"
@@ -50,8 +51,12 @@ $FLAGS = @("-DHAL_GFX_MODE_SERVICE","-DHAL_SYS_FAST_CLOCK","-DPLANE_WINDOWED","-
 # vm_op_modelled. **That is AC-2's validator and it is a BUILD, not a reconstruction** -- the
 # table entries resolve to the same address the pre-wiring probe used, so a black panel here is
 # the behaviour that existed before the wiring rather than an imitation of it [L-113].
-if ($Text)  { $FLAGS += "-DP3B_NO_CEL" }
-if ($Fault) { $FLAGS += @("-DP3B_NO_CEL","-DTEXT_MODELLED") }
+# ★★★★ -DHAL_KEYBOARD SELECTS EXISTING HAL CODE; IT IS NOT A HAL CHANGE [T-P0-085c §6]. print now
+# blocks until ENTER or ESC, so the text configuration needs HAL_key_scan -- ~318 B [P6.24] into
+# 624 of headroom. **It re-baselines p3b_text's binary and gates.manifest records that; `p3b` is
+# untouched and gains nothing.**
+if ($Text)  { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD") }
+if ($Fault) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DTEXT_MODELLED") }
 # ★★★★★ -DecodeFault IS AC-4's ARM AND ITS CONSUMER IS NOW vm_run.s [T-P0-084h]. The decode moved
 # off res_open's miss path to the LOGIC bind, so the fault moved with it: -DRES_FAULT_DECODE_HIT
 # drops the `bcs vbl_nodec`, and the decode then runs on EVERY bind including cached ones.
@@ -60,7 +65,15 @@ if ($Fault) { $FLAGS += @("-DP3B_NO_CEL","-DTEXT_MODELLED") }
 # ★★★ It exists so the fresh-open placement can be FALSIFIED rather than trusted, and it is RUN in
 # both directions: clean 16 of 16 printable (DECODED), fault NOT DECODED [§2W, L-62 -- re-shown on
 # the build that shipped].
-if ($DecodeFault) { $FLAGS += @("-DP3B_NO_CEL","-DRES_FAULT_DECODE_HIT") }
+if ($DecodeFault) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DRES_FAULT_DECODE_HIT") }
+# ★★★★★ -NoTick IS AC-8's FAULT ARM AND IT IS ONE OMITTED `jsr vm_step_clock` [§2W.1]. print's wait
+# loop measures var 21 as a mark on the GAME clock, exactly as the oracle does [text.cpp:395-409,
+# cycle.cpp:558], so a loop that does not tick that clock can never reach the mark and the box hangs
+# forever. **The headless watchdog is the instrument under test and it must FIRE** -- a green
+# headless run is evidence only once this arm has been seen to go red.
+# ★★★★ The arm is 3 bytes smaller than the clean build, which is the `jsr` and nothing else. A fault
+# arm that hung by some other route would prove the watchdog works and nothing about this loop.
+if ($NoTick) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DTEXT_FAULT_NOTICK") }
 & $LW --format=raw --output=build/p3b_probe_pk_fresh.bin --map=build/p3b_probe_pk.map -I. @FLAGS src/harness/p3b_probe.s
 if ($LASTEXITCODE -ne 0) { throw "p3b assemble failed" }
 "p3b_probe: $((Get-Item build\p3b_probe_pk_fresh.bin).Length) bytes"
@@ -74,7 +87,13 @@ $WANT = @("res_volbase","res_slicebase","res_curblk","vm_quit","vm_badop","vm_cy
           "res_err","ph_blk_fb","ph_blk_pri","par_vocab","P3_INBUF","P3_FEED","P3_VOCAB_BAD","P3_VOCAB","P3_VOCAB_END","P3_CODE_END","P3_PARSER_BASE","P3_PARSER_TOTAL")
 # ★★★ MAP_FONT only exists in the text configuration, and vm_symbols.py fails on a missing name,
 # so it is appended rather than added to the list every build shares.
-if ($Text -or $Fault -or $DecodeFault) { $WANT += @("P3_FONT","P3_PBUF") }
+if ($Text -or $Fault -or $DecodeFault -or $NoTick) { $WANT += @("P3_FONT","P3_PBUF") }
+# ★★★★ WIRED BUILDS ONLY. -DTEXT_MODELLED keeps TEXT_WIRED undefined (p3b_probe.s:1004), so the nine
+# handlers become `equ vm_op_modelled` and **the whole body -- tx_wt_key included -- is never
+# assembled**. Asking for it in the -Fault arm fails the symbol extraction, which is why this is a
+# second line rather than three more names on the one above.
+# ★ vm_vms and vm_passed exist in every build; they are here because only these arms read them.
+if ($Text -or $DecodeFault -or $NoTick) { $WANT += @("vm_vms","vm_passed","tx_wt_key") }
 python harness\tools\vm_symbols.py build\p3b_probe_pk.map --out build\p3b\symbols.txt --want @WANT
 if ($LASTEXITCODE -ne 0) { throw "symbols missing" }
 
