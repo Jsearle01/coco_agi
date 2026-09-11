@@ -268,4 +268,5 @@ None.
 - `seeds/AGI/live/2026-09-10-two-legs-of-a-gate-ask-different-things-of-the-same-identifier.md`
 
 ### 11 — Commit
-`<filled at commit>`  (pushed to origin/wip before this report)
+`1f74350` — the tools and this report (pushed to origin/wip before reporting).
+Pool: `methodology-candidate-pool` `49eb1c9`, two rows under `seeds/AGI/live/`.
