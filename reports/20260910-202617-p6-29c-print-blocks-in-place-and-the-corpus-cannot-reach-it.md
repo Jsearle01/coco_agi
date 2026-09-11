@@ -311,4 +311,5 @@ to §4A and changed no AC. It also produced the §4A.1(5) near miss, which is th
 - `seeds/AGI/live/2026-09-10-a-census-of-what-a-loop-must-service-can-be-inverted-by-the-reference.md`
 
 ### 11 — Commit
-`<filled at commit>`  (pushed to origin/wip before this report)
+`289b72e` — the work and this report (pushed to origin/wip before reporting).
+Pool: `methodology-candidate-pool` `7ed575b`, two rows under `seeds/AGI/live/`.
