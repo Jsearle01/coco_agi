@@ -845,6 +845,12 @@ tmb_col_set:    sta     txt_tcol
                 mul
                 subd    #5
                 std     txt_bgy
+* ★★★★★ DRAW THE BOX, HERE, BEFORE THE GLYPHS -- the oracle's order [text.cpp:507 sits between
+* the geometry at :500-503 and displayText at :512]. Reversing it would paint the background over
+* the text, which is a defect that looks like "the text never rendered".
+                ifdef   TEXT_BOX
+                jsr     tx_drawbox
+                endc
 * ── the attribute, then pass 2: place ──
                 clra
                 ldb     #15
@@ -963,6 +969,172 @@ txt_close:
                 ldd     #0
                 std     txt_bgy
 tc_ok:          rts
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ tx_drawbox <- graphics.cpp:1079 GfxMgr::drawBox, called from text.cpp:507.
+*
+* ★★★★★ THIS WAS MISSING ENTIRELY AND NO BYTE GATE COULD SEE IT. txt_msgbox computed
+* txt_bgx/bgy/bgw/bgh exactly right -- the text gate matches the oracle on 4,594 rectangles -- and
+* then drew only the glyphs. **The geometry was gated; the DRAW was never written.** Jay, on the
+* eye gate: "i'm not actually seeing a box, at least not like i'd expect in a sierra game. just
+* the text." ★★★★ Same shape as AD-114: a gate comparing numbers cannot see a missing draw call,
+* and this is the second time this subsystem has needed a person to find that.
+*
+* ★★★★ THE ORACLE'S COLOURS, NOT CHOSEN ONES: `drawBox(..., 15, 4)` with its own comment
+* "Hardcoded colors: white background and red lines". One AGI pixel is one byte with both nibbles
+* equal [design §2.1, 2 px/byte], so 15 is $FF and 4 is $44.
+*
+* ★★★★★ THE BORDER GEOMETRY IS THE `default:` ARM (EGA/CGA/VGA/AtariST), graphics.cpp:1119-1122,
+* and it is expressed in DISPLAY pixels -- i.e. AFTER translateVisualRectToDisplayScreen has
+* doubled x and width. Our framebuffer is 2 display pixels per byte, so a display offset of +2 is
+* +1 byte and a display width of 2 is 1 byte. Converted once, here, rather than at four sites:
+*     top     x+1,      y+1,      w-2,  1
+*     bottom  x+1,      y+h-2,    w-2,  1
+*     left    x+1,      y+2,      1,    h-4
+*     right   x+w-2,    y+2,      1,    h-4
+* ★★★ Vertical is 1:1 (TXT_VH=8 is already display rows), so y is used unscaled.
+*
+* ★★ Gated on txt_noblit, the switch this file already uses for the glyphs: text_probe and
+* gs_probe have no framebuffer and set it, so they keep comparing geometry and draw nothing.
+* ★★★★★ BEHIND -DTEXT_BOX, AND NOT BECAUSE IT IS OPTIONAL -- BECAUSE IT DOES NOT FIT.
+* Measured: with the box in, P3_CODE_END reaches $5830 against a font at $5800. **48 bytes over**,
+* and p3b_probe.s:1275's assert is what says so rather than the code silently overwriting glyphs.
+* ★★★★ THE MAP IS FULL, not merely tight. $2000-$6000 is 16,384 bytes and holds 14,384 of code
+* plus the 2,048-byte font. Slot 0 is allocated end to end (status, seed stack, hw stack, the
+* 2 KB VM state block, 3 KB of DIR tables, MAP_INPUT). Slot 7 holds the parser at $E000 and a
+* vocabulary window with 138 bytes of slack against its own 6,828-byte floor. **There is nowhere
+* to put 2 KB of font and nowhere to take 48 bytes from without a decision about the map.**
+* ★★★ So the flag is a holding position, not a feature switch: the code is written, reviewed
+* against the oracle and compact (three rects, a 15-byte table), and it turns on the moment 48
+* bytes exist. Left OFF so p3b_text keeps building and no gate moves [§22.5 -- where the fix
+* belongs is a memory-map decision, not one to take inside this change].
+                ifdef   TEXT_BOX
+TXF_BG          equ     $FF             ; colour 15, both nibbles
+TXF_LINE        equ     $44             ; colour 4
+
+* ★★ WIDTH AND HEIGHT ARE BYTES, X AND Y ARE SIGNED WORDS, and the asymmetry is measured rather
+* than assumed: bgw = boxw*4+10 <= 170 and bgh = boxh*8+10 <= 170, both inside a byte, while
+* bgx = tcol*4-5 and bgy = srow*8-5 go NEGATIVE when the box starts at column or row 0 [the
+* MixedUpMotherGoose print.at case txt_close already clamps for]. §2V.2: state the maximum.
+txf_x           fdb     0               ; BYTE column, signed
+txf_y           fdb     0               ; PIXEL row, signed
+txf_w           fcb     0
+txf_h           fcb     0
+txf_val         fcb     0
+txf_wy          fdb     0               ; working row, so the caller's txf_y survives
+txf_ylo         fdb     0               ; first/last pixel row this window covers
+txf_yhi         fdb     0
+
+* tx_boxfill: A = byte value; rectangle in txf_x (BYTE column), txf_y (PIXEL row), txf_w, txf_h.
+* ★★★★ ROWS OUTSIDE THE WINDOW ARE SKIPPED, NOT CLAMPED, and the bound is txt_blit's own: a slice
+* holds txt_fbrows character rows starting at txt_fbrow0. **A fill that can run past its window
+* will**, and it would land in whatever the MMU has next -- the class of defect that cost
+* AD-111's 2-byte clear and AD-121's wrap.
+tx_boxfill:
+                sta     txf_val
+                ldd     txt_fbwin
+                beq     txf_out                 ; no framebuffer mapped
+* ★★ A NEGATIVE COLUMN IS CLAMPED, NOT WRAPPED. bgx reaches -5; left uncorrected, `addd txf_x`
+* would step BACK off the row start and paint the tail of the row above.
+                ldd     txf_x
+                bpl     txf_xok
+                clr     txf_x
+                clr     txf_x+1
+txf_xok:
+                lda     txt_fbrow0
+                ldb     #TXT_VH
+                mul
+                std     txf_ylo                 ; first pixel row in this window
+                lda     txt_fbrows
+                inca
+                ldb     #TXT_VH
+                mul
+                addd    txf_ylo
+                std     txf_yhi                 ; one past the last
+                ldd     txf_y
+                std     txf_wy
+txf_rows:
+                lda     txf_h
+                beq     txf_out
+                deca
+                sta     txf_h
+                ldd     txf_wy
+* ★★★ SIGNED compares: txf_wy is negative for a box that starts above the screen, and an unsigned
+* test would read -5 as 65531 and call it "below the window" -- right answer, wrong reason, and
+* wrong the moment the window stops starting at row 0.
+                cmpd    txf_ylo
+                blt     txf_next
+                cmpd    txf_yhi
+                bge     txf_next
+                subd    txf_ylo
+* ★★ ONE MUL, not a shift chain: the row within a window is under 256, so row*160 fits D directly.
+                tfr     b,a
+                ldb     #160
+                mul
+                addd    txf_x
+                addd    txt_fbwin
+                tfr     d,x
+                ldb     txf_w
+                beq     txf_next
+                lda     txf_val
+txf_b:          sta     ,x+
+                decb
+                bne     txf_b
+txf_next:
+                ldd     txf_wy
+                addd    #1
+                std     txf_wy
+                bra     txf_rows
+txf_out:        rts
+
+* ★★★★★ THREE RECTANGLES, NOT FIVE, AND IT IS EXACTLY EQUIVALENT -- not an approximation.
+* The oracle draws a background and four inset lines. Filling the frame SOLID and then hollowing
+* it out leaves precisely the same pixels:
+*     1. background   (x,   y,   w,   h  )  white
+*     2. frame block  (x+1, y+1, w-2, h-2)  red
+*     3. hollow       (x+2, y+2, w-4, h-4)  white
+* What survives red is the border of (2): the top row, the bottom row, and one byte down each
+* side between them -- byte for byte the four rects at graphics.cpp:1119-1122, converted from
+* display pixels to our 2-px bytes. ★★★★ Checked rather than eyeballed: the oracle's left line is
+* x+2disp..x+3disp = byte x+1, rows y+2..y+h-3; (2)-minus-(3) gives byte x+1, rows y+2..y+h-3.
+*
+* ★★★ IT IS ALSO WHAT MADE IT FIT. Five inline setups cost 118 bytes more than MAP_RESERVED has
+* left before the font, and the assert at p3b_probe.s:1275 caught that rather than letting the
+* code silently overwrite glyphs. The table costs 15 bytes and the loop 35.
+txb_n           fcb     0
+txb_tab         fcb     0,0,0,0,TXF_BG          ; dx, dy, dw, dh, colour
+                fcb     1,1,-2,-2,TXF_LINE
+                fcb     2,2,-4,-4,TXF_BG
+
+tx_drawbox:
+                tst     txt_noblit
+                bne     txf_out
+                ldu     #txb_tab
+                lda     #3
+                sta     txb_n
+txb_loop:
+* ★★ `sex` sign-extends B into A, which is what makes a one-byte signed delta table legal for a
+* 16-bit coordinate -- dw and dh are negative.
+                ldb     ,u+
+                sex
+                addd    txt_bgx
+                std     txf_x
+                ldb     ,u+
+                sex
+                addd    txt_bgy
+                std     txf_y
+                ldb     ,u+
+                addb    txt_bgw+1
+                stb     txf_w
+                ldb     ,u+
+                addb    txt_bgh+1
+                stb     txf_h
+                lda     ,u+
+                jsr     tx_boxfill              ; ★ leaves U alone; it uses D and X only
+                dec     txb_n
+                bne     txb_loop
+                rts
+                endc                    ; TEXT_BOX
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ txt_blit -- the 8x8 glyph into the 320x200x16 framebuffer. NOT modelled by the reference.
