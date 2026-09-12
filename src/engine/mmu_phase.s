@@ -11,6 +11,23 @@
 * That is why this file is short, and the shortness is the design being right rather than the
 * implementation being incomplete.
 *
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE EXCEPTION, AND IT IS AN EXCEPTION TO THE SENTENCE ABOVE [T-P0-093]. The TEXT WINDOW
+* borrows slots 3 AND 4 as well, for the duration of one glyph blit or one line clear, and puts
+* them back by known value. **Slots 0-4 are no longer "never touched"; slots 3 and 4 are touched
+* by phase_text_in/_out and by nothing else.**
+* ★★★★★ IT IS WRITTEN DOWN HERE BECAUSE THE CONTRACT IS WRITTEN DOWN HERE. The mapping used to
+* live in src/harness/vm_text_ops.s, whose own comment said: *"$FFA4 HAS NO SANCTIONED OWNER:
+* mmu_phase.s manages slots 5 and 6 only. This file becomes the second writer of the MMU register
+* file, which is a §2N ownership question and is reported rather than settled here."* **A second
+* writer that breaks the first writer's stated invariant is the shape this move exists to end.**
+* ★★★★ WHY FOUR SLOTS: the display is mode 2, 320x200x16, 160 B/row = 32,000 bytes. Three
+* contiguous blocks are 24,576 B = rows 0-18, and AGI's command line is at row 22 -- pixel row
+* 176, byte 28,160. **Every prompt glyph was silently refused for want of a fourth block** [P6.37].
+* $6000-$DFFF is 32,768 B and holds all 200 display rows with 768 to spare.
+* ★★★ THE RESTORE IS BY KNOWN VALUE BECAUSE THE REGISTERS ARE WRITE-ONLY. There is no save. The
+* values come from the client, in ph_blk_slot3/4/5, and the client got them from the boot map.
+*
 * ★★★★ AND SLOT 5 NOW HAS A THIRD TENANT, WHICH IS A WIDENING OF THE SAME MECHANISM RATHER
 * THAN AN EXCEPTION TO IT [T-P0-091]. memmap.inc has said since T-P0-060 that the VOCABULARY
 * lives in slot 5 in the VM phase (`MAP_VOCAB equ MAP_PRI_SLICE`) -- it just had no code.
@@ -31,6 +48,8 @@
 * ★★ THE MMU TASK-1 SLOTS. $FFA0-$FFA7 map $0000,$2000,...,$E000. Named here rather than
 * written as literals so §2N's alias-resolving scan sees them [it MISSES literal greps by
 * design -- CEL_MMU/BANK_MMU/TC_MMU/PALETTE are the majority of POP's real accesses].
+MMU_SLOT3       equ     $FFA3           ; $6000-$7FFF -- arena low / text window rows 0-6
+MMU_SLOT4       equ     $FFA4           ; $8000-$9FFF -- arena high / text window rows 7-12
 MMU_SLOT5       equ     $FFA5           ; $A000-$BFFF -- the priority slice
 MMU_SLOT6       equ     $FFA6           ; $C000-$DFFF -- framebuffer slice / volume window
 
@@ -174,4 +193,61 @@ phase_vocab_out:
                 lda     ph_blk_slot5
                 sta     MMU_SLOT5
                 rts
+                endc
+
+* ── phase_text_in / phase_text_out -- the TEXT WINDOW, four slots, $6000-$DFFF ───
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ FOUR CONTIGUOUS BLOCKS, FLAT, SO EVERY DISPLAY ROW IS ADDRESSABLE AT ONCE [T-P0-093].
+* A character row is 1,280 bytes and the last byte a glyph writes is (r*8+7)*160 + 159, so row 24
+* ends at 31,999. **Three blocks stop at 24,576 and row 22 begins at 28,160** -- which is why the
+* command line was invisible and nothing said so [P6.37 §4D].
+*
+* ★★★★★ THE BORROW IS LEGAL BECAUSE NOTHING IN SLOTS 3-6 IS READ DURING A BLIT, AND THAT IS
+* MEASURED RATHER THAN ASSUMED [T-P0-093 §4A]: the font is at $E3BA (slot 7, which never moves),
+* the substituted text is in txt_pbuf at $1C00 (slot 0), text.s's whole state block is $4F3F-$5498
+* (slot 2), and the stack and direct page are slot 0. **The four borrowed slots hold the
+* framebuffer and nothing the drawing needs to read.**
+*
+* ★★★★★ AND THAT TURNS vm_text_ops.s's HAZARD 1 FROM LUCK INTO A REQUIREMENT. That file recorded
+* the txt_pbuf isolation as *"luck, and it is recorded as luck rather than as design."* With the
+* arena's LOW half borrowed as well, a blit that read the message straight from the resource would
+* read framebuffer bytes -- so substitution running first, into slot 0, is now load-bearing.
+*
+* ★★★★ ONE `inca` CHAIN, NOT FOUR LOADS: the blocks are contiguous by construction (the visible
+* plane is four consecutive blocks), so the first block number plus three increments is the whole
+* mapping and it cannot describe a discontiguous window by accident.
+                ifdef   PHASE_TEXT
+* ★★ ph_blk_slot5 IS PHASE_VOCAB's BYTE AND phase_text_out READS IT. One home for "what slot 5
+* holds otherwise" [§2F]; declaring a second would let the two restores disagree. Asserted rather
+* than left to fail on an undefined symbol sixty lines away.
+                ifndef  PHASE_VOCAB
+                error   "PHASE_TEXT needs PHASE_VOCAB -- phase_text_out restores slot 5 from ph_blk_slot5"
+                endc
+ph_blk_text     fcb     0               ; first of FOUR contiguous framebuffer blocks
+ph_blk_slot3    fcb     0               ; what slot 3 holds otherwise (the arena's low half)
+ph_blk_slot4    fcb     0               ; what slot 4 holds otherwise (the arena's high half)
+
+phase_text_in:
+                lda     ph_blk_text
+                sta     MMU_SLOT3
+                inca
+                sta     MMU_SLOT4
+                inca
+                sta     MMU_SLOT5
+                inca
+                sta     MMU_SLOT6
+                rts
+
+* ★★★ SLOT 6 GOES BACK THROUGH phase_vm, NOT BY A FOURTH LITERAL. That slot's VM-phase content is
+* ph_blk_vol and the phase machinery already owns the question; a literal here would be a second
+* opinion about the same byte, which is exactly the defect this file exists to prevent.
+* ★★ Slot 5 comes back from ph_blk_slot5, which phase_vocab_out already uses -- one home.
+phase_text_out:
+                lda     ph_blk_slot3
+                sta     MMU_SLOT3
+                lda     ph_blk_slot4
+                sta     MMU_SLOT4
+                lda     ph_blk_slot5
+                sta     MMU_SLOT5
+                jmp     phase_vm
                 endc

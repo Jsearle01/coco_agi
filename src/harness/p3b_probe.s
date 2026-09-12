@@ -334,6 +334,10 @@ P3_FONT_BYTES   equ     2048            ; ★ the staging length; p3b_run.lua re
 * does THIS PROBE call them -- and collapsing them would hide which side a future client changed.
 P3_VOCAB_WINDOWED equ   1
 PHASE_VOCAB     equ     1
+* ★★★★ PHASE_TEXT ENABLES mmu_phase.s's FOUR-SLOT TEXT WINDOW [T-P0-093]. Same guarding discipline
+* as PHASE_VOCAB and for the same measured reason: mmu_phase.s is included unconditionally, so
+* unguarded bytes there land in `p3b` and trip its CP_CEL assert.
+PHASE_TEXT      equ     1
                 endc
 
                 org     MAP_CODE
@@ -468,6 +472,23 @@ P3_BLK_VISIBLE  equ     40              ; what the display shows and sprites com
                 sta     ph_blk_vocab
                 lda     #P3_BLK_SLOT5
                 sta     ph_blk_slot5
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE TEXT WINDOW's BLOCKS [T-P0-093]. Four contiguous blocks of the VISIBLE plane, and the
+* two restore values for the slots it borrows on top of the phase machinery's own.
+* ★★★★ THE RESTORE VALUES COME FROM THE BOOT MAP AND NOWHERE ELSE: p3b_run.lua pre-sets all eight
+* slots to $38+i at load, and mmu_phase.s's contract keeps slots 3 and 4 there for the whole run
+* apart from this window. So slot 3 is $3B and slot 4 is $3C -- **the same $3C vm_text_ops.s used
+* to carry as TX_ARENA_HI**, now stated once, beside the slot-5 value it sits next to.
+* ★★★ The registers are write-only, so these are the only record of what was mapped. A wrong value
+* here unmaps the arena permanently and the next resource fetch reads framebuffer bytes.
+                ifdef   PHASE_TEXT
+                lda     #P3_BLK_VISIBLE
+                sta     ph_blk_text
+                lda     #$3B
+                sta     ph_blk_slot3
+                lda     #$3C
+                sta     ph_blk_slot4
+                endc
                 jsr     phase_vocab_in
                 endc
                 ldx     #P3_VOCAB
@@ -579,6 +600,15 @@ p3_vt_done:     std     P3_VOCAB_BAD
 * 4-6, and slot 5 is the vocabulary window. **The two mappings cannot both be open**, so the echo
 * brackets its own blit and the ENTER path parses first and redraws second -- which is also the
 * oracle's order at text.cpp:782-793.
+* ★★★★★ THE DEFAULT TEXT ATTRIBUTE, WHICH NOTHING EVER SET [text.cpp:46, T-P0-093]. TextMgr's
+* constructor calls `charAttrib_Set(15, 0)` -- white on black -- and this port left txt_fg and
+* txt_bg at zero until something drew. **The command line clears its row to txt_bg**, so before
+* anything else had drawn, the prompt row came up in colour 0's background by accident rather than
+* by decision, and after a message box it came up white.
+* ★★ B = 0 takes txt_attrib's `ta_plain` arm, which is the (15, 0) the oracle's constructor means.
+                lda     #15
+                clrb
+                jsr     txt_attrib
                 ifdef   TEXT_PROMPT
                 ldd     #p3_parse_line
                 std     txt_parse
@@ -1151,6 +1181,33 @@ p3_cp:          std     ,x++
 * eight MMU writes -- four framebuffer slices, two priority slices, and the restoring pair -- and
 * they are real. **P3_REMAPS is "two per phase transition"; these are not phase transitions**, so
 * they are added here and the per-room-change cost is visible instead of missing.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ BLACK THE TEXT STRIP, BECAUSE THE PICTURE IS 168 ROWS AND THE DISPLAY IS 200 [T-P0-093].
+* ★★★★★ THE WHITE FILL ABOVE IS RIGHT AND ITS EXTENT WAS NOT. AGI fills are bounded by white, so
+* the plane a PICTURE is rendered into must start white -- but a PICTURE is 160x168 = 26,880
+* bytes, and this walk whitens four whole 8,192-byte slices = 32,768. **The 5,120 bytes past the
+* picture are the text area at the bottom of the screen, and they were being painted white and
+* then carried to the visible plane by p3_present, which copies all four slices.**
+* ★★★★ IT WAS INVISIBLE UNTIL THIS TASK. Nothing ever drew below row 20, so a white strip under
+* the picture looked like part of the border. The command line put characters on row 22 and Jay
+* saw it at once: *"the rows above and below are white and make it look off."*
+* ★★★ SLICE 3, FROM OFFSET 2,304. 26,880 - 3*8,192 = 2,304, so the picture ends 2,304 bytes into
+* the last slice and everything above that is text area. Blacking to the end of the aperture
+* covers pixel rows 168-204; the display shows 200 and the rest is spare.
+* ★★ Scoped to the text configuration: `p3b` is purpose=timing and byte-identical is its contract,
+* and the cel build draws no text at all, so the strip's colour is not observable there.
+                ifdef   TEXT_PROMPT
+                lda     #3
+                jsr     phase_draw_fb
+                ldx     #FB_BASE+2304
+                ldd     #$0000
+p3_cv_tail:     std     ,x++
+                cmpx    #FB_BASE+8192
+                blo     p3_cv_tail
+                ldd     P3_REMAPS
+                addd    #1
+                std     P3_REMAPS
+                endc
                 ldd     P3_REMAPS
                 addd    #8
                 std     P3_REMAPS

@@ -194,7 +194,15 @@ p3b	src/harness/p3b_probe.s	build/p3b_probe_pk_fresh.bin	-DHAL_GFX_MODE_SERVICE 
 # input at all. The prompt reads `enabled=0` on this corpus because Kingquest1's room 83 never
 # calls accept.input. **A green run here says the command line ASSEMBLES and changes nothing else**
 # [L-121: state what a row cannot see]. p3b_type is the row that exercises it.
-p3b_text	src/harness/p3b_probe.s	build/p3b_probe_text.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ	correctness probe: text opcodes, no cel staging, room 83, windowed vocabulary, command line linked but never enabled; binary 0D7EBA16 16,157 B, re-baselined T-P0-092	purpose=correctness
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ RE-BASELINED AT T-P0-093 -- ROW 22 AND THE COLOURS.
+#     retired:  0D7EBA163C0D8DA3AACB375C5119A3E5  16,157 B   (valid P6.37 only)
+#     current:  5B19334FAD8E7AB0F8A7A54C8687163A  16,258 B
+# ★★★★ WHY: 101 bytes. The text window became a PHASE in mmu_phase.s and grew to four slots, so
+# the command line at row 22 is addressable; the attribute gained push/pop [text.cpp:453,:516] and
+# a boot default of white-on-black [text.cpp:46]; and the per-room clear now blacks the text strip
+# below the 168-row picture instead of leaving four whole slices white.
+p3b_text	src/harness/p3b_probe.s	build/p3b_probe_text.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ	correctness probe: text opcodes, no cel staging, room 83, windowed vocabulary, four-slot text window, command line linked but never enabled; binary 5B19334F 16,258 B, re-baselined T-P0-093	purpose=correctness
 # ═══════════════════════════════════════════════════════════════════════════════════════════
 # ★★★★★ THE FAULT ARM, AND IT HAS NOW BEEN SEEN RED. Blocked for three tasks; §2W is satisfied.
 #     retired:  2268DAB7...  15,033 B   (built but unexercisable, P6.29c..P6.31)
@@ -221,7 +229,7 @@ p3b_text	src/harness/p3b_probe.s	build/p3b_probe_text.bin	-DHAL_GFX_MODE_SERVICE
 # ★★ T-P0-092: 5C4200DA 15,552 B RETIRED -> 454576C1 16,154 B. Re-shown RED on this binary:
 # STUCK in cycle 9 under the p3b_box trigger [L-62 -- fault-detectability does not survive a
 # rebuild, so every re-baseline re-runs the arm rather than citing it].
-p3b_notick	src/harness/p3b_probe.s	build/p3b_probe_notick.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ -DTEXT_FAULT_NOTICK	fault arm for print's wait loop -- shown RED T-P0-087+, re-shown T-P0-092; binary 454576C1 16,154 B	purpose=fault
+p3b_notick	src/harness/p3b_probe.s	build/p3b_probe_notick.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ -DTEXT_FAULT_NOTICK	fault arm for print's wait loop -- shown RED T-P0-087+, re-shown T-P0-093; binary F7AE0FCF 16,255 B	purpose=fault
 # ═══════════════════════════════════════════════════════════════════════════════════════════
 # ★★★★★ p3b_nomap -- THE VOCABULARY WINDOW's FAULT ARM [T-P0-091, §2W].
 # ★★★★★ IT EXISTS BECAUSE NO ROW IN THE SUITE EXERCISES THE DICTIONARY AT ALL, and that was true
@@ -241,7 +249,7 @@ p3b_notick	src/harness/p3b_probe.s	build/p3b_probe_notick.bin	-DHAL_GFX_MODE_SER
 # that zeroed par_vocab]. The discrimination is total, which is what §2W asks for.
 # ★★ NOT in run_gates.sh: a fault arm belongs beside its gate, not inside the green path.
 # ★★ T-P0-092: 0A0B7F1B 15,588 B RETIRED -> DC9260A0 16,154 B, re-shown RED (STUCK in cycle 30).
-p3b_nomap	src/harness/p3b_probe.s	build/p3b_probe_nomap.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ -DP3B_VOCAB_NOMAP	fault arm for the vocabulary window -- run with -WithInput; shown RED T-P0-091, re-shown T-P0-092; binary DC9260A0 16,154 B	purpose=fault
+p3b_nomap	src/harness/p3b_probe.s	build/p3b_probe_nomap.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ -DP3B_VOCAB_NOMAP	fault arm for the vocabulary window -- run with -WithInput; shown RED T-P0-091, re-shown T-P0-093; binary 9604AAAA 16,255 B	purpose=fault
 # ═══════════════════════════════════════════════════════════════════════════════════════════
 # ★★★★★ p3b_type -- THE TYPED PATH. Same binary as p3b_text; what differs is P3B_TYPE, which posts
 # characters through MAME's natural keyboard into the CoCo3 matrix [T-P0-092 §1.4].
@@ -255,6 +263,32 @@ p3b_nomap	src/harness/p3b_probe.s	build/p3b_probe_nomap.bin	-DHAL_GFX_MODE_SERVI
 # rather than rediscovering both. It is not in run_gates.sh.
 #     P3B_TITLE=Kingquest1 P3B_ROOM=1 P3B_ROOM_AT=8 P3B_VAR21=2 P3B_TYPE=look -Text -WithInput
 p3b_type	src/harness/p3b_probe.s	build/p3b_probe_text.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ	typed command line -- BLOCKED: natkeyboard cannot hold a key across a once-per-cycle poll; verified by hand instead	purpose=blocked
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ p3b_row22 -- THE COMMAND LINE IS DRAWN [T-P0-093 AC-3]. Same binary as p3b_text; what
+# differs is P3B_INJECT, which hands characters to the editor's own one-deep latch, and P3B_ROOM=1,
+# which is where Kingquest1 calls accept.input.
+#     P3B_ROOM=1 P3B_ROOM_AT=8 P3B_INJECT=look P3B_INJECT_AT=20  -Text -Headless, 60 cycles
+# ★★★★ ADJUDICATED ON INK IN ROW 22's BAND -- offsets 28,160-29,439 of the visible plane, the
+# FOURTH block of four. Measured: clean 55 of 1,280 bytes for four characters; -Win3 zero. The
+# failure is SILENT -- the run completes, the box draws, the parse fires, the line is not there.
+# ★★★★★ WHAT IT CANNOT SEE, AND IT IS DELIBERATE [L-121]: the PIA scan, the key decode and the
+# debounce. It begins ONE BYTE AFTER the matrix, at p3_keybuf, because natkeyboard cannot hold a
+# key across a once-per-cycle poll and a human can [P6.37 §4E]. **Those belong to input_probe's
+# gate and to Jay's eye gate, and this row does not pretend to cover them.**
+# ★★★ It also cannot see COLOUR. Ink is a count of bytes differing from the row's last byte; a row
+# drawn in the wrong attribute counts the same. Jay found the white strip and the leaked box
+# attribute by looking, and no byte gate here would have.
+p3b_row22	src/harness/p3b_probe.s	build/p3b_probe_text.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ	the command line is drawn on row 22: Kingquest1 room 1, injected keys; blind to the matrix and to colour	purpose=correctness
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ p3b_win3 -- THE TEXT WINDOW's FAULT ARM. ONE CONSTANT: the row count text.s is told the
+# window holds, 25 back to 19, which is P6.37's geometry exactly. Rows 0-18 draw, row 22 is refused
+# in silence, and nothing else differs anywhere.
+# ★★★★ IT DOES NOT CHANGE THE MAPPING, and the dispatch asked for three slots. Mapping three from
+# vm_text_ops.s would have put an MMU write back into the file this task emptied -- **the fault arm
+# would have re-created the defect the clean arm just fixed** -- and it would move two variables
+# rather than one [L-73]. The row bound is what actually refuses the glyph.
+# ★★★ Shown RED T-P0-093: 0 of 1,280 bytes on row 22 against the clean arm's 55, same four keys.
+p3b_win3	src/harness/p3b_probe.s	build/p3b_probe_win3.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ -DTEXT_WIN3	fault arm for the four-slot text window -- run with P3B_INJECT; shown RED T-P0-093; binary 5400A30F 16,258 B	purpose=fault
 # ═══════════════════════════════════════════════════════════════════════════════════════════
 # ★★★★★ p3b_parse -- SAME BINARY AS p3b_text; WHAT DIFFERS IS -WithInput, AND THAT IS THE ROW.
 # §2F: the scope and the invocation of a gate are part of its definition, and this project has now

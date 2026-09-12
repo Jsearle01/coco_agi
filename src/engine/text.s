@@ -779,6 +779,35 @@ ta_out:         sta     txt_fg
                 rts
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ txt_attrib_push / _pop <- text.cpp:219/226, AND THEIR ABSENCE WAS VISIBLE ON SCREEN.
+* drawMessageBox pushes the attribute, sets black-on-white for the box, and POPS IT BACK
+* [text.cpp:453, :455, :516; displayText does the same at :597/:603/:624]. **This file ported the
+* set and not the push and pop**, so a box left the attribute at background 15 permanently -- and
+* the command line, which clears its row to txt_bg, came up WHITE ever after.
+* ★★★★ Jay, on the eye gate that made it visible: *"the line i type on starts off white as well
+* and contributes to the wierd look."* It could not be seen before this task because nothing was
+* ever drawn on row 22 [P6.37 §4D], which is the second time this subsystem has needed a person to
+* find a missing side effect rather than a wrong number [AD-114, and tx_drawbox's own note].
+* ★★★ ONE LEVEL, NOT THE ORACLE's STACK. _textAttribArray is TEXTATTRIBARRAY_MAX deep because the
+* oracle nests; our box and our display never do -- txt_msgbox is not re-entrant and there is no
+* path from inside it back into itself. **Two bytes against an array, and the depth is stated
+* rather than assumed** [§2V.2: a 6809 array does not grow, so say the maximum].
+txt_at_sf       fcb     0
+txt_at_sb       fcb     0
+txt_attrib_push:
+                lda     txt_fg
+                sta     txt_at_sf
+                lda     txt_bg
+                sta     txt_at_sb
+                rts
+txt_attrib_pop:
+                lda     txt_at_sf
+                sta     txt_fg
+                lda     txt_at_sb
+                sta     txt_bg
+                rts
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ txt_msgbox <- text.cpp:445. Substitute, measure, place, then draw.
 txt_msgbox:
                 lda     txt_maxw
@@ -852,6 +881,10 @@ tmb_col_set:    sta     txt_tcol
                 jsr     tx_drawbox
                 endc
 * ── the attribute, then pass 2: place ──
+* ★★★ PUSHED BEFORE IT IS SET [text.cpp:453]. The oracle brackets the whole box with
+* charAttrib_Push / charAttrib_Pop; without the push this call leaked black-on-white into
+* everything drawn afterwards, and the command line's own row clear inherited it.
+                jsr     txt_attrib_push
                 clra
                 ldb     #15
                 jsr     txt_attrib      ; charAttrib_Set(0, 15) -> (15, 8)
@@ -874,7 +907,9 @@ tmb_col_set:    sta     txt_tcol
                 lda     #1
                 sta     txt_winactive
                 endc
-                rts
+* ★★★ AND POPPED [text.cpp:516], after the glyphs and after window_Active. The oracle pops at the
+* very end of drawMessageBox and so does this.
+                jmp     txt_attrib_pop
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★ txt_dispch <- text.cpp:295 displayText + :307 displayCharacter. A = the character.
@@ -1407,8 +1442,14 @@ txf_xok:
 * draw in the wrong place, so it is refused outright instead of being silently mis-drawn.
                 tst     txt_fbrow0
                 bne     txf_out
+* ★★★★★ NO `inca`, AND REMOVING IT IS A FIX [T-P0-093]. txt_fbrows is a COUNT of character rows --
+* vm_text_ops.s sets it from TX_WIN_ROWS, "rows 0-18 inclusive" -- so one past the last PIXEL row
+* is rows*8, not (rows+1)*8. The extra row let a fill run a full character row past the window.
+* ★★★★ IT WAS UNREACHABLE AND THIS TASK MAKES IT REACHABLE. With a three-block window nothing drew
+* below row 18, so the slack at row 19 was never used. With four blocks and fbrows 25 the slack is
+* row 25, whose last byte is 33,279 against a 32,768-byte window -- **511 bytes into slot 7, which
+* holds the parser.** A latent off-by-one becomes code corruption exactly when the window grows.
                 lda     txt_fbrows
-                inca
                 ldb     #TXT_VH
                 mul
                 std     txf_yhi                 ; one past the last row this window holds
@@ -1605,8 +1646,12 @@ txt_blit:
                 lda     txt_crow
                 suba    txt_fbrow0
                 lbmi    tb_out                  ; the row is above this window
+* ★★★★ `bhs`, NOT `bhi` [T-P0-093]. txt_fbrows is a COUNT, so the last legal row index is
+* fbrows-1 and `bhi` allowed one row too many -- the same off-by-one tx_boxfill's yhi carried, in
+* the other routine that reads the same variable. Both were unreachable while the window was three
+* blocks and both become live at four.
                 cmpa    txt_fbrows
-                lbhi    tb_out
+                lbhs    tb_out
 * offset = (crow - fbrow0) * 8 * 160 + ccol * 4. ★ 8*160 = 1,280 does not fit MUL's 8x8 form, so
 * it is done as (rows * 160) shifted left three times rather than with one multiply.
                 ldb     #160

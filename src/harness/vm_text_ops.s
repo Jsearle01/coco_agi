@@ -52,54 +52,73 @@ vmop_prevent_input      equ     vm_op_modelled
 * (row 18's last byte is 24,319). Nothing straddles. Slot 7 is untouched, so the font at MAP_FONT
 * stays resident through the blit.
 *
-* ★★★★★ HAZARD 1 -- SLOT 4 IS THE ARENA WINDOW'S HIGH HALF, AND THE MESSAGE LIVES IN THE ARENA.
-* MAP_ARENA_WIN is $6000-$A000 (slots 3-4) and the largest corpus LOGIC is 10,964 B, so a resource
-* at the arena base reaches $8AD4 -- inside slot 4. **The message text is bytes of that resource.**
-* Blitting straight from txt_msgp with slot 4 remapped would read framebuffer bytes as text.
-* ★★★★ SO THE SUBSTITUTION RUNS FIRST, WITH THE ARENA FULLY MAPPED, AND THE BLIT READS ONLY
-* txt_pbuf -- which lives in MAP_INPUT ($1C00), slot 0, resident in every phase. The buffer that
-* §2V sized for %-code substitution is also the isolation this needs; that is luck, and it is
-* recorded as luck rather than as design.
+* ★★★★★ HAZARD 1 -- THE ARENA IS BORROWED WHOLE, AND THE ISOLATION IS NOW A REQUIREMENT [T-P0-093].
+* MAP_ARENA_WIN is $6000-$A000, slots 3 AND 4, and the largest corpus LOGIC is 10,964 B, so a
+* resource at the arena base reaches $8AD4. **The message text is bytes of that resource.**
+* ★★★★★ THIS PARAGRAPH USED TO END "that is luck, and it is recorded as luck rather than as
+* design." It is not luck any more. The window borrowed slot 4 only; it now borrows slot 3 as
+* well, so the arena is COMPLETELY unmapped for the whole blit -- **a blit that read the message
+* from txt_msgp would read framebuffer bytes, with no partial case left to be lucky about.**
+* ★★★★ THE REQUIREMENT, STATED AS ONE: substitution runs FIRST, with the arena mapped, and writes
+* txt_pbuf in MAP_INPUT ($1C00) -- slot 0, resident in every phase. The blit then reads txt_pbuf,
+* the font at $E3BA (slot 7) and text.s's own state (slot 2), and nothing else. Measured, not
+* assumed [T-P0-093 §4A].
 *
-* ★★★★ HAZARD 2 -- THE MMU REGISTERS ARE WRITE-ONLY, so there is no save/restore. Restoration is
-* by KNOWN VALUE: p3b_run.lua:345 pre-sets all eight slots to $38+i and mmu_phase.s's contract is
-* that **slots 0-4 and 7 are set once at init and never touched**, so slot 4's value is $3C. Slots
-* 5 and 6 belong to the phase machinery and are put back through it.
-* ★★★ $FFA4 HAS NO SANCTIONED OWNER: mmu_phase.s manages slots 5 and 6 only. This file becomes the
-* second writer of the MMU register file, which is a §2N ownership question and is reported rather
-* than settled here. It is in src/harness/, so reg_discipline.py's src/engine census does not move.
-MMU_SLOT4       equ     $FFA4
-TX_ARENA_HI     equ     $3C             ; $38 + 4, from p3b_run.lua's boot pre-set
-TX_WIN          equ     $8000           ; slots 4-6, flat
-TX_WIN_ROWS     equ     19              ; rows 0-18 inclusive
+* ★★★★★ HAZARD 2 IS SETTLED AND THE SETTLEMENT IS IN mmu_phase.s. The registers are write-only, so
+* there is no save; restoration is by KNOWN VALUE, and those values now live in ph_blk_slot3/4/5
+* beside the routine that writes them. **This file no longer writes an MMU register at all** --
+* which is what the old note here asked for and declined to do:
+*     "$FFA4 HAS NO SANCTIONED OWNER: mmu_phase.s manages slots 5 and 6 only. This file becomes
+*      the second writer of the MMU register file, which is a §2N ownership question and is
+*      reported rather than settled here."
+* ★★★ Kept quoted rather than deleted: the question stood for six tasks and the answer is only
+* legible beside it.
+* ★★★★ AND THE CENSUS CANNOT SEE THIS FILE. reg_discipline.py scans src/engine, so these five
+* writes were never counted -- the ownership claim needed a WHOLE-TREE grep to be checkable, and
+* that grep is §3(3) of T-P0-093's report.
+TX_WIN          equ     $6000           ; slots 3-6, flat
+* ★★★★ 25 ROWS, AND THE ARITHMETIC RATHER THAN A CONSTANT: $6000-$DFFF is 32,768 B; a character
+* row is 8 * 160 = 1,280 B; the last byte of row 24 is (24*8+7)*160 + 159 = 31,999 < 32,768, and
+* row 25 would end at 33,279 and overrun into slot 7's parser. **Rows 0-24, which is TXT_ROWS.**
+TX_WIN_ROWS     equ     25
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE FAULT ARM IS THE ROW BOUND, NOT THE SLOT COUNT, AND THE CHANGE IS DELIBERATE [§2W].
+* The dispatch asked for "map THREE slots instead of four". **Mapping three from here would put an
+* MMU write back in this file**, which is the one thing this task exists to remove -- the fault arm
+* would have quietly re-created the defect the clean arm just fixed, and AC-2 would be true of one
+* build and false of another.
+* ★★★★ -DTEXT_WIN3 CHANGES ONE CONSTANT: the row count text.s is told the window holds. txt_blit
+* refuses `crow >= txt_fbrows` and tx_boxfill's yhi is fbrows*8, so 19 reproduces P6.37's geometry
+* exactly -- rows 0-18 drawable, the prompt at row 22 refused, **and nothing else different
+* anywhere.** The box still draws, the parse still fires, the run still completes.
+* ★★★ THAT IS A STRICTLY BETTER FAULT [L-73]: one variable rather than two, and it isolates the
+* thing actually under test -- the BOUND -- from the mapping, which is now somebody else's file.
+                ifdef   TEXT_WIN3
+TX_WIN_ROWS_EFF equ     19
+                else
+TX_WIN_ROWS_EFF equ     TX_WIN_ROWS
+                endc
 
-* ── tx_window_enter -- map three visible-plane blocks flat across slots 4-6 ───────
+* ── tx_window_enter -- the text phase: four visible-plane blocks flat, $6000-$DFFF ──
+* ★★ The MAPPING is mmu_phase.s's; what stays here is the text engine's view of it -- the base,
+* the first row and how many rows it holds, which are text.s's parameters and not the MMU's.
 tx_window_enter:
-                lda     #P3_BLK_VISIBLE
-                sta     MMU_SLOT4
-                inca
-                sta     MMU_SLOT5
-                inca
-                sta     MMU_SLOT6
+                jsr     phase_text_in
                 ldx     #TX_WIN
                 stx     txt_fbwin
                 clr     txt_fbrow0
-                lda     #TX_WIN_ROWS
+                lda     #TX_WIN_ROWS_EFF
                 sta     txt_fbrows
                 rts
 
-* ── tx_window_exit -- put the VM phase back, by known value ──────────────────────
+* ── tx_window_exit -- put the VM phase back ──────────────────────────────────────
 * ★★ res_core caches which block it believes is in slot 6 and SKIPS the write when it matches, so
 * after anyone else moves that register the cache has to be invalidated or the next fetch reads
 * the wrong block while being certain it is right [p3b_probe.s's own note at the cycle body].
 tx_window_exit:
-                lda     #TX_ARENA_HI
-                sta     MMU_SLOT4
-                lda     #$3D                    ; VM_OBJ, exactly as the cycle body restores it
-                sta     MMU_SLOT5
+                jsr     phase_text_out
                 lda     #$FF
                 sta     res_curblk
-                jsr     phase_vm
                 ifdef   PLANE_WINDOWED
                 jsr     plane_reset
                 endc

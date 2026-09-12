@@ -307,9 +307,32 @@ if [ "$WHICH" = "p3b_parse" ] || [ "$WHICH" = "all" ]; then
     echo
 fi
 
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ p3b_row22 -- THE COMMAND LINE IS DRAWN [T-P0-093]. Same binary as p3b_text; what differs
+# is P3B_INJECT, which hands characters to the editor's own latch, and P3B_ROOM=1, which is where
+# accept.input runs.
+# ★★★★★ WHY IT INJECTS RATHER THAN TYPES: natkeyboard cannot hold a key across a once-per-cycle
+# poll [P6.37 §4E], and a human's can -- so the matrix is not in doubt and is not what this
+# measures. **It begins one byte after the key decode**, at p3_keybuf, and everything from there
+# inward is the real path: the editor, the window, txt_blit, the framebuffer.
+# ★★★★ ADJUDICATED ON INK IN ROW 22's BAND -- byte offsets 28,160-29,439 of the visible plane,
+# which is the fourth block of four. A three-block window cannot reach it and the failure is
+# SILENT: the run completes, the box draws, the parse fires, and the line simply is not there.
+# ★★★ Measured: clean 100 of 1,280 bytes for four characters; -Win3 zero. Its fault arm is
+# p3b_win3 [gates.manifest], run by hand.
+# ★★ Blind spots: the PIA scan, the key decode and the debounce are input_probe's and Jay's.
+if [ "$WHICH" = "p3b_row22" ] || [ "$WHICH" = "all" ]; then
+    echo "═══ p3b_row22 (the command line is drawn: Kingquest1 room 1, injected keys) ═══"
+    P3B_ROOM=1 P3B_ROOM_AT=8 P3B_INJECT=look P3B_INJECT_AT=20 \
+    powershell -NoProfile -ExecutionPolicy Bypass -File harness/tools/p3b_show.ps1 \
+        -Title Kingquest1 -Cycles 60 -Text -Headless \
+        || note_fail p3b_row22
+    echo
+fi
+
 if [ -n "$FAILED" ]; then
     echo "★★★ GATES FAILED:$FAILED"
     exit 1
 fi
-echo "★ gates run:$([ "$WHICH" = "all" ] && echo " pic res cel comp p3b p3b_text p3b_box p3b_parse" || echo " $WHICH")  -- all green"
+echo "★ gates run:$([ "$WHICH" = "all" ] && echo " pic res cel comp p3b p3b_text p3b_box p3b_parse p3b_row22" || echo " $WHICH")  -- all green"
 exit 0

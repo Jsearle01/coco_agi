@@ -35,6 +35,7 @@ param(
   [switch]$NoTick,
   [switch]$Diag,
   [switch]$NoMap,
+  [switch]$Win3,
   [switch]$NoIrq,
   [double]$Hold   = 3.0
 )
@@ -104,6 +105,16 @@ if ($Diag) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DTX_MSGDIAG") + $IRQ 
 # window that was never opened still reads SOMETHING; the run does not crash and the box still
 # draws. **The only way to know the window is load-bearing is to shut it and watch the parse fail.**
 if ($NoMap) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DP3B_VOCAB_NOMAP") + $IRQ }
+# ★★★★★ -Win3 IS THE TEXT WINDOW's FAULT ARM [T-P0-093, §2W]. -DTEXT_WIN3 changes ONE constant --
+# the number of character rows text.s is told the window holds, 25 back to 19 -- and nothing else.
+# ★★★★ THAT REPRODUCES P6.37's GEOMETRY EXACTLY: txt_blit refuses `crow >= txt_fbrows` and
+# tx_boxfill's yhi is fbrows*8, so rows 0-18 draw and row 22 is declined in silence. The box still
+# draws, the parse still fires, the run still completes -- **the command line simply is not there**,
+# which is the defect this task fixed, reproduced rather than reconstructed.
+# ★★★ IT DOES NOT CHANGE THE MAPPING. An arm that mapped three slots would put an MMU write back
+# into vm_text_ops.s, which is the thing this task removed -- the fault would have re-created the
+# defect it is meant to detect [AC-2], and it would move two variables instead of one [L-73].
+if ($Win3) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DTEXT_WIN3") + $IRQ }
 
 & $LW --format=raw --output=build/p3b_probe_pk_fresh.bin --map=build/p3b_probe_pk.map -I. @FLAGS src/harness/p3b_probe.s
 if ($LASTEXITCODE -ne 0) { throw "p3b assemble failed" }
@@ -128,26 +139,35 @@ $WANT = @("res_volbase","res_slicebase","res_curblk","vm_quit","vm_badop","vm_cy
 # under P3B_NO_CEL -- i.e. exactly the text arms. The host uses their PRESENCE to decide whether
 # the dictionary is windowed, so listing them for the cel build would both fail the extraction and
 # make a flat build claim a window it does not have.
-if ($Text -or $Fault -or $DecodeFault -or $NoTick -or $Diag -or $NoMap) { $WANT += @("P3_FONT","P3_FONT_BYTES","P3_PBUF","ph_blk_vocab","ph_blk_slot5") }
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ TWO PREDICATES, NOT FIVE COPIES OF THE SAME `-or` CHAIN [T-P0-093]. This file carried the
+# arm list five times over, and adding -Win3 meant editing all five. **A list repeated five times
+# is a list that will be edited four times** -- which is the same defect shape as a constant with
+# five homes [memmap.inc's MAP_DIR_STRIDE, found at 0/9 on the fifth].
+#   $Linked  text.s is LINKED (the -Fault arm links it and declines to call it)
+#   $Wired   the nine opcodes are wired, so tx_wt_* and the prompt symbols exist
+$Wired  = $Text -or $DecodeFault -or $NoTick -or $Diag -or $NoMap -or $Win3
+$Linked = $Wired -or $Fault
+if ($Linked) { $WANT += @("P3_FONT","P3_FONT_BYTES","P3_PBUF","ph_blk_vocab","ph_blk_slot5") }
 # ★★★★ THE COMMAND LINE's SYMBOLS [T-P0-092]. They exist wherever TEXT_PROMPT does, which
 # p3b_probe.s conditions exactly as TEXT_WIRED -- so every wired text arm has them and the
 # -Fault arm (TEXT_MODELLED) does not. Asking for them there would fail the extraction.
-if ($Text -or $DecodeFault -or $NoTick -or $Diag -or $NoMap) { $WANT += @("txt_penab","txt_ppos","txt_prow","P3_KEY","P3_NKEY") }
+if ($Wired) { $WANT += @("txt_penab","txt_ppos","txt_prow","P3_KEY","P3_NKEY","p3_keybuf","txt_fg","txt_bg") }
 # ★★★★ WIRED BUILDS ONLY. -DTEXT_MODELLED keeps TEXT_WIRED undefined (p3b_probe.s:1004), so the nine
 # handlers become `equ vm_op_modelled` and **the whole body -- tx_wt_key included -- is never
 # assembled**. Asking for it in the -Fault arm fails the symbol extraction, which is why this is a
 # second line rather than three more names on the one above.
 # ★ vm_vms and vm_passed exist in every build; they are here because only these arms read them.
-if ($Text -or $DecodeFault -or $NoTick -or $Diag -or $NoMap) { $WANT += @("vm_vms","vm_passed","tx_wt_key","tx_wt_nwait") }
+if ($Wired) { $WANT += @("vm_vms","vm_passed","tx_wt_key","tx_wt_nwait") }
 # * P3_TXDIAG exists only in the -Diag build; vm_symbols.py fails on a missing name.
 # * text.s symbols exist in EVERY P3B_NO_CEL build, -Fault included: that arm links the engine and
 #   only declines to call the nine handlers. Kept off the line above because tx_wt_* need
 #   TEXT_WIRED, which -Fault deliberately leaves undefined.
-if ($Text -or $Fault -or $DecodeFault -or $NoTick -or $Diag -or $NoMap) { $WANT += @("txt_bgx","txt_bgy","txt_bgw","txt_bgh","txb_yoff","txt_winactive","txt_restore","P3_RBTRACE","p3rb_tn","P3_CODE_SPLIT","P3_TABLES_BASE","P3_TABLES_END") }
+if ($Linked) { $WANT += @("txt_bgx","txt_bgy","txt_bgw","txt_bgh","txb_yoff","txt_winactive","txt_restore","P3_RBTRACE","p3rb_tn","P3_CODE_SPLIT","P3_TABLES_BASE","P3_TABLES_END") }
 if ($Diag) { $WANT += @("P3_TXDIAG","tx_diag_n1","tx_diag_n2") }
 # * tx_wt_* exist in every wired build; the stall dump reads them to separate the three shapes a
 #   hang inside the wait loop can have.
-if ($Text -or $DecodeFault -or $NoTick -or $Diag -or $NoMap) { $WANT += @("tx_wt_end","tx_wt_timed") }
+if ($Wired) { $WANT += @("tx_wt_end","tx_wt_timed") }
 python harness\tools\vm_symbols.py build\p3b_probe_pk.map --out build\p3b\symbols.txt --want @WANT
 if ($LASTEXITCODE -ne 0) { throw "symbols missing" }
 
@@ -237,16 +257,21 @@ if ($Headless) {
   # watchdog nor the completion check can see them. This is what makes p3b_type a gate.
   $nokeys  = Select-String -Path $log -Pattern 'NO KEYS REACHED THE EDITOR' -Quiet
   $noparse = Select-String -Path $log -Pattern 'TYPED LINE NOT PARSED' -Quiet
+  # ★★★★★ AC-3 [T-P0-093]: keys arrived and row 22 stayed blank. That is P6.37's defect exactly,
+  # and it completes the run silently -- no stall, no error, a green suite. It is the only thing
+  # that distinguishes the four-slot window from the three-slot one on a live machine.
+  $noink   = Select-String -Path $log -Pattern 'NOTHING IS DRAWN ON ROW 22' -Quiet
   # ★★★ P3_PBUF IS IN THE PATTERN BECAUSE IT IS A VERDICT LINE. An allowlist filter drops what it
   # does not name, and what it does not name is always the newest thing -- here AC-3's whole
   # observable printed to the log and never to the console [the same shape as the star-in-a-pattern
   # loss two tasks ago: the filter kept every table and removed the conclusion].
-  Select-String -Path $log -Pattern 'OK prompt|program \d+ bytes|vocabulary |window discrimination|par_vocab written|COMMAND TYPED|parse at cycle|TYPING |TYPED LINE|prompt: enabled|NO KEYS REACHED|STUCK|cycles in|final room|P3_PBUF' |
+  Select-String -Path $log -Pattern 'OK prompt|program \d+ bytes|vocabulary |window discrimination|par_vocab written|COMMAND TYPED|parse at cycle|TYPING |TYPED LINE|prompt: enabled|row 22|NO KEYS REACHED|NEVER REACHED|STUCK|cycles in|final room|P3_PBUF' |
     ForEach-Object { $_.Line }
   if ($stuck) { "★★★ p3b FAILED -- the watchdog fired"; exit 1 }
   if ($nowords) { "★★★ p3b FAILED -- a fed command matched no dictionary words"; exit 1 }
   if ($nokeys)  { "★★★ p3b FAILED -- posted keys never reached the command line"; exit 1 }
   if ($noparse) { "★★★ p3b FAILED -- a typed line did not reach the parser"; exit 1 }
+  if ($noink)   { "★★★ p3b FAILED -- keys reached the editor and nothing was drawn on row 22"; exit 1 }
   if (-not $done) { "★★★ p3b FAILED -- no completion line; the run did not reach $Cycles cycles"; exit 1 }
   "★ p3b headless: $Cycles cycles, no stall"
   exit 0

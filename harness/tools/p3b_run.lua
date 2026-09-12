@@ -188,6 +188,21 @@ local function stage()
     prog:write_u8(SYM.res_curblk, 0xFF)
 
     -- ═══════════════════════════════════════════════════════════════════════════════════
+    -- ★★★★★ THE MARK-AND-SURVIVE INSTRUMENT WAS TRIED HERE AND WITHDRAWN [T-P0-093, §2W].
+    -- The idea: write a non-uniform pattern into row 22's band before the guest reaches it, and
+    -- see whether accept.input's clearLine(22) wipes it. Four slots wipes, three slots cannot.
+    -- ★★★★★ IT DOES NOT DISCRIMINATE, AND THE CHECK THAT SHOWED THAT IS THE ONE §2W ASKS FOR:
+    -- run the case that should leave the mark ALONE. In room 83 the prompt is never enabled, so
+    -- nothing should clear anything -- and the mark vanished there too, leaving the band uniform
+    -- $FF, which is the colour p3_clear_planes writes. **The plane clear reaches that band**, so
+    -- the instrument was measuring the renderer and reporting it as the text engine.
+    -- ★★★★ It had already "passed" on the clean arm and "passed" on the fault arm before that
+    -- check was run. Two green results, one of which should have been red, and the reason was the
+    -- INPUT rather than the adjudication [AD-90, AD-102, AD-122's shape].
+    -- ★★★ What replaces it is below: inject a key at the editor's own entry point and count what
+    -- appears on row 22. That measures the path under test and nothing else.
+
+    -- ═══════════════════════════════════════════════════════════════════════════════════
     -- ★★★★★ THE VOCABULARY, FOR §4A's EYE GATE [T-P0-060]. This is the probe that has a screen,
     -- so it is the one Jay watches the VM respond on. Same two files as the byte gate --
     -- words.tok and input.txt out of the stage directory, written by vm_stage.py -- so the
@@ -397,6 +412,24 @@ local jumped, jump_seen_clear = false, false
 local TYPE_TEXT = os.getenv("P3B_TYPE")
 local TYPE_AT   = tonumber(os.getenv("P3B_TYPE_AT") or "20")
 local typed, type_report = false, nil
+
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+-- ★★★★★ P3B_INJECT -- A KEY AT THE EDITOR's OWN ENTRY POINT, ONE PER PARK [T-P0-093 AC-3].
+--
+-- ★★★★★ IT BYPASSES THE MATRIX ON PURPOSE AND SAYS SO. P6.37 established that natkeyboard cannot
+-- hold a key across a once-per-cycle poll, and that a HUMAN's keypress arrives fine -- so the
+-- matrix is not the thing in doubt and is not the thing this measures. **What is in doubt is
+-- whether a character the editor accepts can be DRAWN on row 22**, which is the four-slot window's
+-- whole purpose, and that question starts after the key decode.
+-- ★★★★ THE INJECTION POINT IS p3_keybuf, the probe's one-deep latch. p3_poll_key consumes it
+-- exactly as it consumes a scanned key -- same guard, same counter, same call into txt_pkey -- so
+-- everything from the editor inward is the real path.
+-- ★★★ WHAT THIS ROW THEREFORE CANNOT SEE [L-121]: the PIA scan, the key decode, and the debounce.
+-- Those are input_probe's gate and Jay's eye gate; this one begins one byte later.
+-- ★ §2P: the LENGTH and the resulting ink count are printed. The characters are the operator's.
+local INJECT    = os.getenv("P3B_INJECT")
+local INJECT_AT = tonumber(os.getenv("P3B_INJECT_AT") or "20")
+local inj_i     = 0
 
 -- ═══════════════════════════════════════════════════════════════════════════════════════════
 -- ★★★★★ WAIT FOR DECB'S "OK" PROMPT, NOT FOR A FRAME COUNT. [Jay, T-P0-060]
@@ -955,6 +988,68 @@ _G._n = emu.add_machine_frame_notifier(function()
             -- typed" are different facts and a row that conflates them cannot fail usefully.
             -- ★★★ The wording is what p3b_show.ps1 adjudicates on, so it is exact rather than
             -- descriptive: NO KEYS REACHED / NOT PARSED are the two failures.
+            -- ═══════════════════════════════════════════════════════════════════════════════
+            -- ★★★★★ AC-3's OBSERVABLE: INK ON ROW 22, COUNTED [T-P0-093]. The command line is at
+            -- character row 22 -- pixel rows 176-183, byte offsets 28,160-29,439 of the visible
+            -- plane. **That band lies in the FOURTH block of the plane**, which is precisely the
+            -- one a three-slot window never mapped, so before this task every byte of it was
+            -- untouched by the text engine and no instrument said so.
+            -- ★★★★ READ THROUGH THE SAME WINDOW THE PLANE DUMP USES: map the block into slot 6 and
+            -- read $C000. 28,160 >> 13 = block 3 of the plane, offset 3,584 within it.
+            -- ★★★ §2P: a COUNT of non-background bytes, never the glyphs. A person reads the
+            -- screen; this says whether anything was drawn there at all.
+            -- ★★ Restored afterwards from the guest's own ph_blk_slot5/vol rather than a literal,
+            -- and the run is over by here in any case.
+            if SYM.txt_penab and SYM.ph_blk_fb then
+                local keys = SYM.P3_NKEY and prog:read_u8(SYM.P3_NKEY) or 0
+                local blk = prog:read_u8(SYM.ph_blk_fb) + 3
+                prog:write_u8(SLOT6, blk)
+                -- ★★★★★ THE REFERENCE IS THE ROW's LAST BYTE, NOT ITS FIRST, AND THE FIRST DRAFT
+                -- USED THE FIRST. A four-character line starts at column 0, so byte 0 is INSIDE
+                -- the first glyph -- the reference was part of what it was measuring, and the
+                -- count came out 1,267 of 1,280 for four characters. The discrimination was still
+                -- total, but the NUMBER meant nothing.
+                -- ★★★★ Column 39's last byte is 156 bytes past a 40-column line's start and is
+                -- background in every case this row sees. **A metric whose baseline is inside the
+                -- signal is the shape §2W keeps finding** [the comparison that read one plane of
+                -- two, AD-122].
+                local ink = 0
+                local bg = prog:read_u8(0xC000 + 3584 + 1279)
+                for i = 0, 1279 do
+                    if prog:read_u8(0xC000 + 3584 + i) ~= bg then ink = ink + 1 end
+                end
+                -- ★★★★ THE VERDICT ONLY WHERE A VERDICT IS POSSIBLE. A run where nothing was typed
+                -- has a blank command line for the honest reason, and a row that alarms on every
+                -- normal run is a row nobody reads [the same trap the mojibake allowlist exists
+                -- for: a check that is permanently red gets switched off].
+                local penab = prog:read_u8(SYM.txt_penab)
+                -- ★★★★ THE ATTRIBUTE THE ROW WAS DRAWN WITH, because Jay's eye gate reported the
+                -- command line "appearing on white which makes them inverted against the other
+                -- white rows in that area". txt_blit treats BIT 3 of the background as INVERT, so
+                -- whether the prompt is inverted is a property of one byte and is worth printing
+                -- rather than inferring from a colour [§2W.3: name what you actually have].
+                if SYM.txt_fg and SYM.txt_bg then
+                    local fg, bgat = prog:read_u8(SYM.txt_fg), prog:read_u8(SYM.txt_bg)
+                    w("    text attribute at the end: fg=%d bg=$%02X (bit 3 = INVERT, so %s)",
+                      fg, bgat, (bgat & 0x08) ~= 0 and "INVERTED" or "normal")
+                end
+                -- ★★★★★ THE VERDICT NEEDS THE PROMPT STILL ENABLED, AND THE FIRST VERSION DID NOT
+                -- CHECK. Jay's 400-cycle eye run looped back to the title screen, where
+                -- prevent.input runs and the row is correctly cleared -- so eleven keys had
+                -- reached the editor, the line had been drawn and answered, and the END state was
+                -- a blank row. **It reported NOTHING IS DRAWN about a run that worked.**
+                -- ★★★★ A measurement taken at the end of a run is a statement about the end of the
+                -- run [§2W.3]. With the prompt disabled this row cannot know what happened
+                -- earlier and now says so instead of guessing.
+                w("    row 22: %d of 1280 bytes differ from $%02X (prompt enabled=%d, keys to the "
+                  .. "editor %d)%s", ink, bg, penab, keys,
+                  keys == 0 and "  -- nothing was typed, so blank is correct"
+                            or (penab == 0
+                                and "  -- the prompt is disabled now; this says nothing about"
+                                    .. " what was drawn earlier"
+                                or (ink > 0 and "  -- ★ the command line is DRAWN"
+                                             or "  -- ★★★ NOTHING IS DRAWN ON ROW 22")))
+            end
             if SYM.txt_penab then
                 local nk   = SYM.P3_NKEY and prog:read_u8(SYM.P3_NKEY) or 0
                 local lastk= SYM.P3_KEY  and prog:read_u8(SYM.P3_KEY)  or 0
@@ -1379,6 +1474,20 @@ _G._n = emu.add_machine_frame_notifier(function()
         -- rather than papering over the loss with a slower rate that might still be lucky.
         -- ★★★ The loss itself is reported as a finding rather than fixed here -- a key queue is a
         -- HAL change and this task is the editor [§22.5].
+        -- ★★★ ONE CHARACTER PER PARK, AND ONLY WHEN THE LATCH IS EMPTY -- the guest consumes at
+        -- most one per cycle, so writing a second before it reads the first would silently drop
+        -- one and the echo would be short by a character with nothing to say why.
+        if INJECT and n >= INJECT_AT and inj_i < #INJECT and SYM.p3_keybuf then
+            if prog:read_u8(SYM.p3_keybuf) == 0 then
+                inj_i = inj_i + 1
+                prog:write_u8(SYM.p3_keybuf, INJECT:byte(inj_i))
+                if inj_i == 1 then
+                    w("  ★ INJECTING %d character(s) from cycle %d at the editor's entry point "
+                      .. "(the matrix is NOT exercised -- see the manifest row)", #INJECT, n)
+                end
+            end
+        end
+
         if TYPE_TEXT and not typed and n >= TYPE_AT then
             local sent = _G._type_i or 0
             local nk = SYM.P3_NKEY and prog:read_u8(SYM.P3_NKEY) or 0
