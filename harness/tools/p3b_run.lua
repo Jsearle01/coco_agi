@@ -137,6 +137,14 @@ end
 -- ★★★ AND THE VOCABULARY WINDOW TOO. It used to be $E000 flat; it now starts AFTER the parser
 -- and its input buffers, so it is an interior address like the rest and comes from the map.
 local INBUF_MAX = 42
+-- ★★★★★ DECLARED HERE, ABOVE stage(), AND THAT PLACEMENT IS THE WHOLE POINT [T-P0-097]. This is
+-- the THIRD time in this file that a name read inside stage() was declared below it: the res_err
+-- tap's cycle, the par_vocab tap's cycle, and this. **A local declared after a function is a
+-- GLOBAL inside it**, and a nil global is silent -- the tap simply never installs, and the missing
+-- output reads as "the condition was false".
+-- ★★★ The other two were fixed by not capturing at all (they read the guest's counter). This one
+-- is a configuration value with nowhere else to come from, so it moves instead.
+local PHASETAP = tonumber(os.getenv("P3B_PHASETAP") or "")
 local VOCAB, VOCAB_END = nil, nil
 local function rd16_early(a) return prog:read_u8(a) * 256 + prog:read_u8(a + 1) end
 
@@ -346,6 +354,46 @@ local function stage()
         -- ★★★ What replaces it is vm_curlogic sampled at each ROOM TRANSITION: it names the LOGIC
         -- that was executing, which is one level coarser than the PC and costs nothing. Recorded
         -- so the next reader does not re-derive that a hot-byte tap is unaffordable here.
+        -- ═══════════════════════════════════════════════════════════════════════════════
+        -- ★★★★★ MID-CYCLE READS, THROUGH A MECHANISM THAT ALREADY EXISTS [T-P0-097 §4B/§4C].
+        -- P3_PHASE is written 1 before vm_pace, **2 immediately after the feed and BEFORE
+        -- vm_interpret_cycle**, 3 just after, and 4 after vm_post_cycle [p3b_probe.s:885-922].
+        -- ★★★★★ SO PHASE 2 AND PHASE 4 BRACKET THE CYCLE BODY, and a write tap on that one byte
+        -- reads the flags at both instants **without touching the port**: phase 2 answers "did the
+        -- feed set ENTERED_CLI" and phase 4 answers "did post_cycle clear it". Those are the two
+        -- halves of the only remaining question about flag 2 [P6.41 §7.2].
+        -- ★★★★ BOUNDED TO ONE CYCLE. A tap on $0800 was abandoned last task because MAME's tap
+        -- covers the containing region and the VM writes that page constantly; this is one status
+        -- byte written ~4 times a cycle, and the callback's FIRST act is a cycle test so the other
+        -- 399 cycles cost a compare.
+        -- ★★★ P3B_PHASETAP=<cycle> selects it; absent, nothing is installed.
+        if PHASETAP and SYM.vm_restart then
+            _G._ph = {}
+            _G._phtap = prog:install_write_tap(ST + 30, ST + 30, "phase",
+                function(offset, data, mask)
+                    -- ★★★ P3_CYCLE COUNTS COMPLETED CYCLES and is incremented at the END of the
+                    -- body, so DURING cycle N it still reads N-1. The first version tested for N
+                    -- and captured nothing. Both values are accepted and the counter is printed,
+                    -- so the reader sees which cycle each row belongs to rather than trusting the
+                    -- off-by-one in a comment.
+                    -- ★★★ P3B_PHASETAP=0 CAPTURES THE FIRST 24 MARKERS WHATEVER THE CYCLE. A tap
+                    -- that produces nothing is indistinguishable from a filter that never matches,
+                    -- and this file has already spent two runs on that ambiguity today [§2W: show
+                    -- the instrument can fire before believing its silence].
+                    local c = prog:read_u8(ST + 4) * 256 + prog:read_u8(ST + 5)
+                    if #_G._ph >= 24 then return end
+                    if PHASETAP > 0 and (c < PHASETAP - 2 or c > PHASETAP + 1) then return end
+                    _G._ph[#_G._ph + 1] = {
+                        data % 256,                                   -- the phase
+                        prog:read_u8(VM_FLAGS + 0),                   -- flags 0-7, packed
+                        SYM.par_egon and prog:read_u8(SYM.par_egon) or -1,
+                        SYM.par_cli  and prog:read_u8(SYM.par_cli)  or -1,
+                        prog:read_u8(SYM.vm_restart),
+                        prog:read_u8(VM_VARS + 0),                    -- the room
+                        prog:read_u8(VM_VARS + 88),                   -- the speed shadow
+                        c }                                           -- P3_CYCLE as read
+                end)
+        end
         if SYM.res_err then
             _G._re = {}
             -- ★★★★★ THE CYCLE COMES FROM THE GUEST's OWN COUNTER, NOT FROM `n` [T-P0-095].
@@ -1106,6 +1154,17 @@ _G._n = emu.add_machine_frame_notifier(function()
                       base, base + len - 1, bad, len,
                       bad == 0 and "  -- ★ intact"
                                or string.format("  -- ★★★ FIRST AT $%04X", first))
+                end
+                -- ★★★★★ THE CYCLE BODY, BRACKETED [T-P0-097 §4C]. Phase 2 is after the feed and
+                -- before interpret; phase 4 is after vm_post_cycle.
+                if _G._ph then
+                    w("    cycle %d, phase by phase  (flag2 = ENTERED_CLI, bit 2 of flag byte 0)",
+                      PHASETAP)
+                    for _, e in ipairs(_G._ph) do
+                        w("      P3_CYCLE=%d phase %d : flags0=$%02X flag2=%d  par_egon=%d "
+                          .. "par_cli=%d  vm_restart=%d  var0=%d var88=%d",
+                          e[8], e[1], e[2], (e[2] >> 2) & 1, e[3], e[4], e[5], e[6], e[7])
+                    end
                 end
                 if _G._v0 then
                     for _, e in ipairs(_G._v0) do
