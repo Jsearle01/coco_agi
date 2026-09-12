@@ -332,7 +332,21 @@ P3_FONT_BYTES   equ     2048            ; ★ the staging length; p3b_run.lua re
 * ★★★★ PHASE_VOCAB is mmu_phase.s's service switch; P3_VOCAB_WINDOWED is this probe's own use of
 * it. Two names because they answer different questions -- does the ENGINE emit the routines, and
 * does THIS PROBE call them -- and collapsing them would hide which side a future client changed.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ -DTEXT_VOCAB_FLAT MAKES ARM E A ONE-VARIABLE ARM [T-P0-095]. P6.39 narrowed the restart to
+* the text configuration and showed it absent in the CEL build -- whose dictionary is flat -- but
+* those two builds differ in five things, so "the window" was one candidate of five.
+* ★★★★★ THIS FLAG REMOVES **ONLY** THE WINDOW. The text configuration keeps its relocated
+* vm_tables.s, its 128-entry seed stack, its font address, its input.s and its four-slot text
+* window; the dictionary moves to a fixed address and phase_vocab_in/_out are never called.
+* ★★★ PHASE_VOCAB STAYS DEFINED, deliberately: phase_text_out restores slot 5 from ph_blk_slot5,
+* so the routines and that byte must exist even when nothing maps a vocabulary. **Undefining it
+* would have changed the text window too, which is the second variable this arm exists to avoid.**
+* ★★ MEASUREMENT ONLY -- see the address note at P3_VOCAB. It is not a shipped configuration and
+* no gate row uses it.
+                ifndef  TEXT_VOCAB_FLAT
 P3_VOCAB_WINDOWED equ   1
+                endc
 PHASE_VOCAB     equ     1
 * ★★★★ PHASE_TEXT ENABLES mmu_phase.s's FOUR-SLOT TEXT WINDOW [T-P0-093]. Same guarding discipline
 * as PHASE_VOCAB and for the same measured reason: mmu_phase.s is included unconditionally, so
@@ -467,11 +481,22 @@ P3_BLK_VISIBLE  equ     40              ; what the display shows and sprites com
 * ★★★ The block numbers are set HERE, before the first phase_vocab_in, rather than at the
 * allocator above: ph_blk_pri/ph_blk_fb are plane blocks and these are not, and putting them
 * beside the routine that first uses them is what keeps the next reader from assuming they are.
+* ★★★★ ph_blk_slot5 IS SET WHENEVER THE PHASE SERVICE EXISTS, NOT ONLY WHEN THE VOCABULARY RIDES
+* IT [T-P0-095]. phase_text_out restores slot 5 from that byte too, so a build with the text window
+* and a FLAT dictionary would otherwise restore slot 5 to ZERO after every blit -- unmapping the
+* object table permanently. **The flat measurement arm is exactly such a build**, and this is the
+* line that keeps it a one-variable arm rather than a second defect.
+* ★★ THE ORDER IS THE ORIGINAL ORDER, DELIBERATELY: vocab block first, then the slot-5 value. It
+* emits the same four instructions the windowed build has always emitted, so `p3b_text` stays
+* byte-identical and this measurement task re-baselines nothing.
                 ifdef   P3_VOCAB_WINDOWED
                 lda     #P3_BLK_VOCAB
                 sta     ph_blk_vocab
+                endc
+                ifdef   PHASE_VOCAB
                 lda     #P3_BLK_SLOT5
                 sta     ph_blk_slot5
+                endc
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ THE TEXT WINDOW's BLOCKS [T-P0-093]. Four contiguous blocks of the VISIBLE plane, and the
 * two restore values for the slots it borrows on top of the phase machinery's own.
@@ -489,6 +514,7 @@ P3_BLK_VISIBLE  equ     40              ; what the display shows and sprites com
                 lda     #$3C
                 sta     ph_blk_slot4
                 endc
+                ifdef   P3_VOCAB_WINDOWED
                 jsr     phase_vocab_in
                 endc
                 ldx     #P3_VOCAB
@@ -1876,6 +1902,27 @@ P3_PARSER_TOTAL equ     P3_CLNBUF+42-P3_PARSER_BASE
 * has always had, byte-identical at 58AD3C27.
 * ═══════════════════════════════════════════════════════════════════════════════════════════
                 ifdef   P3B_NO_CEL
+                ifdef   TEXT_VOCAB_FLAT
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE FLAT MEASUREMENT ARM's DICTIONARY, AND ITS ADDRESS IS A COMPROMISE THAT IS STATED
+* RATHER THAN HIDDEN [T-P0-095 §4A]. Region B above the font is $EBBA-$FEF0 = **4,918 bytes**,
+* which holds Kingquest1's 3,144-byte WORDS.TOK and **does NOT hold the corpus maximum of 6,828**
+* (SpaceQuest-2). The windowed configuration exists precisely because 6,828 does not fit here.
+* ★★★★ SO THIS ARM IS FOR ONE TITLE AND ONE QUESTION. It is not a shipped configuration, it is in
+* no gate row, and the assertion below is relaxed for it with the smaller bound named -- **a build
+* that silently accepted a dictionary it could not hold would corrupt the vector stubs**, which is
+* the failure the 6,828 assert was written against [the IRQ crash, P6.32].
+* ★★ SPELLED FROM P3_CLNBUF, NOT FROM P3_FONT, AND THE TWO ARE THE SAME ADDRESS. P3_FONT is
+* declared BELOW this block, so `P3_FONT+P3_FONT_BYTES` is a forward reference and the assert
+* underneath it fails pass 1 with "Conditions must be constant" -- which reads as a broken
+* assertion rather than as a declaration-order problem. P3_FONT is P3_CLNBUF+42 by its own
+* definition, so this is that value with no forward reference in it.
+P3_VOCAB        equ     P3_CLNBUF+42+P3_FONT_BYTES
+P3_VOCAB_END    equ     $FEF0
+                ifgt    3144-(P3_VOCAB_END-P3_VOCAB)
+                error   "the flat measurement arm cannot hold Kingquest1's WORDS.TOK (3,144 B)"
+                endc
+                else
 P3_VOCAB        equ     MAP_VOCAB       ; $A000, slot 5 -- mapped only while tokenising
 P3_VOCAB_END    equ     MAP_VOCAB_E     ; $C000; 8,192 B >= 6,828 (SpaceQuest-2, the corpus max)
 * ★★★★ THE BLOCK NUMBERS, WHICH THIS PROBE OWNS AND THE HOST READS [p3b_run.lua's own rule for
@@ -1884,6 +1931,9 @@ P3_VOCAB_END    equ     MAP_VOCAB_E     ; $C000; 8,192 B >= 6,828 (SpaceQuest-2,
 * ★★★ $3D is what slot 5 holds otherwise: the host pre-sets all eight slots to $38+i at load and
 * VM_OBJ has lived in that block ever since [the `lda #$3D` this replaces, p3_do_cycle].
 P3_BLK_VOCAB    equ     6
+                endc
+* ★★★ P3_BLK_SLOT5 IS OUTSIDE THE FLAT/WINDOWED SPLIT: phase_text_out needs it in both, because the
+* four-slot text window borrows slot 5 whether or not a dictionary ever does.
 P3_BLK_SLOT5    equ     $3D
                 else
 * ── the flat window the cel configuration keeps, unchanged ───────────────────────
@@ -1906,8 +1956,13 @@ P3_VOCAB_END    equ     $FEF0           ; ★ $FEF0-$FF00 = the vector redirect 
 P3_VOCAB_END    equ     $FF00           ; ★ $FF00-$FFFF is the I/O page and is not ours
                 endc
                 endc
+* ★★ The corpus-maximum assert covers every SHIPPED configuration. The flat measurement arm carries
+* its own, smaller, named bound above [§4A]; asserting 6,828 against it would refuse a build whose
+* whole purpose is one 3,144-byte title.
+                ifndef  TEXT_VOCAB_FLAT
                 ifgt    6828-(P3_VOCAB_END-P3_VOCAB)
                 error   "the vocabulary window is smaller than the largest corpus WORDS.TOK (6,828 B)"
+                endc
                 endc
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════

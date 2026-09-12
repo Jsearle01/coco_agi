@@ -36,6 +36,7 @@ param(
   [switch]$Diag,
   [switch]$NoMap,
   [switch]$Win3,
+  [switch]$FlatVocab,
   [switch]$NoIrq,
   [double]$Hold   = 3.0
 )
@@ -115,6 +116,16 @@ if ($NoMap) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DP3B_VOCAB_NOMAP") +
 # into vm_text_ops.s, which is the thing this task removed -- the fault would have re-created the
 # defect it is meant to detect [AC-2], and it would move two variables instead of one [L-73].
 if ($Win3) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DTEXT_WIN3") + $IRQ }
+# ★★★★★ -FlatVocab IS T-P0-095's ONE-VARIABLE ARM. P6.39 showed the restart absent in the CEL build,
+# whose dictionary is flat -- but cel and text differ in five things, so "the window" was one
+# candidate of five. -DTEXT_VOCAB_FLAT removes ONLY the window: the text build keeps its relocated
+# tables, its seed stack, its font address, its input.s and its four-slot text window.
+# ★★★★ IT CARRIES -DTEXT_MODELLED ITSELF rather than being combined with -Fault, and that is the
+# whole point: **P6.39's arm B is -Fault with the jump and the input, and this must differ from it
+# by exactly one flag.** Composing two switches would also pass -DP3B_NO_CEL twice, which lwasm
+# rejects -- so the arm is spelled out once, here, and cannot drift from its control.
+# ★★ Measurement only: it holds one title's dictionary and is in no gate row [p3b_probe.s].
+if ($FlatVocab) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DTEXT_MODELLED","-DTEXT_VOCAB_FLAT") + $IRQ }
 
 & $LW --format=raw --output=build/p3b_probe_pk_fresh.bin --map=build/p3b_probe_pk.map -I. @FLAGS src/harness/p3b_probe.s
 if ($LASTEXITCODE -ne 0) { throw "p3b assemble failed" }
@@ -150,8 +161,10 @@ $WANT = @("res_volbase","res_slicebase","res_curblk","vm_quit","vm_badop","vm_cy
 # five homes [memmap.inc's MAP_DIR_STRIDE, found at 0/9 on the fifth].
 #   $Linked  text.s is LINKED (the -Fault arm links it and declines to call it)
 #   $Wired   the nine opcodes are wired, so tx_wt_* and the prompt symbols exist
+# ★ -FlatVocab is a MODELLED arm, so it belongs with $Fault in $Linked and not in $Wired: it links
+#   text.s and leaves TEXT_WIRED undefined, exactly as -Fault does.
 $Wired  = $Text -or $DecodeFault -or $NoTick -or $Diag -or $NoMap -or $Win3
-$Linked = $Wired -or $Fault
+$Linked = $Wired -or $Fault -or $FlatVocab
 if ($Linked) { $WANT += @("P3_FONT","P3_FONT_BYTES","P3_PBUF","ph_blk_vocab","ph_blk_slot5") }
 # ★★★★ THE COMMAND LINE's SYMBOLS [T-P0-092]. They exist wherever TEXT_PROMPT does, which
 # p3b_probe.s conditions exactly as TEXT_WIRED -- so every wired text arm has them and the

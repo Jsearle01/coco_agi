@@ -189,6 +189,20 @@ phase_vocab_in:
                 sta     MMU_SLOT5
                 rts
 
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ HAZARD, RECORDED BEFORE IT IS DISCOVERED: THESE TWO DO NOT NEST [T-P0-095 §1.2].
+* phase_vocab_out writes ph_blk_slot5 -- a STATIC value the client sets at boot -- and **it does
+* not restore what slot 5 HELD.** Neither `_in` routine saves anything; there is no stack.
+* ★★★★★ SO A PARSE INSIDE AN OPEN TEXT WINDOW LEAVES SLOT 5 WRONG. phase_text_in put the third
+* framebuffer block there; phase_vocab_out would put the object table's block back, and the rest
+* of the blit would draw into the wrong plane with nothing objecting.
+* ★★★★ IT IS NOT REACHABLE TODAY and that is why this is a comment rather than a guard: the
+* oracle's own order is parse first, redraw second [text.cpp:782-793], and txt_pkey follows it --
+* the ENTER arm calls the parse vector before it calls txt_predraw, and the two never overlap.
+* ★★★ T-P0-094 measured that this is NOT the restart's cause (the text engine was modelled in the
+* arm that still restarts), so it is recorded as a live hazard and not as a suspect.
+* ★★ The fix, if one is ever needed, is an actual save -- `phase_vocab_in` reading the current
+* slot-5 intent into a byte -- which is a design change and not a line.
 phase_vocab_out:
                 lda     ph_blk_slot5
                 sta     MMU_SLOT5

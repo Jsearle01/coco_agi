@@ -241,7 +241,15 @@ local function stage()
         -- phase_vocab_out uses that byte; using anything else here would leave the host and the
         -- guest disagreeing about what slot 5 holds while the object table lives in it.
         -- ★★ The flat configuration takes neither branch: no ph_blk_vocab symbol, no remap.
+        -- ★★★★★ A BLOCK NUMBER OF ZERO MEANS "NO BLOCK", NOT "BLOCK 0" [T-P0-095]. The symbol's
+        -- PRESENCE stopped being the right test the moment a build existed that has the phase
+        -- service and a FLAT dictionary: ph_blk_vocab exists there and the guest never sets it,
+        -- so staging through it would map block 0 -- the priority plane -- over the object table
+        -- and poke the dictionary into it.
+        -- ★★★ Block 0 is genuinely in use (priority, per this file's own allocation note), so zero
+        -- is unambiguous as a sentinel here and is what the guest leaves it at.
         local VBLK = SYM.ph_blk_vocab and prog:read_u8(SYM.ph_blk_vocab) or nil
+        if VBLK == 0 then VBLK = nil end
         local V5   = SYM.ph_blk_slot5 and prog:read_u8(SYM.ph_blk_slot5) or nil
         if VBLK and not V5 then
             w("★★★ ph_blk_vocab is in the map and ph_blk_slot5 is not -- cannot restore slot 5")
@@ -340,10 +348,20 @@ local function stage()
         -- so the next reader does not re-derive that a hot-byte tap is unaffordable here.
         if SYM.res_err then
             _G._re = {}
+            -- ★★★★★ THE CYCLE COMES FROM THE GUEST's OWN COUNTER, NOT FROM `n` [T-P0-095].
+            -- stage() is defined ABOVE `local n`, so `n` inside this closure resolves to a GLOBAL
+            -- of that name -- which is nil. The tap then recorded a nil cycle, string.format threw
+            -- "bad argument #4", and **the frame callback died silently**: the run completed, the
+            -- log stopped mid-summary, and the missing lines read as "the check did not fire".
+            -- ★★★★ A diagnostic that kills the reporting it belongs to is worse than one that says
+            -- nothing [§2W.3]. P3_CYCLE is two bytes at ST+4 and is the same number `n` tracks.
+            -- ★★★ The par_vocab tap twenty lines below captures `n` the same way and has the same
+            -- latent bug; it only shows on the stall path, which is why nobody has met it.
             _G._retap = prog:install_write_tap(SYM.res_err, SYM.res_err, "reserr",
                 function(offset, data, mask)
                     if (data % 256) ~= 0 and #_G._re < 16 then
-                        _G._re[#_G._re + 1] = { data % 256, cpu.state["PC"].value, n,
+                        _G._re[#_G._re + 1] = { data % 256, cpu.state["PC"].value,
+                                                prog:read_u8(ST + 4) * 256 + prog:read_u8(ST + 5),
                                                 prog:read_u8(0x0800) }
                     end
                 end)
@@ -639,6 +657,19 @@ _G._n = emu.add_machine_frame_notifier(function()
             end
             for i = 0, s[2] - 1 do prog:write_u8(s[1] + i, blob:byte(pos + i)) end
             w("  poked %5d B -> $%04X  %s", s[2], s[1], s[3])
+            -- ★★★★★ REMEMBER THE DISPATCH TABLES SO THEY CAN BE CHECKED AT THE END [T-P0-095].
+            -- In the text configuration vm_tables.s is relocated to $0200-$0472, inside what the
+            -- ENGINE's map reserves as the flood-fill seed stack ($0100-$0400) and which this
+            -- probe shortens to $0100-$0200 to make room. **That is 626 bytes of VMOP_TAB and
+            -- VMOP_ARGS living in a region another subsystem believes it owns.**
+            -- ★★★★ A CORRUPTED DISPATCH TABLE IS LATENT UNTIL THE DAMAGED OPCODE IS REACHED, which
+            -- is exactly the shape of a divergence that appears only when a command is fed: the
+            -- render runs at cycle 9 and the wrong entry is not dispatched until cycle 100.
+            -- ★★★ Comparing RAM against the bytes THIS run poked is the check; comparing against
+            -- the file would be the same bytes one indirection further away.
+            if s[3]:find("vm_tables") then
+                _G._tab = { s[1], s[2], blob:sub(pos, pos + s[2] - 1) }
+            end
             pos = pos + s[2]
         end
         w("program %d bytes in %d run(s); MMU slots pre-set $38..$3F", #blob, #segs)
@@ -1038,6 +1069,21 @@ _G._n = emu.add_machine_frame_notifier(function()
                 else
                     w("    res_err: NO TAP INSTALLED -- this run staged no vocabulary, so the "
                       .. "watch in stage() never ran")
+                end
+                -- ★★★★★ ARE THE DISPATCH TABLES STILL THE BYTES WE POKED? [T-P0-095 §4B/AC-4]
+                if _G._tab then
+                    local base, len, want = _G._tab[1], _G._tab[2], _G._tab[3]
+                    local bad, first = 0, nil
+                    for i = 0, len - 1 do
+                        if prog:read_u8(base + i) ~= want:byte(i + 1) then
+                            bad = bad + 1
+                            if not first then first = base + i end
+                        end
+                    end
+                    w("    vm_tables at $%04X..$%04X: %d of %d bytes differ from what was poked%s",
+                      base, base + len - 1, bad, len,
+                      bad == 0 and "  -- ★ intact"
+                               or string.format("  -- ★★★ FIRST AT $%04X", first))
                 end
                 if _G._v0 then
                     for _, e in ipairs(_G._v0) do
