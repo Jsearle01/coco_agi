@@ -493,10 +493,24 @@ _G._n = emu.add_machine_frame_notifier(function()
                 m:exit(); return
             end
             if #fd ~= 2048 then
-                w("★★★ font is %d bytes, expected 2048", #fd); m:exit(); return
+                w("★★★ font FILE is %d bytes, expected 2048", #fd); m:exit(); return
             end
-            for i = 1, #fd do prog:write_u8(SYM.P3_FONT + i - 1, fd:byte(i)) end
-            w("font %d bytes -> P3_FONT $%04X", #fd, SYM.P3_FONT)
+            -- ★★★★★ STAGE WHAT THE BUILD RESERVED, NOT WHAT THE FILE HOLDS. The text
+            -- configuration uses a 128-glyph font (1,024 B) because the full 2 KB does not fit
+            -- [p3b_probe.s, with font_high_census.py]. **The length comes from P3_FONT_BYTES, a
+            -- symbol from this build's own map** -- a literal here would overrun P3_FONT by 1 KB
+            -- into whatever follows it the moment the two disagree, which is the class of defect
+            -- that put the font over the parser in the first place [AD-179].
+            -- ★★ The FILE stays 256 glyphs: the upper half is simply not staged, and txt_blit
+            -- folds any character >= 128 to space so nothing indexes past what was written.
+            local nfont = SYM.P3_FONT_BYTES or #fd
+            if nfont > #fd then
+                w("★★★ build wants %d font bytes and the file has %d", nfont, #fd)
+                m:exit(); return
+            end
+            for i = 1, nfont do prog:write_u8(SYM.P3_FONT + i - 1, fd:byte(i)) end
+            w("font %d of %d bytes -> P3_FONT $%04X (%d glyphs)",
+              nfont, #fd, SYM.P3_FONT, nfont // 8)
         end
         prog:write_u8(GO, 1)
         cpu.state["PC"].value = LOAD

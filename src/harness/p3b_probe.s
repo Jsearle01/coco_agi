@@ -221,7 +221,28 @@ TXD_EACH        equ     8                       ; records kept per site
 * ★★★ $5800 = MAP_RESERVED_END - 2048, the top of the reservation, above the code (which ends at
 * $5597). It is in slot 2 -- engine code, never remapped -- so it is resident in both phases and
 * the flat window (slots 4-6) does not disturb it, which is what a per-glyph fetch needs.
-P3_FONT         equ     MAP_RESERVED_END-2048
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ 128 GLYPHS, NOT 256, AND THE CORPUS SAYS IT COSTS NOTHING [font_high_census.py].
+* The message box would not fit: $2000-$6000 is 16,384 bytes against 14,384 of code plus a 2 KB
+* font, 48 over. Halving the font buys 1,024.
+* ★★★★ MEASURED BEFORE IT WAS DONE, over all nine pinned titles and 14,944 LOGIC messages:
+*     Kingquest2   15 messages carry a glyph >= 128, all of them codepoint 255, in ONE logic
+*     the other 8  ZERO
+* and glyph 255 in the font we ship is `00 00 00 00 00 00 00 00` -- BLANK, byte-identical to
+* space. So those fifteen characters are padding and the upper half of the font is otherwise
+* untouched by this corpus.
+* ★★★★★ WHICH IS WHY txt_blit FOLDS TO SPACE RATHER THAN MASKING TO 7 BITS. A mask sends 255 to
+* 127, and glyph 127 is NOT blank (`00 10 38 6C C6 C6 FE 00`) -- fifteen blanks would become
+* fifteen pieces of visible garbage. Folding renders 255 CORRECTLY, because space and 255 are the
+* same glyph, and degrades any unseen high character to a blank instead of noise.
+* ★★★ IT IS A FACT ABOUT THESE NINE TITLES, NOT ABOUT AGI [L-86]. A fan game or an unpinned
+* release may use CP437 box-drawing; it would render as blanks. Inventory names and the
+* vocabulary go through the same font and were NOT scanned -- the census is necessary, not
+* sufficient, and its own header says so.
+TEXT_FONT128    equ     1
+TEXT_BOX        equ     1
+P3_FONT         equ     MAP_RESERVED_END-1024
+P3_FONT_BYTES   equ     1024            ; ★ the staging length; p3b_run.lua reads this symbol
                 endc
 
                 org     MAP_CODE

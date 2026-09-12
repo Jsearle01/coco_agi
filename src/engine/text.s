@@ -1250,6 +1250,17 @@ txt_blit:
                 ldu     txt_font
                 beq     tb_out
                 lda     txt_char
+                ifdef   TEXT_FONT128
+* ★★★★★ FOLD >= 128 TO SPACE. The font is 128 glyphs [p3b_probe.s, with the census], so an index
+* above 127 would read past it -- into whatever follows P3_FONT.
+* ★★★★ SPACE, NOT `anda #$7F`. The mask is one byte cheaper and WRONG: the only high codepoint in
+* the corpus is 255, whose glyph is blank, and masking sends it to 127, whose glyph is not. Fifteen
+* blanks in Kingquest2 would become fifteen visible marks. Folding to 32 renders 255 exactly right.
+                cmpa    #$80
+                blo     tb_glyph
+                lda     #$20
+tb_glyph:
+                endc
                 ldb     #8
                 mul
                 leau    d,u

@@ -110,7 +110,7 @@ $WANT = @("res_volbase","res_slicebase","res_curblk","vm_quit","vm_badop","vm_cy
           "vm_badlogic","res_depth","hal_frame_hi")
 # ★★★ MAP_FONT only exists in the text configuration, and vm_symbols.py fails on a missing name,
 # so it is appended rather than added to the list every build shares.
-if ($Text -or $Fault -or $DecodeFault -or $NoTick -or $Diag) { $WANT += @("P3_FONT","P3_PBUF") }
+if ($Text -or $Fault -or $DecodeFault -or $NoTick -or $Diag) { $WANT += @("P3_FONT","P3_FONT_BYTES","P3_PBUF") }
 # ★★★★ WIRED BUILDS ONLY. -DTEXT_MODELLED keeps TEXT_WIRED undefined (p3b_probe.s:1004), so the nine
 # handlers become `equ vm_op_modelled` and **the whole body -- tx_wt_key included -- is never
 # assembled**. Asking for it in the -Fault arm fails the symbol extraction, which is why this is a
