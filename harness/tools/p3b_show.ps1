@@ -147,7 +147,12 @@ $WANT = @("res_volbase","res_slicebase","res_curblk","vm_quit","vm_badop","vm_cy
           # ★★★ vm_curlogic NAMES THE LOGIC THAT WAS INTERPRETING when a room changed [T-P0-094].
           # It exists in every build and was in vm_run.ps1's list and not this one, so p3b's room
           # trajectory could say WHEN and never WHICH.
-          "vm_curlogic")
+          "vm_curlogic",
+          # ★★★★★ vm_restart IS THE BYTE restart.game SETS, AND P6.39 READ THE WRONG ONE. That
+          # report said "restart.game did not execute -- vm_quit and vm_badop are 0", and
+          # vm_probe.s:440-443 says in as many words that **badop stays 0 for both, so this byte is
+          # the only discriminator**. The claim was made from two bytes that cannot answer it.
+          "vm_restart")
 # ★★★ MAP_FONT only exists in the text configuration, and vm_symbols.py fails on a missing name,
 # so it is appended rather than added to the list every build shares.
 # ★★★★ ph_blk_vocab / ph_blk_slot5 EXIST ONLY WHERE -DPHASE_VOCAB DOES, which p3b_probe.s defines

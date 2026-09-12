@@ -367,10 +367,16 @@ local function stage()
                 end)
         end
         _G._pv = {}
+        -- ★★★★ THE CYCLE COMES FROM P3_CYCLE, NOT FROM `n` [T-P0-096 §4D(1)]. Same latent closure
+        -- bug the res_err tap had: stage() is defined above `local n`, so this captured a global
+        -- of that name and stored nil. **It fires only on the stall path**, which is why it has
+        -- never been met -- and the stall path is exactly where a nil would kill the frame
+        -- callback and take the whole stall dump with it [P6.40 §7.1].
         _G._pvtap = prog:install_write_tap(SYM.par_vocab, SYM.par_vocab + 1, "parvocab",
             function(offset, data, mask)
                 if #_G._pv < 24 then
-                    _G._pv[#_G._pv + 1] = { offset, data % 256, cpu.state["PC"].value, n }
+                    _G._pv[#_G._pv + 1] = { offset, data % 256, cpu.state["PC"].value,
+                                            prog:read_u8(ST + 4) * 256 + prog:read_u8(ST + 5) }
                 end
             end)
     end
@@ -476,6 +482,14 @@ local typed, type_report = false, nil
 -- ★★★ WHAT THIS ROW THEREFORE CANNOT SEE [L-121]: the PIA scan, the key decode, and the debounce.
 -- Those are input_probe's gate and Jay's eye gate; this one begins one byte later.
 -- ★ §2P: the LENGTH and the resulting ink count are printed. The characters are the operator's.
+-- ★★ P3B_STATEDUMP="98-102" -- the cycle range whose 288-byte state block is written to
+--    <OUT>/state_<nnn>.bin, for state_diff.py to compare against the reference's oracle.bin.
+local STATE_LO, STATE_HI
+do
+    local lo, hi = (os.getenv("P3B_STATEDUMP") or ""):match("^(%d+)%-(%d+)$")
+    if lo then STATE_LO, STATE_HI = tonumber(lo), tonumber(hi) end
+end
+
 local INJECT    = os.getenv("P3B_INJECT")
 local INJECT_AT = tonumber(os.getenv("P3B_INJECT_AT") or "20")
 local inj_i     = 0
@@ -1037,6 +1051,14 @@ _G._n = emu.add_machine_frame_notifier(function()
                       SYM.res_depth and prog:read_u8(SYM.res_depth) or -1)
                 end
             end
+            -- ★★★★★ vm_restart AND res_err, BOTH LIVE [T-P0-096 §4D]. P6.39 concluded restart.game
+            -- had not run from vm_quit and vm_badop, which vm_probe.s says cannot answer it; and
+            -- RES_E_BIG went six tasks unmentioned because only the sticky P3_ERR was published.
+            -- **Two wrong readings from two unpublished bytes**, so both are on this line now.
+            if SYM.vm_restart then
+                w("    vm_restart=%d (restart.game executed) | res_err=%d (LIVE; P3_ERR is sticky)",
+                  prog:read_u8(SYM.vm_restart), prog:read_u8(SYM.res_err or 0))
+            end
             w("    var0=%d flag0=$%02X  vm_quit=%d vm_badop=$%02X vm_cycle=%d vm_tdelay=%d res_err=%d",
               prog:read_u8(0x0800), prog:read_u8(0x0900),
               prog:read_u8(SYM.vm_quit or 0), prog:read_u8(SYM.vm_badop or 0),
@@ -1516,6 +1538,25 @@ _G._n = emu.add_machine_frame_notifier(function()
         -- transition list is the observation that inference was standing in for.**
         -- ★★ Transitions only, not 400 samples: a room number repeated is not evidence, and this
         -- file already guards against printing 900 copies of one fact.
+        -- ═══════════════════════════════════════════════════════════════════════════════
+        -- ★★★★★ SAMPLE THE WHOLE VM STATE BLOCK [T-P0-096 §4A]. Seven arms have asked which BUILD
+        -- difference correlates with the restart. **None has asked what logic 0 actually READ.**
+        -- It is the actor on both sides, with the same inputs and the same parse, and it decides
+        -- differently -- so something it reads differs, and the state block is where that lives.
+        -- ★★★★★ THE SAME 288 BYTES THE vm GATE COMPARES, in the same order: 32 packed flag bytes
+        -- then 256 variables [vm_diff.py's own format; vm_sweep.lua:714-716 writes it]. **Reading
+        -- it needs no change to the port** -- the addresses are in memmap.inc and the host reads
+        -- memory freely, which is what makes this a measurement and not a code change.
+        -- ★★★ P3B_STATEDUMP=98-102 selects the cycles. Absent, nothing is written and no gate row
+        -- pays for it.
+        if STATE_LO and n >= STATE_LO and n <= STATE_HI then
+            local buf = {}
+            for i = 0, 31 do buf[#buf + 1] = string.char(prog:read_u8(VM_FLAGS + i)) end
+            for i = 0, 255 do buf[#buf + 1] = string.char(prog:read_u8(VM_VARS + i)) end
+            local f = io.open(string.format("%s/state_%03d.bin", OUT, n), "wb")
+            if f then f:write(table.concat(buf)); f:close() end
+        end
+
         -- ★★★ vm_curlogic IS SAMPLED WITH THE ROOM, not separately: it is the logic that was
         -- interpreting when the change happened, and a transition without it is half an answer.
         do
