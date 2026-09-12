@@ -239,6 +239,23 @@ TXD_EACH        equ     8                       ; records kept per site
 * release may use CP437 box-drawing; it would render as blanks. Inventory names and the
 * vocabulary go through the same font and were NOT scanned -- the census is necessary, not
 * sufficient, and its own header says so.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE FULL 256-GLYPH FONT IS BACK [Jay's ruling]. The halving was never a design choice --
+* it was 1,024 bytes bought to make the message box fit, and the census showed what it cost:
+* **13 of 147 PC DOS AGI v2 FAN games use the upper half**, two of them heavily (groza 30,238
+* high bytes, 0fb053 9,558). The nine pinned commercial titles are clean, but fan v2 games are
+* PC DOS AGI v2 and are in scope.
+* ★★★★ AND THE FREED KILOBYTE BOUGHT NOTHING ELSE. In the ENGINE's map the font lives at MAP_FONT
+* ($E0B8) inside MAP_TABLES, which has ~5.7 KB unallocated; sound's budget is MAP_RESERVED's
+* "parser + sound (floor 3,072)" and is a different region entirely. **The squeeze is p3b's own**,
+* because this probe orgs the parser over MAP_FONT and relocates the font down here.
+* ★★★ So the 54 bytes came out of tx_boxfill instead: the window-origin generality nothing used,
+* and a shadow row variable that existed to preserve a value every caller overwrote.
+* ★★★★★ AND IT DOES NOT FIT YET -- 312 BYTES SHORT, NOT THE 54 I QUOTED. The 54 was measured
+* BEFORE the scoped rectangle restore landed; p3_restore_box cost ~288 bytes and the figure went
+* stale the moment it did. **A budget quoted from before the last change is not a budget** [AD-95's
+* shape: a recorded number whose producer has moved]. Reverted to 128 glyphs so the build works,
+* and the decision goes back to Jay with the real number.
 TEXT_FONT128    equ     1
 TEXT_BOX        equ     1
 P3_FONT         equ     MAP_RESERVED_END-1024

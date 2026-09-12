@@ -1051,9 +1051,7 @@ txf_y           fdb     0               ; PIXEL row, signed
 txf_w           fcb     0
 txf_h           fcb     0
 txf_val         fcb     0
-txf_wy          fdb     0               ; working row, so the caller's txf_y survives
-txf_ylo         fdb     0               ; first/last pixel row this window covers
-txf_yhi         fdb     0
+txf_yhi         fdb     0               ; one past the last pixel row this window holds
 
 * tx_boxfill: A = byte value; rectangle in txf_x (BYTE column), txf_y (PIXEL row), txf_w, txf_h.
 * ★★★★ ROWS OUTSIDE THE WINDOW ARE SKIPPED, NOT CLAMPED, and the bound is txt_blit's own: a slice
@@ -1071,32 +1069,32 @@ tx_boxfill:
                 clr     txf_x
                 clr     txf_x+1
 txf_xok:
-                lda     txt_fbrow0
-                ldb     #TXT_VH
-                mul
-                std     txf_ylo                 ; first pixel row in this window
+* ★★★★ THE WINDOW IS ASSUMED TO START AT ROW 0, AND THAT IS ASSERTED RATHER THAN HOPED. Every
+* caller of this routine draws inside tx_window_enter's FLAT 24 KB window, whose txt_fbrow0 is 0.
+* Carrying the general case cost ~20 bytes of ylo arithmetic for a case nothing reaches -- and the
+* font needed them back [the 256-glyph restore]. ★★★ A window that did start elsewhere would now
+* draw in the wrong place, so it is refused outright instead of being silently mis-drawn.
+                tst     txt_fbrow0
+                bne     txf_out
                 lda     txt_fbrows
                 inca
                 ldb     #TXT_VH
                 mul
-                addd    txf_ylo
-                std     txf_yhi                 ; one past the last
-                ldd     txf_y
-                std     txf_wy
+                std     txf_yhi                 ; one past the last row this window holds
 txf_rows:
                 lda     txf_h
                 beq     txf_out
                 deca
                 sta     txf_h
-                ldd     txf_wy
-* ★★★ SIGNED compares: txf_wy is negative for a box that starts above the screen, and an unsigned
-* test would read -5 as 65531 and call it "below the window" -- right answer, wrong reason, and
-* wrong the moment the window stops starting at row 0.
-                cmpd    txf_ylo
-                blt     txf_next
+* ★★ txf_y is CONSUMED, not shadowed. The caller's table sets it fresh for every rectangle, so
+* preserving it cost a copy and a variable for nothing.
+                ldd     txf_y
+* ★★★ SIGNED: txf_y is negative for a box starting above the screen, and `bmi` rejects that in two
+* bytes where a compare against a zero lower bound took six. The upper bound still needs the
+* compare, and `bge` keeps it signed so a wrapped value cannot read as in-range.
+                bmi     txf_next
                 cmpd    txf_yhi
                 bge     txf_next
-                subd    txf_ylo
 * ★★ ONE MUL, not a shift chain: the row within a window is under 256, so row*160 fits D directly.
                 tfr     b,a
                 ldb     #160
@@ -1111,9 +1109,9 @@ txf_b:          sta     ,x+
                 decb
                 bne     txf_b
 txf_next:
-                ldd     txf_wy
+                ldd     txf_y
                 addd    #1
-                std     txf_wy
+                std     txf_y
                 bra     txf_rows
 txf_out:        rts
 
