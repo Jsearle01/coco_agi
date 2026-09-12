@@ -868,6 +868,12 @@ tmb_col_set:    sta     txt_tcol
                 jsr     txt_wrap
                 ldd     #0
                 std     txt_emit
+* ★★ window_Active = true [text.cpp:509], set AFTER the box is on screen so txt_close can only
+* restore a rectangle that was actually drawn.
+                ifdef   TEXT_BOX
+                lda     #1
+                sta     txt_winactive
+                endc
                 rts
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -973,6 +979,12 @@ tpg_ret:        rts
 * routine and the engine stays independent of how planes are mapped.
 * ★★ Zero = no restore, which is what text_probe and gs_probe want: they have no framebuffer.
 txt_restore     fdb     0
+* ★★★ window_Active [text.cpp:550, `if (_messageState.window_Active)`]. The oracle guards the
+* restore on it, and so must we: txt_close is reachable without a box having been drawn, and the
+* rectangle it would restore is then whatever the LAST box left in txt_bgx/bgy/bgw/bgh. **A
+* restore of a stale rectangle repaints a region nothing asked for**, which reads as a flicker in
+* an unrelated part of the screen.
+txt_winactive   fcb     0
 
 txt_close:
                 ldd     txt_bgy
@@ -980,6 +992,9 @@ txt_close:
                 ldd     #0
                 std     txt_bgy
 tc_ok:
+                tst     txt_winactive
+                beq     tc_out
+                clr     txt_winactive
                 ldx     txt_restore
                 beq     tc_out
                 jsr     ,x

@@ -281,7 +281,7 @@ p3b_entry:
 * engine's; txt_restore is a vector for that reason.
 * ★ Guarded: the cel configuration does not link text.s, so txt_restore does not exist there.
                 ifdef   P3B_NO_CEL
-                ldd     #p3_present
+                ldd     #p3_restore_box
                 std     txt_restore
                 endc
                 jsr     vm_start
@@ -900,6 +900,160 @@ p3_bv:          std     ,x++
 * ★ Both bytes live HERE, after a `rts` and before the entry label, so nothing falls through them.
 p3p_slice       fcb     0
 p3_blk_vis      fcb     P3_BLK_VISIBLE  ; the harness display reads this; it never moves
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ p3_restore_box -- close the message window by re-rendering ITS RECTANGLE, shadow -> visible.
+* This replaces a whole-plane p3_present [fc2389e], which worked and restored 26,880 bytes to fix
+* about 1,900 of them.
+* ★★★★ THE ORACLE'S MODEL, AND IT NEEDS NO SAVED PIXELS: "the window is closed by RE-RENDERING a
+* rectangle of the game screen into the display screen. There is no save-under buffer anywhere"
+* [text.cpp:560-564, this project's own oracle instrumentation]. Our game screen is the SHADOW
+* plane and our display screen is the VISIBLE plane.
+* ★★★★★ WHY THE WHOLE-PLANE VERSION HAD TO GO: the compositor draws sprites onto the VISIBLE
+* plane, so re-presenting all of it erases every sprite until the next cycle recomposites -- a
+* one-cycle flicker outside the box that the oracle never produces. Room 101 quits immediately and
+* could not show it; a room with moving sprites would.
+*
+* ★★★★ PER ROW, NOT PER SLICE, AND THE ARITHMETIC IS WHY. Planes are mapped 8,192 bytes at a time
+* and a row is 160 bytes, so a slice boundary falls mid-row (51.2 rows per slice). Iterating rows
+* and mapping each row's slice costs ~2 remaps per row -- about 52 for a 26-row box against
+* p3_present's 8 -- but copies ~1,900 bytes instead of 26,880. **Remaps are 7 cycles; the copy is
+* the whole cost**, so this is ~6x cheaper overall and far simpler than per-slice row clipping.
+* ★★★ THE STRADDLE IS HANDLED, NOT ASSUMED AWAY. A 74-byte span crosses a slice boundary whenever
+* it starts within 74 bytes of the end, which is ~0.9% of positions -- rare enough to survive
+* testing and certain to happen. Split into two mapped copies.
+* ★★ Reads the DRAWN rectangle: txt_bgy is game-screen and the box is drawn at txt_bgy + txb_yoff,
+* so the restore uses the same sum [§2F -- txb_yoff is computed once, in tx_drawbox].
+                ifdef   P3B_NO_CEL
+* ★ 160 x 168, one byte per pixel. Declared here rather than forward-referencing P3B_PRI_BYTES,
+*   which is defined 550 lines below this and only for the budget asserts.
+P3RB_PLANE      equ     26880
+p3rb_row        fdb     0
+p3rb_rend       fdb     0
+p3rb_x          fdb     0
+p3rb_w          fcb     0
+p3rb_n          fcb     0
+p3rb_within     fdb     0
+
+p3_restore_box:
+                lda     txt_bgw+1
+                lbeq    p3rb_out                ; ★ long: p3rb_out is past the byte range
+                sta     p3rb_w
+* x, clamped: bgx reaches -5 and a negative would step off the row start
+                ldd     txt_bgx
+                bpl     p3rb_xok
+                ldd     #0
+p3rb_xok:       std     p3rb_x
+* first and last+1 pixel rows, in DRAWN space
+                ldd     txt_bgy
+                addd    txb_yoff
+                bpl     p3rb_yok
+                ldd     #0
+p3rb_yok:       std     p3rb_row
+                addd    txt_bgh
+                std     p3rb_rend
+p3rb_loop:
+                ldd     p3rb_row
+                cmpd    p3rb_rend
+                bhs     p3rb_done
+* offset = row*160 + x   (row < 256 within the plane, so one MUL)
+                tfr     b,a
+                ldb     #160
+                mul
+                addd    p3rb_x
+                cmpd    #P3RB_PLANE
+                bhs     p3rb_next               ; past the plane: skip
+                pshs    a,b                     ; keep the absolute offset
+                lsra
+                lsra
+                lsra
+                lsra
+                lsra                            ; A = offset >> 13 == slice
+                jsr     p3rb_map
+                puls    a,b
+                anda    #$1F
+                std     p3rb_within             ; offset within the slice
+* n = min(w, 8192 - within)
+                lda     p3rb_w
+                sta     p3rb_n
+                ldd     #8192
+                subd    p3rb_within
+                tsta
+                bne     p3rb_copy               ; >= 256 left, so w always fits
+                cmpb    p3rb_w
+                bhs     p3rb_copy
+                stb     p3rb_n                  ; short: the span straddles
+p3rb_copy:
+                jsr     p3rb_span
+* did it straddle?
+                lda     p3rb_w
+                suba    p3rb_n
+                beq     p3rb_next
+                sta     p3rb_n                  ; the remainder, in the NEXT slice
+                pshs    a
+                ldd     p3rb_row
+                tfr     b,a
+                ldb     #160
+                mul
+                addd    p3rb_x
+                lsra
+                lsra
+                lsra
+                lsra
+                lsra
+                inca                            ; slice + 1
+                jsr     p3rb_map
+                puls    a
+                ldd     #0
+                std     p3rb_within
+                jsr     p3rb_span
+p3rb_next:
+                ldd     p3rb_row
+                addd    #1
+                std     p3rb_row
+                bra     p3rb_loop
+p3rb_done:
+* ★ leave the mapping as p3_present does: ph_blk_fb on the visible plane, slot 5 back to priority
+                lda     #P3_BLK_VISIBLE
+                sta     ph_blk_fb
+                clra
+                jsr     phase_draw
+                ifdef   PLANE_WINDOWED
+                jsr     plane_reset
+                endc
+p3rb_out:       rts
+
+* p3rb_map: A = slice. Visible into slot 5 ($A000), shadow into slot 6 ($C000) -- p3_present's pair.
+p3rb_map:
+                pshs    a
+                lda     #P3_BLK_VISIBLE
+                sta     ph_blk_fb
+                lda     ,s
+                jsr     phase_draw_fb_slot5
+                lda     #P3_BLK_SHADOW
+                sta     ph_blk_fb
+                lda     ,s+
+                jsr     phase_draw_fb
+                ldd     P3_REMAPS
+                addd    #2
+                std     P3_REMAPS
+                rts
+
+* p3rb_span: copy p3rb_n bytes at p3rb_within, shadow ($C000) -> visible ($A000).
+p3rb_span:
+                ldb     p3rb_n
+                beq     p3rbs_out
+                ldx     #FB_BASE
+                ldd     p3rb_within
+                leax    d,x
+                ldu     #PRI_BASE
+                leau    d,u
+p3rbs_b:        lda     ,x+
+                sta     ,u+
+                decb
+                bne     p3rbs_b
+p3rbs_out:      rts
+                endc
+
 p3_present:
                 clr     p3p_slice
 p3p_next:

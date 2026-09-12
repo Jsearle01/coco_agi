@@ -258,9 +258,36 @@ if [ "$WHICH" = "p3b_text" ] || [ "$WHICH" = "all" ]; then
     echo
 fi
 
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ p3b_box -- THE BLOCKING MESSAGE WINDOW. Same binary as p3b_text; what differs is the
+# TRIGGER, and the trigger is the part that was missing for four tasks.
+# ★★★★ IT IS A SEPARATE ROW BECAUSE p3b_text CANNOT REACH IT. That row runs Kingquest1 at room 83,
+# and no title in the pinned set executes print from its intro -- measured three ways
+# [vm_opcov.py, print_first_cycle.py, vm_input_script.py --wants-print]. **The scope and the
+# invocation of a gate are part of its definition** [§2F; this project has recorded that five
+# times], so the corpus difference gets a row rather than a flag.
+# ★★★ WHY THIS ROOM, MEASURED NOT CHOSEN [P6.30 §4A/§4B]: SpaceQuest-2 logic 101 is
+# `print.v(v17); quit(1)` -- unconditional, HAS a picture so the probe can be in it, does not halt
+# the VM, and reaches print at cycle 8 identically across runs. P3B_SETVAR is not optional: var 17
+# selects the message and at its cold value of 0 the index resolves to -1 and print draws nothing.
+# ★★ P3B_VAR21=2 auto-closes the box after 2 * 30 ticks so the run completes unattended. The eye
+# gate drops it and waits for a key instead.
+# ★★★★★ AND THE EARLIER WORRY WAS WRONG, SO IT IS RECORDED RATHER THAN REPEATED: this row was held
+# out on the grounds that quit(1) would end the run early and the completion check would read that
+# as a failure. **Measured: the probe keeps cycling after vm_quit, reaches its full count and
+# exits 0.** The claim was never tested when it was made.
+if [ "$WHICH" = "p3b_box" ] || [ "$WHICH" = "all" ]; then
+    echo "═══ p3b_box (blocking message window: SpaceQuest-2 room 101, 40 cycles) ═══"
+    P3B_ROOM=101 P3B_ROOM_AT=8 P3B_SETVAR=17=1 P3B_VAR21=2 \
+    powershell -NoProfile -ExecutionPolicy Bypass -File harness/tools/p3b_show.ps1 \
+        -Title SpaceQuest-2 -Cycles 40 -Text -Headless \
+        || note_fail p3b_box
+    echo
+fi
+
 if [ -n "$FAILED" ]; then
     echo "★★★ GATES FAILED:$FAILED"
     exit 1
 fi
-echo "★ gates run:$([ "$WHICH" = "all" ] && echo " pic res cel comp p3b p3b_text" || echo " $WHICH")  -- all green"
+echo "★ gates run:$([ "$WHICH" = "all" ] && echo " pic res cel comp p3b p3b_text p3b_box" || echo " $WHICH")  -- all green"
 exit 0

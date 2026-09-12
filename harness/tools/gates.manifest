@@ -137,7 +137,8 @@ p3b	src/harness/p3b_probe.s	build/p3b_probe_pk_fresh.bin	-DHAL_GFX_MODE_SERVICE 
 # ═══════════════════════════════════════════════════════════════════════════════════════════
 # ★★★★★ RE-BASELINED AGAIN AT T-P0-087+ (Jay: "do it"), AND THE FLAG SET GAINED -DP3B_IRQ.
 #     retired:  AF0B2A027A960DF4...  15,036 B   (valid P6.29c..P6.31)
-#     now:      9D2F925F03D21B2E...  15,052 B
+#     then:     9D2F925F03D21B2E...  15,052 B   (valid to the message-box work)
+#     now:      ED3F248A0ACC9B0A...  15,548 B   -- box drawn, restore scoped, 128-glyph font
 # ★★★★★ WHY: print's wait loop paces off hal_frame, and NO PROBE HAS EVER ADVANCED IT. The CoCo3
 # redirects the 6809 vectors into the $FExx page, so the chain is TWO hops -- $FFF8 -> $FEF7
 # (LBRA, wrapping to $010C) -> $010C (JMP handler) -- and HAL_time_init patches only the second.
@@ -166,11 +167,12 @@ p3b	src/harness/p3b_probe.s	build/p3b_probe_pk_fresh.bin	-DHAL_GFX_MODE_SERVICE 
 # and that is scoped to this row, not a claim about the engine.
 # ★★ purpose=correctness: this row is gated on health and on what a person sees, not on a clock.
 # **No timing figure may be quoted from it** -- the row above is the timing build.
-p3b_text	src/harness/p3b_probe.s	build/p3b_probe_text.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ	correctness probe: text opcodes, no cel staging, room 83; binary 9D2F925F 15,052 B, re-baselined T-P0-087+	purpose=correctness
+p3b_text	src/harness/p3b_probe.s	build/p3b_probe_text.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ	correctness probe: text opcodes, no cel staging, room 83; binary ED3F248A 15,548 B, re-baselined at the message-box work	purpose=correctness
 # ═══════════════════════════════════════════════════════════════════════════════════════════
 # ★★★★★ THE FAULT ARM, AND IT HAS NOW BEEN SEEN RED. Blocked for three tasks; §2W is satisfied.
 #     retired:  2268DAB7...  15,033 B   (built but unexercisable, P6.29c..P6.31)
-#     now:      EEBA4C73...  15,049 B
+#     then:     EEBA4C73...  15,049 B
+#     now:      ED500A37...  15,545 B
 # ★★★★ -DTEXT_FAULT_NOTICK drops ONE `jsr vm_step_clock` from print's wait loop -- 3 bytes, and
 # nothing else differs from the row above. var 21's deadline is a mark ON the game clock, so a loop
 # that does not advance that clock can never reach it.
@@ -195,7 +197,10 @@ p3b_notick	src/harness/p3b_probe.s	build/p3b_probe_notick.bin	-DHAL_GFX_MODE_SER
 # reaches print at cycle 8 identically across runs. var 17 must be set or the message number
 # resolves to -1 and print draws nothing -- "the opcode executed" and "a box was drawn" are
 # different facts [P6.31].
-# ★★ Its determinism evidence and its two arms are in the block above. It is NOT in run_gates.sh
-# yet: the clean arm ends via quit(1), so the suite's completion adjudicator needs a verdict for
-# "ended early and deliberately" before this can join the green path.
+# ★★ Its determinism evidence and its two arms are in the block above.
+# ★★★★★ IT IS IN run_gates.sh AS OF THIS CHANGE, AND THE REASON IT WAS HELD OUT WAS WRONG. The
+# note here said the clean arm ends via quit(1) so the completion adjudicator would read it as a
+# failure. **Measured: the probe keeps cycling after vm_quit, reaches its full count and exits 0.**
+# The claim was never tested when it was written -- recorded rather than quietly deleted, because
+# an untested reason for excluding a gate is how a gate stays excluded [§2W].
 p3b_box	src/harness/p3b_probe.s	build/p3b_probe_text.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ	blocking message window: SpaceQuest-2 room 101 via P3B_ROOM/P3B_SETVAR/P3B_VAR21; gates what p3b_text cannot	purpose=correctness
