@@ -210,6 +210,9 @@ vm_getvar:
 
 * vm_setvar: A = var number, B = value
 vm_setvar:
+                ifdef   VM_VAR0DIAG
+                jsr     vm_v0_record
+                endc
                 ldx     #VM_VARS
                 pshs    b
                 tfr     a,b
@@ -218,6 +221,70 @@ vm_setvar:
                 puls    b
                 stb     ,x
                 rts
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ -DVM_VAR0DIAG -- EVERY WRITER OF VAR 0, WITH ITS CALLER [T-P0-098's §8.1].
+* ★★★★★ IT RECORDS THE WRITERS RATHER THAN THE COMMANDS I EXPECTED, and that is the point. The
+* obvious instrument was a recorder on new.room / new.room.v / restart.game -- but that is a guess
+* at which three routines can move the room, and P6.43 ended with every predicate agreeing and the
+* room changing anyway. **A recorder keyed on the EFFECT cannot miss a cause I did not think of.**
+* ★★★★ THE CALLER IS THE ANSWER, and it is free: vm_setvar is reached by `jsr`, so the return
+* address is at 0,S on entry and names the instruction after the call. The build's .lst turns that
+* into a routine name.
+* ★★★ PUBLISH ONLY. One guarded `jsr` at the top; the routine changes no register the caller can
+* see -- A, B, X and CC are all restored -- so the sequence vm_setvar executes is identical with
+* the flag on or off. **That is checked by AC-4's byte identity, not asserted here.**
+* ★★ Scoped by cycle through vm_v0_at, which the host writes, for the reason the said() recorder
+* is: one cycle's writes, not cycle 1's.
+                ifdef   VM_VAR0DIAG
+* ★★★★ FIVE BYTES, AND THE FIFTH IS THE ANSWER. The first version recorded the caller address and
+* it resolved to vm_core.s's `jsr ,x` -- the opcode DISPATCH -- which says "a command handler did
+* it" and not WHICH. vm_op holds the opcode being dispatched, so one more byte names it outright.
+VM_V0_MAX       equ     12
+vm_v0_at        fdb     $FFFF           ; the cycle to record; the host writes it
+vm_v0_n         fcb     0
+vm_v0_buf       fill    0,VM_V0_MAX*5   ; value(1), caller(2), logic(1), opcode(1)
+
+vm_v0_record:
+* ★★★ EVERYTHING IS SAVED, INCLUDING CC. vm_setvar's caller sees no difference: this runs before
+* the store and must leave A (the var number) and B (the value) exactly as they arrived.
+                pshs    cc,d,x
+                tsta                            ; var 0?
+                bne     vm_v0_out
+                ldd     vm_cycle
+                cmpd    vm_v0_at
+                bne     vm_v0_out
+                lda     vm_v0_n
+                cmpa    #VM_V0_MAX
+                bhs     vm_v0_out
+                ldb     #5
+                mul
+                ldx     #vm_v0_buf
+                leax    d,x
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE STACK MAP, WRITTEN OUT, BECAUSE THE FIRST VERSION GOT BOTH OFFSETS WRONG.
+*     0,s CC   1,s A   2,s B   3,s X    5,s -> back into vm_setvar    7,s -> ITS CALLER
+* ★★★★★ THE FIRST DRAFT TOOK THE VALUE FROM 1,s -- which is A, the var NUMBER -- and the caller
+* from 5,s, which is the return address of the `jsr vm_v0_record` two instructions above. **It
+* reported `var0 <- 0 from caller $24FA`, and $24FA is inside vm_setvar.**
+* ★★★★ THE VALUE HAPPENED TO BE RIGHT BY COINCIDENCE: this call writes var 0 with the value 0, so
+* A and B are both zero and the wrong offset read the right number. **A wrong instrument agreeing
+* with a correct one on the one sample taken is the failure §2W keeps naming**, and only the
+* caller column showed it -- because an address inside the routine doing the recording is
+* self-evidently not a caller.
+* ★★★ There are TWO return addresses on this stack and the inner one is the decoy. An added
+* register in the pshs above moves both offsets, which is why the map is here and not in a head.
+                ldb     2,s                     ; B as it arrived -- the value being written
+                stb     ,x
+                ldd     7,s                     ; vm_setvar's own caller
+                std     1,x
+                lda     vm_curlogic
+                sta     3,x
+                lda     vm_op                   ; ★ which COMMAND -- the dispatch's own byte
+                sta     4,x
+                inc     vm_v0_n
+vm_v0_out:      puls    cc,d,x,pc
+                endc
 
 * ★★ get_var on a TIMER variable ticks the clock in the reference [cycle.py get_var]. The
 * interpreter's own reads of vars 11-14 must therefore go through vm_get_timer_var, and the

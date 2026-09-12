@@ -1186,6 +1186,19 @@ _G._n = emu.add_machine_frame_notifier(function()
                           ip, res, fl & 1, (fl >> 1) & 1)
                     end
                 end
+                -- ★★★★★ EVERY WRITER OF VAR 0 IN THE TARGET CYCLE, WITH ITS CALLER. Four bytes a
+                -- row: the value, the return address of the vm_setvar call, and the logic that was
+                -- running. **The caller address is the answer** -- the build's .lst names it.
+                if SYM.vm_v0_n and SYM.vm_v0_buf then
+                    local n = prog:read_u8(SYM.vm_v0_n)
+                    w("    var-0 writers in vm_cycle %d : %d", SAIDAT or -1, n)
+                    for i = 0, n - 1 do
+                        local b = SYM.vm_v0_buf + i * 5
+                        w("      var0 <- %-3d  opcode $%02X  logic %d  caller $%04X",
+                          prog:read_u8(b), prog:read_u8(b + 4), prog:read_u8(b + 3),
+                          prog:read_u8(b + 1) * 256 + prog:read_u8(b + 2))
+                    end
+                end
                 if _G._v0 then
                     for _, e in ipairs(_G._v0) do
                         w("    var0 <- %d  by PC $%04X at cycle %d", e[1], e[2], e[3])
@@ -1626,6 +1639,12 @@ _G._n = emu.add_machine_frame_notifier(function()
             prog:write_u8(SYM.vm_sd_at + 1, SAIDAT % 256)
             _G._sd_armed = true
             w("  ★ said() recorder armed for vm_cycle %d", SAIDAT)
+        end
+        if SAIDAT and SYM.vm_v0_at and not _G._v0_armed then
+            prog:write_u8(SYM.vm_v0_at, math.floor(SAIDAT / 256))
+            prog:write_u8(SYM.vm_v0_at + 1, SAIDAT % 256)
+            _G._v0_armed = true
+            w("  ★ var-0 writer recorder armed for vm_cycle %d", SAIDAT)
         end
 
         -- ★★★★★ SAMPLE THE WHOLE VM STATE BLOCK [T-P0-096 §4A]. Seven arms have asked which BUILD
