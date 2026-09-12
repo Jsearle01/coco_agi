@@ -65,8 +65,36 @@ PRI_BASE        equ     MAP_PRI_SLICE           ; priority slice, draw phase
 PLANE_WIN_MMU   equ     1
 PIC_W           equ     160
 PIC_H           equ     168
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE SEED STACK IS SIZED HERE, BY THIS PROBE, AND memmap.inc IS NOT TOUCHED [T-P0-089].
+* STACK_BASE/STACK_TOP have always been probe-local equs that happened to take the engine's
+* values. The engine reserves 768 B = 384 entries of (x,y) and records its own measurement beside
+* it: **"peak measured at 37"**. 74 bytes used of 768.
+* ★★★★ That slack is what the font needs. Region A ($2000-$6000) holds 14,691 B of code against a
+* 2,048 B font and 16,384 of space -- 355 short -- and **the answer is not to shrink the code but
+* to move DATA out of it** [Jay: "what lies below the code"]. vm_tables.s is 525 B of pure table
+* and it now lives at P3_TABLES_BASE, in space this reservation was never using.
+* ★★★ 128 ENTRIES, which is 3.5x the measured peak, not the 384 the engine reserves. ★★★★ AND THE
+* FAILURE IS LOUD: pic_fill's ff_push compares against STACK_TOP-2 and HALTS on overflow -- "
+* wrapping the stack would overwrite code and produce a wrong picture with no attributable cause"
+* -- so a picture that needs more fails visibly and the renderer gate's 45 pictures, both planes,
+* is what says it did not.
+* ★★ THE PEAK IS A CORPUS MEASUREMENT, NOT A BOUND [L-86]. 37 is the deepest fill in 45 gated
+* pictures; a picture outside that set could go deeper. The margin is 3.5x and the guard halts.
+* ★★★★★ AND IT IS SCOPED TO THE TEXT CONFIGURATION. `p3b` is purpose=timing and its figures are
+* attached to a binary; relocating bytes changes that binary even when it changes no behaviour, and
+* AD-96 is the standing lesson about quoting a figure whose producer moved. **The cel build has no
+* font and no font pressure, so it keeps the engine's seed stack and its own byte identity.**
 STACK_BASE      equ     MAP_SEEDSTACK
-STACK_TOP       equ     MAP_SEEDSTACK_E
+                ifdef   P3B_NO_CEL
+STACK_TOP       equ     MAP_SEEDSTACK+256       ; 128 entries; engine reserves 384
+* ★★★ $0200-$0480 is what that frees. $0480-$0500 is left as margin below the hardware stack,
+* whose own low-water is measured at S=$07C6 -- 710 bytes clear of its $0500 floor.
+P3_TABLES_BASE  equ     MAP_SEEDSTACK+256
+P3_TABLES_LIMIT equ     $0480
+                else
+STACK_TOP       equ     MAP_SEEDSTACK_E         ; the engine's 384 entries, unchanged
+                endc
 HW_STACK        equ     MAP_HWSTACK
 
 * ── host handshake, in the status block ──────────────────────────────────────────
@@ -251,15 +279,18 @@ TXD_EACH        equ     8                       ; records kept per site
 * because this probe orgs the parser over MAP_FONT and relocates the font down here.
 * ★★★ So the 54 bytes came out of tx_boxfill instead: the window-origin generality nothing used,
 * and a shadow row variable that existed to preserve a value every caller overwrote.
-* ★★★★★ AND IT DOES NOT FIT YET -- 312 BYTES SHORT, NOT THE 54 I QUOTED. The 54 was measured
-* BEFORE the scoped rectangle restore landed; p3_restore_box cost ~288 bytes and the figure went
-* stale the moment it did. **A budget quoted from before the last change is not a budget** [AD-95's
-* shape: a recorded number whose producer has moved]. Reverted to 128 glyphs so the build works,
-* and the decision goes back to Jay with the real number.
-TEXT_FONT128    equ     1
+* ★★★★★ AND IT FITS NOW, BECAUSE THE FONT WAS NEVER THE THING TO MOVE [T-P0-089].
+* Two earlier attempts priced this as a byte hunt: 54 bytes, then 312, then 355 -- each measured
+* against a code size that moved under it. ★★★★ **The question was wrong.** Region A holds DATA as
+* well as code, and `vm_tables.s` is 626 bytes of pure table sitting in it. Relocated into the seed
+* stack's measured slack -- 768 B reserved against a peak of 37 entries -- it drops P3_CODE_END
+* from $5963 to $56EB and the full 2,048-byte font lands at $5800 with 277 bytes spare.
+* ★★★ Jay asked "what lies below the code", and the answer was 1,660 bytes of stack reservation
+* that two independent measurements -- the engine's own seed-stack note and this probe's stack
+* low-water instrument -- had already shown nobody uses.
 TEXT_BOX        equ     1
-P3_FONT         equ     MAP_RESERVED_END-1024
-P3_FONT_BYTES   equ     1024            ; ★ the staging length; p3b_run.lua reads this symbol
+P3_FONT         equ     MAP_RESERVED_END-2048
+P3_FONT_BYTES   equ     2048            ; ★ the staging length; p3b_run.lua reads this symbol
                 endc
 
                 org     MAP_CODE
@@ -1286,7 +1317,25 @@ phase_draw_enter:
 
                 include "src/engine/mmu_phase.s"
 
+* ★★★★ vm_tables.s IS RELOCATED, NOT REORDERED. It stays exactly here in the assembly so nothing
+* about symbol visibility changes; only the ADDRESS its bytes land at moves, into the seed stack's
+* measured slack. 525 B of `fdb` dispatch entries and `fcb` argument counts -- pure data, reached
+* only by address, so where it lives is free to choose.
+* ★★★ THE CODE RUN IS SPLIT BY THIS, and the host must know: the raw image is now
+* code-before | tables | code-after | parser, four runs where there were two. p3b_run.lua pokes
+* them from these symbols rather than from literals [the same rule that put P3_INBUF in the map].
+                ifdef   P3B_NO_CEL
+P3_CODE_SPLIT   equ     *
+                org     P3_TABLES_BASE
                 include "src/harness/vm_tables.s"
+P3_TABLES_END   equ     *
+                ifgt    P3_TABLES_END-P3_TABLES_LIMIT
+                error   "vm_tables.s overruns the seed stack's slack and is heading for the hardware stack -- shrink it or raise P3_TABLES_LIMIT after re-measuring the stacks"
+                endc
+                org     P3_CODE_SPLIT
+                else
+                include "src/harness/vm_tables.s"
+                endc
                 include "src/harness/vm_state.s"
                 include "src/harness/vm_core.s"
                 include "src/harness/vm_cmds.s"

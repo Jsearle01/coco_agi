@@ -139,7 +139,8 @@ p3b	src/harness/p3b_probe.s	build/p3b_probe_pk_fresh.bin	-DHAL_GFX_MODE_SERVICE 
 #     retired:  AF0B2A027A960DF4...  15,036 B   (valid P6.29c..P6.31)
 #     then:     9D2F925F03D21B2E...  15,052 B   (valid to the message-box work)
 #     then:     ED3F248A0ACC9B0A...  15,548 B   -- box drawn, restore scoped, 128-glyph font
-#     now:      63597E4DE0AB58EF...  15,561 B   -- T-P0-088: the restore copies its full width
+#     then:     63597E4DE0AB58EF...  15,561 B   -- T-P0-088: the restore copies its full width
+#     now:      C4A4346B55330174...  15,555 B   -- T-P0-089: 256-glyph font; vm_tables relocated
 # ★★★★★ WHY: print's wait loop paces off hal_frame, and NO PROBE HAS EVER ADVANCED IT. The CoCo3
 # redirects the 6809 vectors into the $FExx page, so the chain is TWO hops -- $FFF8 -> $FEF7
 # (LBRA, wrapping to $010C) -> $010C (JMP handler) -- and HAL_time_init patches only the second.
@@ -168,13 +169,14 @@ p3b	src/harness/p3b_probe.s	build/p3b_probe_pk_fresh.bin	-DHAL_GFX_MODE_SERVICE 
 # and that is scoped to this row, not a claim about the engine.
 # ★★ purpose=correctness: this row is gated on health and on what a person sees, not on a clock.
 # **No timing figure may be quoted from it** -- the row above is the timing build.
-p3b_text	src/harness/p3b_probe.s	build/p3b_probe_text.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ	correctness probe: text opcodes, no cel staging, room 83; binary 63597E4D 15,561 B, re-baselined T-P0-088	purpose=correctness
+p3b_text	src/harness/p3b_probe.s	build/p3b_probe_text.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ	correctness probe: text opcodes, no cel staging, room 83; binary C4A4346B 15,555 B, re-baselined T-P0-089	purpose=correctness
 # ═══════════════════════════════════════════════════════════════════════════════════════════
 # ★★★★★ THE FAULT ARM, AND IT HAS NOW BEEN SEEN RED. Blocked for three tasks; §2W is satisfied.
 #     retired:  2268DAB7...  15,033 B   (built but unexercisable, P6.29c..P6.31)
 #     then:     EEBA4C73...  15,049 B
 #     then:     ED500A37...  15,545 B
-#     now:      DA798353...  15,558 B   -- T-P0-088
+#     then:     DA798353...  15,558 B   -- T-P0-088
+#     now:      2849A07A...  15,552 B   -- T-P0-089
 # ★★★★ -DTEXT_FAULT_NOTICK drops ONE `jsr vm_step_clock` from print's wait loop -- 3 bytes, and
 # nothing else differs from the row above. var 21's deadline is a mark ON the game clock, so a loop
 # that does not advance that clock can never reach it.

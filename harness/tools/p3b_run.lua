@@ -453,25 +453,51 @@ _G._n = emu.add_machine_frame_notifier(function()
         -- same rule that put P3_INBUF in the symbol list rather than in a literal.
         -- ★★★ Guarded: a build without the parser (no P3_PARSER_BASE) pokes one segment exactly
         -- as before, so this file still drives the pre-parser p3b unchanged.
-        local codelen = #blob
-        if SYM.P3_CODE_END and SYM.P3_PARSER_BASE then
-            codelen = SYM.P3_CODE_END - LOAD
-            if codelen < 0 or codelen > #blob then
-                w("★★★ P3_CODE_END $%04X is not inside the %d-byte image -- stale map?",
-                  SYM.P3_CODE_END, #blob)
-                m:exit(); return
-            end
-        end
-        for i = 1, codelen do prog:write_u8(LOAD + i - 1, blob:byte(i)) end
-        if codelen < #blob then
-            for i = codelen + 1, #blob do
-                prog:write_u8(SYM.P3_PARSER_BASE + (i - codelen) - 1, blob:byte(i))
-            end
-            w("program %d bytes: %d at $%04X + %d at $%04X (the parser, org'd)",
-              #blob, codelen, LOAD, #blob - codelen, SYM.P3_PARSER_BASE)
+        -- ═══════════════════════════════════════════════════════════════════════════════
+        -- ★★★★★ THE IMAGE IS A LIST OF RUNS, NOT A CODE BLOCK PLUS A TAIL [T-P0-089].
+        -- lwasm --format=raw emits bytes in SOURCE order with no padding, so every `org` starts a
+        -- new run and the file says nothing about where any of them goes. The text configuration
+        -- now has FOUR: vm_tables.s is relocated into the seed stack's measured slack so the full
+        -- 256-glyph font fits, which splits the code either side of it.
+        -- ★★★★ EVERY BOUNDARY COMES FROM THE BUILD'S OWN MAP. A literal here would mis-place a
+        -- whole run the moment the code grows -- the same rule that put P3_INBUF in the symbol
+        -- list rather than in a constant [P6.3 §3.F.2], and the failure would look like a
+        -- corrupted program rather than a staging bug.
+        -- ★★★ The cel configuration has no split and no relocation, so it still describes two runs
+        -- and this code produces exactly the two it always did.
+        local segs = {}
+        if SYM.P3_CODE_SPLIT and SYM.P3_TABLES_BASE and SYM.P3_TABLES_END then
+            segs[#segs+1] = { LOAD,               SYM.P3_CODE_SPLIT - LOAD,             "code" }
+            segs[#segs+1] = { SYM.P3_TABLES_BASE, SYM.P3_TABLES_END - SYM.P3_TABLES_BASE,
+                              "vm_tables (relocated)" }
+            segs[#segs+1] = { SYM.P3_CODE_SPLIT,  SYM.P3_CODE_END - SYM.P3_CODE_SPLIT,  "code" }
         else
-            w("program %d bytes at $%04X; MMU slots pre-set $38..$3F", #blob, LOAD)
+            segs[#segs+1] = { LOAD, (SYM.P3_CODE_END or (LOAD + #blob)) - LOAD, "code" }
         end
+        local used = 0
+        for _, s in ipairs(segs) do used = used + s[2] end
+        if SYM.P3_PARSER_BASE and used < #blob then
+            segs[#segs+1] = { SYM.P3_PARSER_BASE, #blob - used, "parser (org'd)" }
+            used = #blob
+        end
+        -- ★★★★ REFUSE ON A MISMATCH rather than poke a partial program. A run list that does not
+        -- account for every byte means the map and the image disagree, and the guest would then
+        -- execute whatever the gap left behind.
+        if used ~= #blob then
+            w("★★★ the run list covers %d bytes of a %d-byte image -- map and image disagree",
+              used, #blob)
+            m:exit(); return
+        end
+        local pos = 1
+        for _, s in ipairs(segs) do
+            if s[2] < 0 then
+                w("★★★ run '%s' has negative length -- stale map?", s[3]); m:exit(); return
+            end
+            for i = 0, s[2] - 1 do prog:write_u8(s[1] + i, blob:byte(pos + i)) end
+            w("  poked %5d B -> $%04X  %s", s[2], s[1], s[3])
+            pos = pos + s[2]
+        end
+        w("program %d bytes in %d run(s); MMU slots pre-set $38..$3F", #blob, #segs)
         -- ═══════════════════════════════════════════════════════════════════════════════
         -- ★★★★★ THE FONT, STAGED INTO P3_FONT [T-P0-084d §5C]. text.s reaches every glyph through
         -- txt_font, which the probe points at P3_FONT -- the top of MAP_RESERVED, in slot 2,

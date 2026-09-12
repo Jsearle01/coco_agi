@@ -121,7 +121,7 @@ if ($Text -or $DecodeFault -or $NoTick -or $Diag) { $WANT += @("vm_vms","vm_pass
 # * text.s symbols exist in EVERY P3B_NO_CEL build, -Fault included: that arm links the engine and
 #   only declines to call the nine handlers. Kept off the line above because tx_wt_* need
 #   TEXT_WIRED, which -Fault deliberately leaves undefined.
-if ($Text -or $Fault -or $DecodeFault -or $NoTick -or $Diag) { $WANT += @("txt_bgx","txt_bgy","txt_bgw","txt_bgh","txb_yoff","txt_winactive","txt_restore","P3_RBTRACE","p3rb_tn") }
+if ($Text -or $Fault -or $DecodeFault -or $NoTick -or $Diag) { $WANT += @("txt_bgx","txt_bgy","txt_bgw","txt_bgh","txb_yoff","txt_winactive","txt_restore","P3_RBTRACE","p3rb_tn","P3_CODE_SPLIT","P3_TABLES_BASE","P3_TABLES_END") }
 if ($Diag) { $WANT += @("P3_TXDIAG","tx_diag_n1","tx_diag_n2") }
 # * tx_wt_* exist in every wired build; the stall dump reads them to separate the three shapes a
 #   hang inside the wait loop can have.
