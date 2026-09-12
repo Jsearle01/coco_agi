@@ -37,6 +37,7 @@ param(
   [switch]$NoMap,
   [switch]$Win3,
   [switch]$FlatVocab,
+  [switch]$SaidDiag,
   [switch]$NoIrq,
   [double]$Hold   = 3.0
 )
@@ -126,6 +127,13 @@ if ($Win3) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DTEXT_WIN3") + $IRQ }
 # rejects -- so the arm is spelled out once, here, and cannot drift from its control.
 # ★★ Measurement only: it holds one title's dictionary and is in no gate row [p3b_probe.s].
 if ($FlatVocab) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DTEXT_MODELLED","-DTEXT_VOCAB_FLAT") + $IRQ }
+# ★★★★★ -SaidDiag RECORDS ONE ROW PER said() IN ONE CYCLE [T-P0-098 §1.3]. The reference's side of
+# this question is answered by test_trace.py and needs no emulator; the PORT's needs the guest to
+# publish, because MAME's write tap cannot see a direct-page store [P6.42 §4C].
+# ★★★★ It carries -DTEXT_MODELLED so it differs from P6.39's arm B by exactly one flag, the same
+# discipline the flat-vocabulary arm follows.
+# ★★ Diagnostic only: in no gate row, and every shipped artifact is byte-identical without it.
+if ($SaidDiag) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DTEXT_MODELLED","-DVM_SAIDDIAG") + $IRQ }
 
 & $LW --format=raw --output=build/p3b_probe_pk_fresh.bin --map=build/p3b_probe_pk.map -I. @FLAGS src/harness/p3b_probe.s
 if ($LASTEXITCODE -ne 0) { throw "p3b assemble failed" }
@@ -169,7 +177,9 @@ $WANT = @("res_volbase","res_slicebase","res_curblk","vm_quit","vm_badop","vm_cy
 # ★ -FlatVocab is a MODELLED arm, so it belongs with $Fault in $Linked and not in $Wired: it links
 #   text.s and leaves TEXT_WIRED undefined, exactly as -Fault does.
 $Wired  = $Text -or $DecodeFault -or $NoTick -or $Diag -or $NoMap -or $Win3
-$Linked = $Wired -or $Fault -or $FlatVocab
+$Linked = $Wired -or $Fault -or $FlatVocab -or $SaidDiag
+# ★★ The said-diagnostic's own symbols, only where the flag defines them.
+if ($SaidDiag) { $WANT += @("vm_sd_at","vm_sd_n","vm_sd_buf") }
 if ($Linked) { $WANT += @("P3_FONT","P3_FONT_BYTES","P3_PBUF","ph_blk_vocab","ph_blk_slot5") }
 # ★★★★ THE COMMAND LINE's SYMBOLS [T-P0-092]. They exist wherever TEXT_PROMPT does, which
 # p3b_probe.s conditions exactly as TEXT_WIRED -- so every wired text arm has them and the

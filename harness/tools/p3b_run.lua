@@ -145,6 +145,9 @@ local INBUF_MAX = 42
 -- ★★★ The other two were fixed by not capturing at all (they read the guest's counter). This one
 -- is a configuration value with nowhere else to come from, so it moves instead.
 local PHASETAP = tonumber(os.getenv("P3B_PHASETAP") or "")
+-- ★★ P3B_SAIDAT=<vm_cycle> -- record one row per said() in that cycle [T-P0-098]. Declared here,
+--    above stage(), for the reason the comment on PHASETAP gives.
+local SAIDAT = tonumber(os.getenv("P3B_SAIDAT") or "")
 local VOCAB, VOCAB_END = nil, nil
 local function rd16_early(a) return prog:read_u8(a) * 256 + prog:read_u8(a + 1) end
 
@@ -1166,6 +1169,23 @@ _G._n = emu.add_machine_frame_notifier(function()
                           e[8], e[1], e[2], (e[2] >> 2) & 1, e[3], e[4], e[5], e[6], e[7])
                     end
                 end
+                -- ★★★★★ THE said() ROWS [T-P0-098 §4B]. Four bytes each: ip (which said), result,
+                -- and a packed byte carrying flag 4 AS READ ON ENTRY and flag 2.
+                -- ★★★ flag 4 on entry is the guard that should reject every said() after the first
+                -- match in a cycle [parser.s:474]. A row with result=1 and f4=1 would be that
+                -- guard failing; a second result=1 in one cycle is the same thing one level up.
+                if SYM.vm_sd_n and SYM.vm_sd_buf then
+                    local n = prog:read_u8(SYM.vm_sd_n)
+                    w("    said() rows for vm_cycle %d : %d", SAIDAT or -1, n)
+                    for i = 0, n - 1 do
+                        local b = SYM.vm_sd_buf + i * 4
+                        local ip = prog:read_u8(b) * 256 + prog:read_u8(b + 1)
+                        local res = prog:read_u8(b + 2)
+                        local fl = prog:read_u8(b + 3)
+                        w("      said @ip $%04X  result=%d  flag4_on_entry=%d  flag2=%d",
+                          ip, res, fl & 1, (fl >> 1) & 1)
+                    end
+                end
                 if _G._v0 then
                     for _, e in ipairs(_G._v0) do
                         w("    var0 <- %d  by PC $%04X at cycle %d", e[1], e[2], e[3])
@@ -1598,6 +1618,16 @@ _G._n = emu.add_machine_frame_notifier(function()
         -- ★★ Transitions only, not 400 samples: a room number repeated is not evidence, and this
         -- file already guards against printing 900 copies of one fact.
         -- ═══════════════════════════════════════════════════════════════════════════════
+        -- ★★★★ ARM THE said() RECORDER ONE PARK EARLY, for the reason every other arming in this
+        -- file is one park early: the guest runs the cycle this release starts, and vm_cycle reads
+        -- the cycle it is ABOUT to run [T-P0-098].
+        if SAIDAT and SYM.vm_sd_at and not _G._sd_armed then
+            prog:write_u8(SYM.vm_sd_at, math.floor(SAIDAT / 256))
+            prog:write_u8(SYM.vm_sd_at + 1, SAIDAT % 256)
+            _G._sd_armed = true
+            w("  ★ said() recorder armed for vm_cycle %d", SAIDAT)
+        end
+
         -- ★★★★★ SAMPLE THE WHOLE VM STATE BLOCK [T-P0-096 §4A]. Seven arms have asked which BUILD
         -- difference correlates with the restart. **None has asked what logic 0 actually READ.**
         -- It is the actor on both sides, with the same inputs and the same parse, and it decides

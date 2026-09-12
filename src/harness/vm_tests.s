@@ -193,6 +193,28 @@ vm_saidn        fdb     0               ; said() evaluations
 vm_saidm        fdb     0               ; ... of which matched
 vm_fedn         fcb     0               ; inputs fed (vp_feed)
 
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ -DVM_SAIDDIAG -- ONE ROW PER said() IN ONE CYCLE [T-P0-098 §1.3, AUTHORISED].
+* ★★★★★ WHY THE GUEST HAS TO PUBLISH: P6.42 showed MAME's write tap does not catch stores to a
+* direct-page address, verified by removing the filter entirely [§2W]. **There is no host-side
+* route to a mid-cycle value**, and the reference's side of this question is already answered --
+* said($01FF) TRUE, said($022F) FALSE, every controller FALSE. Only the port's side is missing.
+* ★★★★ PUBLISH ONLY. No behaviour change, no reordering, no new call: four stores into a buffer,
+* after the result is already computed and before the flag is published, so the sequence the VM
+* executes is identical with the flag on or off.
+* ★★★ SCOPED BY CYCLE. vm_sd_at is written by the HOST; rows are recorded only while vm_cycle
+* matches it, so sixteen slots cover one cycle's said() calls rather than being consumed by
+* cycle 1. ★★ Four bytes a row: ip (which said), result, flag 4 as it was ON ENTRY, flag 2.
+* ★ Off by default. Every shipped artifact is byte-identical with this undefined [AC-4].
+                ifdef   VM_SAIDDIAG
+VM_SD_MAX       equ     16
+vm_sd_at        fdb     $FFFF           ; the cycle to record; the host writes it
+vm_sd_n         fcb     0
+vm_sd_f4        fcb     0               ; flag 4 as read on entry, held across par_said
+vm_sd_f2        fcb     0
+vm_sd_buf       fill    0,VM_SD_MAX*4
+                endc
+
 vmtest_said:
                 ldd     vm_saidn
                 addd    #1
@@ -200,9 +222,15 @@ vmtest_said:
                 lda     #FLAG_SAID_ACCEPTED
                 jsr     vm_getflag
                 sta     par_accepted
+                ifdef   VM_SAIDDIAG
+                sta     vm_sd_f4        ; ★ ON ENTRY -- par_said overwrites par_accepted on a match
+                endc
                 lda     #FLAG_ENTERED_CLI
                 jsr     vm_getflag
                 sta     par_cli
+                ifdef   VM_SAIDDIAG
+                sta     vm_sd_f2
+                endc
                 ldx     vm_code
                 ldd     vm_ip
                 leax    d,x
@@ -215,6 +243,11 @@ vmtest_said:
                 bra     vm_said_pub
 vm_said_no:     clra
 vm_said_pub:    sta     vm_testres
+* ★★★ RECORDED HERE: the result is final and the flag has not been published yet, so vm_sd_f4 is
+* still the value this call SAW rather than the one it caused.
+                ifdef   VM_SAIDDIAG
+                jsr     vm_sd_record
+                endc
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ VM_FAULT_SAID_PURE -- THIS TASK'S OWN INJECTED FAULT [L-62, §2W.1].
 * ★★★★ THE FAULT MUST BE IN THE CODE THIS TASK WROTE. parser.s already carries
@@ -237,3 +270,36 @@ vm_said_pub:    sta     vm_testres
                 jsr     vm_setflag
                 endc
                 rts
+
+* ── vm_sd_record -- four bytes into the ring, only in the host's chosen cycle ──
+* ★★ A ROUTINE, NOT INLINE, so the guarded block at the call site is one `jsr` and the emitted
+* sequence is trivially the same shape with the flag off.
+                ifdef   VM_SAIDDIAG
+vm_sd_record:
+                ldd     vm_cycle
+                cmpd    vm_sd_at
+                bne     vm_sd_out
+                lda     vm_sd_n
+                cmpa    #VM_SD_MAX
+                bhs     vm_sd_out
+                ldb     #4
+                mul
+                ldx     #vm_sd_buf
+                leax    d,x
+                ldd     vm_ip                   ; which said() -- its operand offset
+                std     ,x
+                lda     vm_testres
+                sta     2,x
+* ★★★ f4 and f2 are packed into one byte so a row stays four wide: bit 0 = flag 4 on entry,
+* bit 1 = flag 2. The host unpacks them; the alternative was a five-byte row for one bit.
+                lda     vm_sd_f4
+                anda    #1
+                ldb     vm_sd_f2
+                andb    #1
+                lslb
+                pshs    b
+                ora     ,s+
+                sta     3,x
+                inc     vm_sd_n
+vm_sd_out:      rts
+                endc
