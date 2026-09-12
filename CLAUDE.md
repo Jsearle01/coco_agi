@@ -1,7 +1,18 @@
 # CLAUDE.md — AGI Interpreter → CoCo3 Project (Clyde standing rules)
-## Working Agreement v1.8 (forked from POP3_port CLAUDE.md v1.1)
-**Version:** 1.8
+## Working Agreement v1.9 (forked from POP3_port CLAUDE.md v1.1)
+**Version:** 1.9
 **Instantiates:** CODM v0.7. Where this doc and v0.7 overlap, v0.7 governs; this doc adds AGI invariants.
+
+**Changelog v1.8 → v1.9 (2026-09-12, Jay — "add it to CLAUDE.md").** ★★★★★ **§2J.5–§2J.7 ADDED —
+the heredoc ban now covers POWERSHELL ROUND-TRIPS, which are the same defect by another mechanism:
+a read-modify-write of a tracked file through PowerShell double-encodes every non-ASCII character
+and leaves a file that still assembles, runs and passes its gate.** ★★★★ **The rule already existed
+in an agent's memory file and failed three times — six files in T-P0-061 with four pushed, 34 runs
+in T-P0-086, 59 plus a BOM in T-P0-087 during the session that was reporting the previous instance.
+§2J has never been violated. Placement was the defect.** ★★★ **§2J.7 adds the mechanical half
+(`run_gates.sh` fails on `fix_mojibake.py --check`, `1bd7648`) and the trap inside it: a written-down
+example of the damage is byte-identical to the damage, which caught three files including the
+comment explaining the allowlist.** No other rule changed.
 
 **Changelog v1.7 → v1.8 (2026-09-06, Jay).** ★★★★★ **§2W ADDED — an instrument must be shown able to
 FAIL before its output is believed.** Five instruments have now testified rather than measured: a stale
@@ -416,6 +427,51 @@ the debugging goes to the wrong place.**
 
 ★★★ **If a case genuinely has no §2J.2 answer, that is a §22.5 consultation, not a reason to try a
 heredoc.**
+
+### 2J.5 ★★★★★ THE SAME BAN COVERS POWERSHELL ROUND-TRIPS. Never edit a tracked file through a shell.
+
+> ★★★★★ **`Get-Content` / `Set-Content`, `Get-Content -Raw` / `[IO.File]::WriteAllText`, and every
+> other read-modify-write of a repository file through PowerShell are BANNED, in every use.**
+> **Use `create_file` / `str_replace` — the same answer §2J.2 gives for heredocs.**
+
+★★★★ **This is §2J's defect with a different mechanism, and it belongs in the same section for that
+reason.** PowerShell 5.1 reads a BOM-less UTF-8 file using the **ANSI codepage**, and
+`Set-Content -Encoding utf8` writes a **BOM** back. A round trip therefore does two things to every
+non-ASCII character: `U+2605` is read as three cp1252 characters and re-encoded as seven bytes.
+
+★★★★★ **AND IT PRODUCES SOMETHING THAT LOOKS PLAUSIBLE AND IS WRONG** — §2J.1's words, and they
+transfer exactly. **The damage is comment-only and every affected file still assembles, runs and
+passes its gate**, which is precisely why it survives commits unnoticed.
+
+### 2J.6 ★★★★ Why this is a rule and not a note — it WAS a note, and the note failed twice
+
+| | |
+|---|---|
+| **T-P0-061** | six files, **four already pushed**, during bulk edits the Edit tool would have made safely |
+| **T-P0-086** | **34 runs** in `print_first_cycle.py`, on a file written minutes earlier |
+| **T-P0-087** | **59 runs plus a BOM** in `p3b_show.ps1` — ★★★ **in the same session whose report was recording the T-P0-086 instance** |
+
+★★★★★ **The rule existed for all three. It lived in an agent's memory file — the weakest slot
+available, delivered as background context that is explicitly not instructions — and it did not
+hold.** ★★★ **§2J has never been violated, and the difference between the two is that §2J is here.**
+**Placement was the defect, not diligence.**
+
+### 2J.7 The mechanical half, and the trap inside it
+
+★★★★ **`harness/tools/fix_mojibake.py` repairs a file; `--check` reports and exits non-zero.**
+**`run_gates.sh` runs `--check` FIRST, on every invocation, over every tracked text file**, so
+corruption cannot survive a task [landed `1bd7648`; shown red by a real PowerShell round-trip and
+green on repair, per §2W].
+
+★★★★★ **NEVER PASTE THE DAMAGED FORM INTO A FILE — DESCRIBE IT IN CODEPOINTS.** A written-down
+example is **byte-identical to the real thing**, so it is indistinguishable from the defect:
+`fix_mojibake.py` once flagged its own docstring, P3.2's report is allowlisted by explicit filename
+because it documents the damage literally, and ★★★ **the `run_gates.sh` comment explaining that
+allowlist flagged `run_gates.sh` itself and had to be rewritten.** Three instances, one cause.
+
+★★ **The allowlist is BY EXPLICIT FILENAME, never by pattern** (§2N's rule), **and it exists so the
+check can stay on**: a gate permanently red for a legitimate reason gets switched off, and then
+enforces nothing [§2M.8].
 
 ---
 
