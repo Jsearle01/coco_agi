@@ -34,6 +34,7 @@ param(
   [switch]$DecodeFault,
   [switch]$NoTick,
   [switch]$Diag,
+  [switch]$NoMap,
   [switch]$NoIrq,
   [double]$Hold   = 3.0
 )
@@ -95,6 +96,14 @@ if ($NoTick) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DTEXT_FAULT_NOTICK"
 # auditing arithmetic that is identical either way. Records live in MAP_INPUT's tail, not the code
 # region. ★★ Diagnostic only -- not in the clean build, not in any gate row.
 if ($Diag) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DTX_MSGDIAG") + $IRQ }
+# ★★★★★ -NoMap IS THE VOCABULARY WINDOW's FAULT ARM [T-P0-091, §2W]. -DP3B_VOCAB_NOMAP drops ONE
+# `jsr phase_vocab_in` from p3_feed -- 3 bytes, and nothing else differs from the clean arm [L-73].
+# ★★★★ par_find then computes `vocab + letter*2` from $A000 while slot 5 still holds the VM OBJECT
+# TABLE, so every word comes back unknown and p3b_run.lua's parse readback reports 0 words.
+# ★★★ IT EXISTS BECAUSE THE CLEAN ARM'S GREEN IS OTHERWISE UNEARNED. A dictionary read through a
+# window that was never opened still reads SOMETHING; the run does not crash and the box still
+# draws. **The only way to know the window is load-bearing is to shut it and watch the parse fail.**
+if ($NoMap) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DP3B_VOCAB_NOMAP") + $IRQ }
 
 & $LW --format=raw --output=build/p3b_probe_pk_fresh.bin --map=build/p3b_probe_pk.map -I. @FLAGS src/harness/p3b_probe.s
 if ($LASTEXITCODE -ne 0) { throw "p3b assemble failed" }
@@ -105,27 +114,36 @@ if ($LASTEXITCODE -ne 0) { throw "p3b assemble failed" }
 # inside MAP_RESERVED and moves whenever either grows -- so p3b_run.lua refuses to stage input
 # without it rather than falling back to a literal [P6.3 §3.F.2].
 New-Item -ItemType Directory -Force build\p3b | Out-Null
+# ★★★ par_egon/par_ego/par_notfound/par_cli ARE THE PARSE READBACK [T-P0-091]. They exist in
+# every build that links parser.s, which is both configurations, so they belong on the shared
+# line. Without them a fed command produced no host-visible result at all and the vocabulary
+# window had no observable to be gated on.
 $WANT = @("res_volbase","res_slicebase","res_curblk","vm_quit","vm_badop","vm_cycle","vm_tdelay",
           "res_err","ph_blk_fb","ph_blk_pri","par_vocab","P3_INBUF","P3_FEED","P3_VOCAB_BAD","P3_VOCAB","P3_VOCAB_END","P3_CODE_END","P3_PARSER_BASE","P3_PARSER_TOTAL",
+          "par_egon","par_ego","par_notfound","par_cli",
           "vm_badlogic","res_depth","hal_frame_hi")
 # ★★★ MAP_FONT only exists in the text configuration, and vm_symbols.py fails on a missing name,
 # so it is appended rather than added to the list every build shares.
-if ($Text -or $Fault -or $DecodeFault -or $NoTick -or $Diag) { $WANT += @("P3_FONT","P3_FONT_BYTES","P3_PBUF") }
+# ★★★★ ph_blk_vocab / ph_blk_slot5 EXIST ONLY WHERE -DPHASE_VOCAB DOES, which p3b_probe.s defines
+# under P3B_NO_CEL -- i.e. exactly the text arms. The host uses their PRESENCE to decide whether
+# the dictionary is windowed, so listing them for the cel build would both fail the extraction and
+# make a flat build claim a window it does not have.
+if ($Text -or $Fault -or $DecodeFault -or $NoTick -or $Diag -or $NoMap) { $WANT += @("P3_FONT","P3_FONT_BYTES","P3_PBUF","ph_blk_vocab","ph_blk_slot5") }
 # ★★★★ WIRED BUILDS ONLY. -DTEXT_MODELLED keeps TEXT_WIRED undefined (p3b_probe.s:1004), so the nine
 # handlers become `equ vm_op_modelled` and **the whole body -- tx_wt_key included -- is never
 # assembled**. Asking for it in the -Fault arm fails the symbol extraction, which is why this is a
 # second line rather than three more names on the one above.
 # ★ vm_vms and vm_passed exist in every build; they are here because only these arms read them.
-if ($Text -or $DecodeFault -or $NoTick -or $Diag) { $WANT += @("vm_vms","vm_passed","tx_wt_key","tx_wt_nwait") }
+if ($Text -or $DecodeFault -or $NoTick -or $Diag -or $NoMap) { $WANT += @("vm_vms","vm_passed","tx_wt_key","tx_wt_nwait") }
 # * P3_TXDIAG exists only in the -Diag build; vm_symbols.py fails on a missing name.
 # * text.s symbols exist in EVERY P3B_NO_CEL build, -Fault included: that arm links the engine and
 #   only declines to call the nine handlers. Kept off the line above because tx_wt_* need
 #   TEXT_WIRED, which -Fault deliberately leaves undefined.
-if ($Text -or $Fault -or $DecodeFault -or $NoTick -or $Diag) { $WANT += @("txt_bgx","txt_bgy","txt_bgw","txt_bgh","txb_yoff","txt_winactive","txt_restore","P3_RBTRACE","p3rb_tn","P3_CODE_SPLIT","P3_TABLES_BASE","P3_TABLES_END") }
+if ($Text -or $Fault -or $DecodeFault -or $NoTick -or $Diag -or $NoMap) { $WANT += @("txt_bgx","txt_bgy","txt_bgw","txt_bgh","txb_yoff","txt_winactive","txt_restore","P3_RBTRACE","p3rb_tn","P3_CODE_SPLIT","P3_TABLES_BASE","P3_TABLES_END") }
 if ($Diag) { $WANT += @("P3_TXDIAG","tx_diag_n1","tx_diag_n2") }
 # * tx_wt_* exist in every wired build; the stall dump reads them to separate the three shapes a
 #   hang inside the wait loop can have.
-if ($Text -or $DecodeFault -or $NoTick -or $Diag) { $WANT += @("tx_wt_end","tx_wt_timed") }
+if ($Text -or $DecodeFault -or $NoTick -or $Diag -or $NoMap) { $WANT += @("tx_wt_end","tx_wt_timed") }
 python harness\tools\vm_symbols.py build\p3b_probe_pk.map --out build\p3b\symbols.txt --want @WANT
 if ($LASTEXITCODE -ne 0) { throw "symbols missing" }
 
@@ -190,13 +208,21 @@ if ($Headless) {
   if (-not (Test-Path $log)) { "★★★ p3b: no run.log -- the launch produced nothing"; exit 1 }
   $stuck = Select-String -Path $log -Pattern '★★★ STUCK|★★★ STUCK' -Quiet
   $done  = Select-String -Path $log -Pattern 'cycles complete|cycles in ' -Quiet
+  # ★★★★★ AND A FED COMMAND THAT MATCHED NOTHING IS A FAILURE [T-P0-091]. A parse against an
+  # unmapped, unstaged or wrongly-blocked dictionary returns zero words WITHOUT stalling, so the
+  # two conditions above would both be satisfied and the row would be green. **The vocabulary
+  # window had no adjudicated observable at all before this line**; p3b_run.lua now prints the
+  # word count and this is what makes it a verdict rather than a log entry.
+  # ★★ Silent when no command is fed: the pattern cannot match a run that never parsed.
+  $nowords = Select-String -Path $log -Pattern 'NO WORDS MATCHED' -Quiet
   # ★★★ P3_PBUF IS IN THE PATTERN BECAUSE IT IS A VERDICT LINE. An allowlist filter drops what it
   # does not name, and what it does not name is always the newest thing -- here AC-3's whole
   # observable printed to the log and never to the console [the same shape as the star-in-a-pattern
   # loss two tasks ago: the filter kept every table and removed the conclusion].
-  Select-String -Path $log -Pattern 'OK prompt|program \d+ bytes|vocabulary |par_vocab written|COMMAND TYPED|STUCK|cycles in|final room|P3_PBUF' |
+  Select-String -Path $log -Pattern 'OK prompt|program \d+ bytes|vocabulary |window discrimination|par_vocab written|COMMAND TYPED|parse at cycle|STUCK|cycles in|final room|P3_PBUF' |
     ForEach-Object { $_.Line }
   if ($stuck) { "★★★ p3b FAILED -- the watchdog fired"; exit 1 }
+  if ($nowords) { "★★★ p3b FAILED -- a fed command matched no dictionary words"; exit 1 }
   if (-not $done) { "★★★ p3b FAILED -- no completion line; the run did not reach $Cycles cycles"; exit 1 }
   "★ p3b headless: $Cycles cycles, no stall"
   exit 0

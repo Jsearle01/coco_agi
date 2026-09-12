@@ -288,9 +288,32 @@ TXD_EACH        equ     8                       ; records kept per site
 * ★★★ Jay asked "what lies below the code", and the answer was 1,660 bytes of stack reservation
 * that two independent measurements -- the engine's own seed-stack note and this probe's stack
 * low-water instrument -- had already shown nobody uses.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ AND THE FONT HAS NOW LEFT REGION A ENTIRELY [T-P0-091]. P3_FONT is declared with the
+* parser's buffers, in slot 7, which is where memmap.inc's MAP_FONT ($E0B8) always wanted it.
+* ★★★★ WHAT CHANGED IS NOT THE FONT BUT WHAT WAS BEHIND IT. The block at line 241 recorded the
+* obstacle exactly: "this probe orgs the PARSER at $E000 (slot 5 is its priority slice, so the
+* engine's vocabulary window is unavailable here), so $E0B8 is 184 bytes INTO parser code and the
+* vocabulary follows at $E3BA." **Both halves of that are now false.** The vocabulary rides slot 5
+* through phase_vocab_in, which is exactly what memmap.inc's MAP_VOCAB says, and $E3BA upward is
+* free. The font goes there and region A's ceiling stops being a font at all.
+* ★★★ THE REASON THE OBJECTION DISSOLVED IS WORTH KEEPING: slot 5 was unavailable to a RESIDENT
+* vocabulary because it is the priority slice in every DRAW phase. A WINDOW is only open during
+* par_parse, which is in the VM phase, where slot 5 is not the priority slice. **Windowing removed
+* the reason the probe could not use the engine's own address**, so the two maps converge here
+* rather than diverging further.
 TEXT_BOX        equ     1
-P3_FONT         equ     MAP_RESERVED_END-2048
 P3_FONT_BYTES   equ     2048            ; ★ the staging length; p3b_run.lua reads this symbol
+* ★★★★★ DECLARED HERE, WHICH IS EARLIER THAN IT READS. Both are `ifdef`-tested, and an `ifdef` is
+* resolved WHEN THE LINE IS PARSED rather than when the symbol is finally known -- so a flag
+* declared beside P3_VOCAB (line ~1600) would be invisible to the three sites that use it at
+* lines 425, 630 and 750, and to mmu_phase.s's include at 1331. **A forward reference is fine in
+* an operand and is not a flag**, which is the distinction that decides this placement.
+* ★★★★ PHASE_VOCAB is mmu_phase.s's service switch; P3_VOCAB_WINDOWED is this probe's own use of
+* it. Two names because they answer different questions -- does the ENGINE emit the routines, and
+* does THIS PROBE call them -- and collapsing them would hide which side a future client changed.
+P3_VOCAB_WINDOWED equ   1
+PHASE_VOCAB     equ     1
                 endc
 
                 org     MAP_CODE
@@ -408,6 +431,25 @@ P3_BLK_VISIBLE  equ     40              ; what the display shows and sprites com
 * of the writing, not of the memory.
 * ★★ It does not disturb either plane -- $E000-$FEFF is MAP_TABLES' region and neither plane
 * lives there -- and p3_clear_planes / agi_pal_load follow it unchanged.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ WINDOWED, THE WALK IS OVER $A000-$C000 AND THE MAPPING IS NOT OPTIONAL [T-P0-091].
+* Slot 5 holds the VM OBJECT TABLE at this point -- vm_start ran fifty lines up and initialised
+* 8,160 bytes there. **Walking $A000-$C000 without mapping the dictionary's block first would
+* write a walking pattern over the object table**, and the symptom would be the sprite-count
+* fault this file already records once (0 on cycle 1, pinned at the 16 cap thereafter).
+* ★★★★ SO THE MAP/UNMAP IS PART OF THE TEST, NOT SCAFFOLDING AROUND IT. The walk now proves the
+* BLOCK is RAM and that phase_vocab_in reaches it -- which is what staging needs to be true, and
+* is strictly more than the flat version proved.
+* ★★★ The block numbers are set HERE, before the first phase_vocab_in, rather than at the
+* allocator above: ph_blk_pri/ph_blk_fb are plane blocks and these are not, and putting them
+* beside the routine that first uses them is what keeps the next reader from assuming they are.
+                ifdef   P3_VOCAB_WINDOWED
+                lda     #P3_BLK_VOCAB
+                sta     ph_blk_vocab
+                lda     #P3_BLK_SLOT5
+                sta     ph_blk_slot5
+                jsr     phase_vocab_in
+                endc
                 ldx     #P3_VOCAB
 p3_vt_wr:       tfr     x,d
                 eora    #$5A
@@ -428,6 +470,12 @@ p3_vt_rd:       tfr     x,d
 p3_vt_bad:      leax    -1,x
                 tfr     x,d
 p3_vt_done:     std     P3_VOCAB_BAD
+* ★★★★ AND PUT SLOT 5 BACK BEFORE ANYTHING READS THE OBJECT TABLE. The window is open for the
+* walk and for par_parse and for nothing else; leaving it open here would hand vm_start's freshly
+* initialised object table to the next reader as dictionary bytes.
+                ifdef   P3_VOCAB_WINDOWED
+                jsr     phase_vocab_out
+                endc
 * ★ par_vocab stays 0 until the host stages a dictionary; until then par_said's own guard makes
 * the whole path inert, which is what every p3b run before this task effectively had.
                 ldd     #0
@@ -611,8 +659,19 @@ p3_do_cycle:
 * 16-sprite cap on every cycle after**, which reads as "lots of sprites" rather than as a fault.
 * ★★ Fixed here in the harness rather than in mmu_phase.s: the engine needs a ph_blk_obj and a
 * phase_vm that restores it, and that is a design change to report, not to slip into this task.
+* ★★★★★ AND T-P0-091 IS THE TASK THAT MADE IT ITS BUSINESS. mmu_phase.s now holds ph_blk_slot5
+* and phase_vocab_out, because windowing the vocabulary is the first thing that unmaps slot 5
+* mid-phase and the restore had to live somewhere. **The literal `lda #$3D` is gone and this
+* probe no longer writes an MMU register anywhere** -- one sanctioned owner, in fact and not only
+* in the engine's scan scope [§2N].
+* ★★★ The cel configuration has no phase_vocab_out (P3_VOCAB_WINDOWED is undefined there), so it
+* keeps the two-instruction literal and stays byte-identical.
+                ifdef   P3_VOCAB_WINDOWED
+                jsr     phase_vocab_out
+                else
                 lda     #$3D                    ; the block the host pre-set slot 5 to at boot
                 sta     MMU_SLOT5
+                endc
 * ★★★ INVALIDATE THE VOLUME WINDOW'S CACHE. phase_vm writes slot 6 directly, but res_core tracks
 * what it believes is mapped in res_curblk and SKIPS the write when it matches -- so after a
 * phase change it would read the wrong block while being certain it had the right one.
@@ -727,7 +786,27 @@ p3_feed:
                 stx     par_inbuf
                 ldx     #P3_CLNBUF
                 stx     par_clnbuf
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE WINDOW OPENS HERE AND SHUTS TWO INSTRUCTIONS LATER. This is the whole cost of
+* windowing the dictionary: two MMU writes per TYPED COMMAND [T-P0-091]. par_said is outside the
+* bracket on purpose -- memmap.inc: "ONLY par_parse NEEDS IT MAPPED... a game evaluating fifteen
+* said() patterns a cycle needs the vocabulary mapped for none of them."
+* ★★★★ EVERYTHING ELSE par_parse TOUCHES IS IN SLOT 0 OR SLOT 7 AND NEITHER MOVES: parser.s's
+* code and state, par_inbuf and par_clnbuf (slot 7, $E000 up), the hardware stack and the direct
+* page (slot 0). **par_parse calls nothing outside parser.s** -- par_clean, par_is_sep,
+* par_is_inv, par_find, par_fi_cmp, par_fi_left, and that is the complete list.
+* ★★★ -DP3B_VOCAB_NOMAP IS THE FAULT ARM AND IT DROPS THE `jsr phase_vocab_in`, NOTHING ELSE
+* [§2W, L-73: one variable]. par_find then walks the object table as a dictionary and the words
+* come back unknown, which is the observable p3b_run.lua reads back as par_egon/par_ego.
+                ifdef   P3_VOCAB_WINDOWED
+                ifndef  P3B_VOCAB_NOMAP
+                jsr     phase_vocab_in
+                endc
+                endc
                 jsr     par_parse
+                ifdef   P3_VOCAB_WINDOWED
+                jsr     phase_vocab_out
+                endc
                 lda     #FLAG_ENTERED_CLI
                 ldb     par_cli
                 jsr     vm_setflag
@@ -1518,10 +1597,39 @@ P3_INBUF        equ     P3_PARSER_END
 P3_CLNBUF       equ     P3_INBUF+42
 P3_PARSER_TOTAL equ     P3_CLNBUF+42-P3_PARSER_BASE
 
-* ★★★★ THE VOCABULARY WINDOW, AFTER THEM. WORDS.TOK is a RESOURCE read in place from a window
-* (§2V.2 residency; parser.s's header). memmap.inc's slot 5 -- $A000-$BFFF, "nothing mapped" for
-* the whole VM phase -- is the ENGINE's answer and is recorded there [AC-6]. **This probe cannot
-* use it**: slot 5 is p3b's PRIORITY slice, live in every draw phase.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE VOCABULARY: A WINDOW IN SLOT 5, NOT 6,966 RESIDENT BYTES BEHIND THE PARSER
+* [T-P0-091]. The text configuration's region B was parser 870 + buffers 84 + **vocabulary
+* 6,966** + 16 of vector stubs: 88% of a permanently-mapped bank spent on a table read ONCE PER
+* TYPED LINE. memmap.inc has said `MAP_VOCAB equ MAP_PRI_SLICE` since T-P0-060 and this is that
+* line acquiring code [mmu_phase.s phase_vocab_in/_out].
+*
+* ★★★★★ THE TEXT PARAGRAPH THIS REPLACES SAID "**This probe cannot use it**: slot 5 is p3b's
+* PRIORITY slice, live in every draw phase." **That was true of a RESIDENT vocabulary and is
+* false of a WINDOW.** par_parse runs in the VM phase, where slot 5 holds the object table and
+* not the priority slice, and it needs the dictionary for the duration of one call. The
+* objection was about residency all along and windowing removes it.
+*
+* ★★★★ SCOPED TO THE TEXT CONFIGURATION, DELIBERATELY, AND FOR T-P0-089's REASON. P3_VOCAB and
+* P3_VOCAB_END are compared in EMITTED CODE (the window self-test), so moving them
+* unconditionally moves `p3b` -- the purpose=timing row, where AD-96 is the standing lesson about
+* a figure whose producer moved. The cel build has no font pressure and keeps the flat window it
+* has always had, byte-identical at 58AD3C27.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+                ifdef   P3B_NO_CEL
+P3_VOCAB        equ     MAP_VOCAB       ; $A000, slot 5 -- mapped only while tokenising
+P3_VOCAB_END    equ     MAP_VOCAB_E     ; $C000; 8,192 B >= 6,828 (SpaceQuest-2, the corpus max)
+* ★★★★ THE BLOCK NUMBERS, WHICH THIS PROBE OWNS AND THE HOST READS [p3b_run.lua's own rule for
+* ph_blk_fb/ph_blk_pri]. Priority 0-1, shadow framebuffer 2-5, volumes 8-38, visible plane 40-43,
+* $38-$3F the CPU's own boot window -- so **blocks 6 and 7 are free** and the dictionary takes 6.
+* ★★★ $3D is what slot 5 holds otherwise: the host pre-sets all eight slots to $38+i at load and
+* VM_OBJ has lived in that block ever since [the `lda #$3D` this replaces, p3_do_cycle].
+P3_BLK_VOCAB    equ     6
+P3_BLK_SLOT5    equ     $3D
+                else
+* ── the flat window the cel configuration keeps, unchanged ───────────────────────
+* ★★★ THE INPUT BUFFERS ARE FOLLOWED BY THE DICTIONARY HERE, so the whole parser subsystem is one
+* contiguous run and its total is one number.
 P3_VOCAB        equ     P3_CLNBUF+42
 * ★★★★★ WITH INTERRUPTS ON, THE TOP OF THIS WINDOW IS NOT OURS EITHER [after the IRQ crash].
 * The CoCo3 redirects the 6809 vectors into the $FExx page as 3-byte stubs -- $FFF8 reads $FEF7,
@@ -1529,16 +1637,36 @@ P3_VOCAB        equ     P3_CLNBUF+42
 * ★★★★ The dictionary is staged from P3_VOCAB upward and the harness only refuses when it exceeds
 * the window, so a title with a big enough WORDS.TOK would write over the IRQ stub. That failure
 * would be title-dependent and intermittent -- the worst kind -- so the window is shortened rather
-* than left to luck. 16 bytes reserved; the assert below still has 138 bytes of slack.
-* ★★★ CONDITIONAL, so `p3b` and `p3b_text` do not move: P3_VOCAB_END is compared in emitted code
-* (the window self-test above), so changing it unconditionally would change every binary.
+* than left to luck. 16 bytes reserved.
+* ★★ Reachable only without P3B_NO_CEL now, and P3B_IRQ is a text-configuration flag -- so this
+* branch is the `$FF00` one in every shipped build. Kept whole rather than simplified: -NoIrq is
+* how the IRQs-off hang stays reproducible [§2W] and it must keep assembling.
                 ifdef   P3B_IRQ
 P3_VOCAB_END    equ     $FEF0           ; ★ $FEF0-$FF00 = the vector redirect stubs
                 else
 P3_VOCAB_END    equ     $FF00           ; ★ $FF00-$FFFF is the I/O page and is not ours
                 endc
+                endc
                 ifgt    6828-(P3_VOCAB_END-P3_VOCAB)
                 error   "the vocabulary window is smaller than the largest corpus WORDS.TOK (6,828 B)"
+                endc
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ AND THE FONT LANDS IN WHAT THE DICTIONARY GAVE BACK. 2,048 bytes of authored glyphs,
+* reached ONLY through txt_font and only by address -- which is exactly L-127's test for what
+* should move when a region is contended [T-P0-089's finding, applied a second time].
+* ★★★★ SLOT 7 IS NEVER REMAPPED, so the font is resident in every phase. That is the property
+* txt_blit needs -- it fetches a glyph while slots 5 and 6 hold the planes -- and it is the same
+* guarantee MAP_INPUT gives P3_PBUF, one slot along [vm_text_ops.s, hazard 1].
+* ★★★ THE BYTE FLOW, SO IT IS NOT LEFT TO THE READER: the font LEAVES region A ($5800-$6000) and
+* ARRIVES in region B at $E3BA. Region A's ceiling becomes MAP_RESERVED_END with nothing under
+* it, and region B holds parser + buffers + font with 2,870 bytes still free.
+                ifdef   P3B_NO_CEL
+P3_FONT         equ     P3_CLNBUF+42
+P3_REGIONB_END  equ     $FEF0           ; ★ the vector stubs, as above -- P3B_IRQ is always on here
+                ifgt    P3_FONT+2048-P3_REGIONB_END
+                error   "the font overruns region B into the $FEF0 vector stubs -- the parser or its buffers have grown"
+                endc
                 endc
 * ★★★★ AND THE ASSERTION THAT WOULD HAVE CAUGHT THE COLLISION. CP_CEL is 4,784 B from
 * MAP_RESERVED; the parser must start above where it ends. An overlap claim checked by a human
@@ -1568,11 +1696,19 @@ CP_CEL_END      equ     CP_CEL+4784
                 error   "the tx_msgptr diagnostic record overlaps the substitution buffer"
                 endc
                 endc
-* ★★★★★ AND THE ONE THAT WOULD HAVE CAUGHT THE FONT COLLISION HAD IT EXISTED. The font sits at the
-* top of MAP_RESERVED and the code grows up toward it; without this, code reaching $5800 would
-* overwrite glyphs and the panel would render garbage that looks like a blitter defect.
-                ifgt    P3_CODE_END-P3_FONT
-                error   "P3b code has grown into the font at P3_FONT (MAP_RESERVED_END-2048) -- shrink the code or move the font, do not let them overlap"
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE FONT GUARD, REPOINTED RATHER THAN DELETED [T-P0-091]. It used to read
+* `ifgt P3_CODE_END-P3_FONT` and it was the right guard while the font sat at the top of
+* MAP_RESERVED with the code growing toward it. **The font is in region B now, so that comparison
+* is trivially true and would never fire again** -- a guard that cannot go red is §2W's whole
+* subject, and leaving it in place would have been worse than having none.
+* ★★★★ WHAT REPLACES IT IS THE SAME QUESTION AGAINST THE CEILING THAT ACTUALLY BOUNDS REGION A
+* NOW: MAP_RESERVED_END. Under -DP3B_NO_CEL there is no CP_CEL and no font below it, so the code
+* may run the whole way to $6000 and the only thing it can collide with is the arena window.
+* ★★★ The region-B half is asserted where the font is declared (P3_FONT+2048 vs $FEF0), so both
+* ends of the move carry a check rather than a sentence.
+                ifgt    P3_CODE_END-MAP_RESERVED_END
+                error   "P3b code has grown past MAP_RESERVED_END ($6000) into the arena window -- region A is full"
                 endc
                 endc
 

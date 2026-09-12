@@ -285,9 +285,31 @@ if [ "$WHICH" = "p3b_box" ] || [ "$WHICH" = "all" ]; then
     echo
 fi
 
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ p3b_parse -- THE ROW THAT STAGES A DICTIONARY AT ALL [T-P0-091].
+# ★★★★★ NEITHER ROW ABOVE DOES, AND THAT WAS TRUE BEFORE THIS TASK AS WELL AS AFTER IT.
+# vm_stage.py writes words.tok ONLY when an input script is requested, so p3b_text and p3b_box run
+# with no vocabulary staged, par_vocab 0, and par_said's guard making the whole parser path inert.
+# **Every green run of those two said nothing whatever about the parser**, which is why windowing
+# the dictionary could not have been caught by the suite in either direction.
+# ★★★★ -WithInput IS THE WHOLE DIFFERENCE. vm_input_script.py --eye picks lines whose said()
+# branch produces a visible change, vm_stage.py then stages WORDS.TOK beside them, and the guest
+# parses them through the window. The adjudication is in p3b_show.ps1: a fed command that matches
+# zero words fails the row, because a broken window returns zero words WITHOUT stalling.
+# ★★★ Kingquest1 at 120 cycles is the same corpus p3b_text uses, deliberately: the flags and the
+# title are held constant so the only thing this row adds is the input [L-73].
+# ★★ Its fault arm is p3b_nomap [gates.manifest], run by hand with -NoMap -WithInput.
+if [ "$WHICH" = "p3b_parse" ] || [ "$WHICH" = "all" ]; then
+    echo "═══ p3b_parse (windowed vocabulary: Kingquest1 with a fed command line) ═══"
+    powershell -NoProfile -ExecutionPolicy Bypass -File harness/tools/p3b_show.ps1 \
+        -Title "${P3B_TITLE:-Kingquest1}" -Cycles "${P3B_CYCLES:-120}" -Text -Headless -WithInput \
+        || note_fail p3b_parse
+    echo
+fi
+
 if [ -n "$FAILED" ]; then
     echo "★★★ GATES FAILED:$FAILED"
     exit 1
 fi
-echo "★ gates run:$([ "$WHICH" = "all" ] && echo " pic res cel comp p3b p3b_text p3b_box" || echo " $WHICH")  -- all green"
+echo "★ gates run:$([ "$WHICH" = "all" ] && echo " pic res cel comp p3b p3b_text p3b_box p3b_parse" || echo " $WHICH")  -- all green"
 exit 0

@@ -11,10 +11,19 @@
 * That is why this file is short, and the shortness is the design being right rather than the
 * implementation being incomplete.
 *
+* ★★★★ AND SLOT 5 NOW HAS A THIRD TENANT, WHICH IS A WIDENING OF THE SAME MECHANISM RATHER
+* THAN AN EXCEPTION TO IT [T-P0-091]. memmap.inc has said since T-P0-060 that the VOCABULARY
+* lives in slot 5 in the VM phase (`MAP_VOCAB equ MAP_PRI_SLICE`) -- it just had no code.
+* phase_vocab_in/_out below are that line becoming a routine. **Slot 5 was already the moving
+* slot; nothing that this file called fixed has become movable.**
+*
 * ★★★ THIS FILE IS WHY reg_discipline.py NOW REPORTS A NON-ZERO COUNT, AND THAT IS CORRECT.
 * CLAUDE.md §2N.2: "the goal is ONE SANCTIONED OWNER per register, not zero references."
 * **This file is the sanctioned owner of $FFA5 and $FFA6.** A count of zero would mean the
 * engine does not exist, which is exactly what the previous zero meant.
+* ★★ THE COUNT IN THE OLD TEXT BELOW WAS 5 AND THE CENSUS SAYS 8 -- a figure in a comment with
+* no producer, stale since the cross-slot pair landed [AD-95's shape, corrected in passing
+* because this task moves the number again: 8 -> 10, both new writes in this file].
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 
                 include "src/engine/memmap.inc"
@@ -32,6 +41,26 @@ MMU_SLOT6       equ     $FFA6           ; $C000-$DFFF -- framebuffer slice / vol
 ph_blk_pri      fcb     0               ; first block of the priority plane
 ph_blk_fb       fcb     0               ; first block of the framebuffer
 ph_blk_vol      fcb     0               ; the block currently holding the VOL window
+* ★★★★★ WORDS.TOK's BLOCK, AND WHAT SLOT 5 HOLDS WHEN IT IS NOT MAPPED [T-P0-091].
+* ★★★★ ph_blk_slot5 EXISTS BECAUSE A CLIENT MAY PUT SOMETHING IN SLOT 5 DURING THE VM PHASE AND
+* THE ENGINE'S OWN MODEL DOES NOT. memmap.inc's phase table reads "-- nothing mapped --" for slot
+* 5 in the VM phase, and phase_vm says so in as many words ("SLOT 5 IS LEFT ALONE, NOT CLEARED").
+* p3b_probe.s:604 names the gap that leaves: it puts the 8,160-byte object table there, and
+* "the engine needs a ph_blk_obj and a phase_vm that restores it". **That is this byte**, closed
+* here because windowing the vocabulary is the first thing that unmaps slot 5 mid-phase.
+* ★★★ AN ENGINE THAT GENUINELY HOLDS NOTHING IN SLOT 5 NEVER CALLS phase_vocab_out -- it enters a
+* draw phase next and phase_draw writes the slot anyway. The byte is not a dummy write with no
+* reader; it is the client saying what to put back.
+* ★★★★★ BEHIND -DPHASE_VOCAB, AND THAT IS NOT TIDINESS. This file is included UNCONDITIONALLY by
+* every windowed probe, so two bytes and two routines here are 16 bytes in EVERY client --
+* including `p3b`, the purpose=timing row whose byte identity AC-5 gates. **The first build of
+* this change grew the cel configuration by exactly those 16 bytes and tripped its CP_CEL guard**,
+* which is the guard doing its job. A client that wants the window says so, the way
+* HAL_GFX_MODE_SERVICE works one layer down [§2M.2's `ifndef` discipline, same shape].
+                ifdef   PHASE_VOCAB
+ph_blk_vocab    fcb     0               ; WORDS.TOK, mapped only while a line is TOKENISED
+ph_blk_slot5    fcb     0               ; what slot 5 holds outside that window
+                endc
 
 * ── phase_vm -- no plane mapped; slot 6 is the volume window ─────────────────────
 * ★★ SLOT 5 IS LEFT ALONE, NOT CLEARED. There is no "unmapped" block number on the GIME -- a
@@ -71,8 +100,9 @@ phase_draw_pri:
 * phase_draw remaps BOTH slots and is the phase-entry call; a windowed walk crossing a slice
 * boundary needs to move the framebuffer alone, hundreds of times per picture, and must not
 * disturb the priority slice while doing it.
-* ★★★ §2N: this file is the ONE sanctioned owner of $FFA5/$FFA6 -- reg_discipline reports 5
-* accesses in 1 file over 2 registers, and that is the property being preserved. plane_win.s
+* ★★★ §2N: this file is the ONE sanctioned owner of $FFA5/$FFA6 -- reg_discipline reports every
+* access in 1 file over 2 registers, and THAT is the property being preserved, not the count
+* [the count was written as 5 here and measured 8; see the header]. plane_win.s
 * calling here keeps the owner count at one; plane_win.s writing the register itself would have
 * made it two, silently, in a file the census would then have had to grow to cover.
 phase_draw_fb:
@@ -111,3 +141,37 @@ phase_vol:
                 sta     ph_blk_vol
                 sta     MMU_SLOT6
                 rts
+
+* ── phase_vocab_in / phase_vocab_out -- the VOCABULARY window, TOKENISE only ─────
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ WHY THIS IS A WINDOW AND NOT A RESIDENT TABLE. WORDS.TOK is up to 6,828 bytes
+* (SpaceQuest-2, the corpus maximum, re-measured at T-P0-059 §3.E) and it is READ ONCE PER
+* TYPED LINE. Resident, it is 88% of a permanently-mapped 8 KB bank spent on a table that a
+* game evaluating fifteen said() patterns a cycle touches for none of them.
+*
+* ★★★★★ THE NARROWING IS memmap.inc's AND IT IS THE WHOLE REASON THIS IS CHEAP: "ONLY par_parse
+* NEEDS IT MAPPED, NOT par_said. par_said reads par_ego, par_egon and the operand stream; it
+* never touches par_vocab." So the window is open for one call per ENTER and shut otherwise --
+* two MMU writes per typed command, against two per phase transition for everything else.
+*
+* ★★★★ AND THE RESIDENCY SET IS WHAT MAKES IT LEGAL. Everything par_parse touches besides the
+* dictionary is in slot 0 (the hardware stack, the direct page) or slot 7 (parser.s's code, its
+* state, par_inbuf, par_clnbuf, par_ego) -- and par_parse calls nothing outside parser.s.
+* **Neither slot 0 nor slot 7 ever moves**, so the tokeniser can run with any other slot pointed
+* anywhere. Slot 5 is the one memmap.inc already reserved for it.
+*
+* ★★★ NOT SLOT 6, AND memmap.inc GIVES THE REASON: slot 6 is the VOLUME window in the VM phase
+* and a resource fetch happens in the VM phase. Slot 5 is idle there. §3.4's disjointness is
+* what makes this legal and it is the third place in the map where that property is load-bearing.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+                ifdef   PHASE_VOCAB
+phase_vocab_in:
+                lda     ph_blk_vocab
+                sta     MMU_SLOT5
+                rts
+
+phase_vocab_out:
+                lda     ph_blk_slot5
+                sta     MMU_SLOT5
+                rts
+                endc

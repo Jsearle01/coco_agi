@@ -169,7 +169,20 @@ p3b	src/harness/p3b_probe.s	build/p3b_probe_pk_fresh.bin	-DHAL_GFX_MODE_SERVICE 
 # and that is scoped to this row, not a claim about the engine.
 # ★★ purpose=correctness: this row is gated on health and on what a person sees, not on a clock.
 # **No timing figure may be quoted from it** -- the row above is the timing build.
-p3b_text	src/harness/p3b_probe.s	build/p3b_probe_text.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ	correctness probe: text opcodes, no cel staging, room 83; binary C4A4346B 15,555 B, re-baselined T-P0-089	purpose=correctness
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ RE-BASELINED AT T-P0-091, AND THE OLD IDENTITIES ARE RETIRED, NOT LOST.
+#     retired:  C4A4346B55330174234AED64254075BE  15,555 B   (valid P6.34 .. P6.35)
+#     current:  7B58CE6BD16CEE065B6F37CA7E56B671  15,591 B
+# ★★★★ WHY IT MOVED: 36 bytes. The vocabulary stopped being resident behind the parser and now
+# rides MMU slot 5 through mmu_phase.s's phase_vocab_in/_out -- two calls around par_parse, two
+# around the boot-time window self-test, four bytes of block-number setup, and the `lda #$3D /
+# sta $FFA5` at the top of the cycle replaced by a `jsr`.
+# ★★★★★ WHAT IT BOUGHT: the FONT left region A. P3_FONT was MAP_RESERVED_END-2048 ($5800) and is
+# now $E3BA, in slot 7, which is where memmap.inc's MAP_FONT always wanted it. **Region A's
+# headroom goes 277 -> 2,289 bytes** and region B still has 4,918 free.
+# ★★★ THE FLAGS ARE UNCHANGED, so this is not AD-96's shape: same program, same corpus, and this
+# row carries no median to invalidate (purpose=correctness).
+p3b_text	src/harness/p3b_probe.s	build/p3b_probe_text.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ	correctness probe: text opcodes, no cel staging, room 83, windowed vocabulary; binary 7B58CE6B 15,591 B, re-baselined T-P0-091	purpose=correctness
 # ═══════════════════════════════════════════════════════════════════════════════════════════
 # ★★★★★ THE FAULT ARM, AND IT HAS NOW BEEN SEEN RED. Blocked for three tasks; §2W is satisfied.
 #     retired:  2268DAB7...  15,033 B   (built but unexercisable, P6.29c..P6.31)
@@ -187,7 +200,41 @@ p3b_text	src/harness/p3b_probe.s	build/p3b_probe_text.bin	-DHAL_GFX_MODE_SERVICE
 #     +66 clean and +0 fault. **Interrupts stay healthy and only the game clock is starved**, which
 #     is exactly the defect the §4A census named rather than a hang arranged by some other route.
 # ★★★ NOT in run_gates.sh: a fault arm belongs beside its gate, not inside the green path.
-p3b_notick	src/harness/p3b_probe.s	build/p3b_probe_notick.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ -DTEXT_FAULT_NOTICK	fault arm for print's wait loop -- shown RED T-P0-087+; see above	purpose=fault
+# ★★★ RE-BASELINED WITH ITS CLEAN ARM [T-P0-091]:
+#     retired:  2849A07A738B3DEAFFB82893C972B0EB  15,552 B   (valid P6.34 .. P6.35)
+#     current:  5C4200DA58DD94031C75F98C3606EED1  15,588 B
+# ★★ Still exactly 3 bytes below p3b_text, which is the one omitted `jsr vm_step_clock` and
+# nothing else. Re-shown RED on THIS binary: STUCK in cycle 9 under the p3b_box trigger [§2W,
+# L-62 -- fault-detectability does not survive a rebuild, so it was re-run rather than cited].
+p3b_notick	src/harness/p3b_probe.s	build/p3b_probe_notick.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ -DTEXT_FAULT_NOTICK	fault arm for print's wait loop -- shown RED T-P0-087+, re-shown T-P0-091; binary 5C4200DA 15,588 B	purpose=fault
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ p3b_nomap -- THE VOCABULARY WINDOW's FAULT ARM [T-P0-091, §2W].
+# ★★★★★ IT EXISTS BECAUSE NO ROW IN THE SUITE EXERCISES THE DICTIONARY AT ALL, and that was true
+# before this task as well as after it. vm_stage.py writes words.tok ONLY when an input script is
+# requested, so `p3b_text` and `p3b_box` both run with `words` nil on the host: no vocabulary is
+# staged, par_vocab stays 0, and par_said's guard makes the whole path inert. **Every green run of
+# those two rows says nothing whatever about the parser.**
+# ★★★★ SO THE ARM IS RUN WITH -WithInput, WHICH IS WHAT STAGES A DICTIONARY. Kingquest1, 120
+# cycles, two commands fed at cycles 30 and 60.
+#     clean  vocabulary 3,144 B -> $A000 block 6; window discrimination $A001 reads $00 shut and
+#            $3E open; parse at cycle 30 = 1 word [161] notfound=0; cycle 60 = 1 word [160]
+#     fault  -DP3B_VOCAB_NOMAP drops ONE `jsr phase_vocab_in` (3 bytes, nothing else) and the run
+#            is STUCK in CYCLE 30 -- the cycle the command was fed
+# ★★★ IT HANGS RATHER THAN RETURNING ZERO WORDS, and that is the honest outcome: par_find computes
+# `vocab + letter*2` into the object table and walks looking for a terminator that is not there --
+# the same runaway this probe's own history records twice [P6.3's bucket walk; the CP_CEL collision
+# that zeroed par_vocab]. The discrimination is total, which is what §2W asks for.
+# ★★ NOT in run_gates.sh: a fault arm belongs beside its gate, not inside the green path.
+p3b_nomap	src/harness/p3b_probe.s	build/p3b_probe_nomap.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ -DP3B_VOCAB_NOMAP	fault arm for the vocabulary window -- run with -WithInput; shown RED T-P0-091; binary 0A0B7F1B 15,588 B	purpose=fault
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ p3b_parse -- SAME BINARY AS p3b_text; WHAT DIFFERS IS -WithInput, AND THAT IS THE ROW.
+# §2F: the scope and the invocation of a gate are part of its definition, and this project has now
+# recorded that six times. **The first five were about corpora; this one is about whether the
+# subsystem is reached at all.** p3b_text and p3b_box stage no vocabulary, so the parser has been
+# linked into the integration probe since P6.4 and gated by nothing inside it.
+# ★★★★ ADJUDICATED ON WORD COUNT, not on completion: a broken window parses to zero words and the
+# run finishes normally [p3b_show.ps1's $nowords]. Shown red by p3b_nomap above.
+p3b_parse	src/harness/p3b_probe.s	build/p3b_probe_text.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ	windowed vocabulary: Kingquest1 with -WithInput; the only row that stages a dictionary	purpose=correctness
 # ═══════════════════════════════════════════════════════════════════════════════════════════
 # ★★★★★ p3b_box -- THE ROW THAT ACTUALLY GATES THE BLOCKING WINDOW. Same binary as p3b_text; what
 # differs is the TRIGGER, and the trigger is the part that was missing for four tasks.

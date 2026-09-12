@@ -36,6 +36,12 @@ local RES_DIRS  = 0x1000        -- MAP_DIRS
 local DIR_STRIDE= 0x0300
 local WINDOW    = 0xC000        -- MAP_PHASE_WIN, the volume window in the VM phase
 local MMU_SLOT  = 0xFFA6
+-- ★★★ NAMED AT MODULE SCOPE BECAUSE THREE PLACES NOW NEED SLOT 5: the vocabulary staging, the
+-- stall dump's dictionary readout, and the plane dump at the foot of this file -- which declared
+-- its own `local SLOT6, SLOT5` and was the only home the pair had. **Two homes for $FFA5 in one
+-- file is how the next caller writes a literal** [§2F], and the dump's locals now come from here.
+local SLOT5     = 0xFFA5        -- MMU slot 5: priority / VM_OBJ / the vocabulary window
+local SLOT6     = 0xFFA6        -- MMU slot 6: framebuffer slice / VOL window (== MMU_SLOT)
 local FB_BASE   = 0xC000        -- MAP_PHASE_WIN, the framebuffer slice in a draw phase
 local PRI_BASE  = 0xA000        -- MAP_PRI_SLICE
 local W, H      = 160, 168
@@ -207,6 +213,26 @@ local function stage()
             w("★★★ WORDS.TOK is %d bytes, past the %d-byte window", #words, VOCAB_END - VOCAB)
             return false
         end
+        -- ═══════════════════════════════════════════════════════════════════════════════
+        -- ★★★★★ THE DICTIONARY IS IN A BLOCK NOW, NOT BEHIND THE PARSER [T-P0-091]. The text
+        -- configuration maps WORDS.TOK into slot 5 for the duration of par_parse and nothing
+        -- else, so staging it means mapping the same block the guest will map and poking $A000.
+        -- ★★★★ THE BLOCK NUMBER COMES FROM THE GUEST, WHICH OWNS IT -- ph_blk_vocab, read from
+        -- the map, exactly as ph_blk_fb/ph_blk_pri are read for the plane dump below. A literal
+        -- here would be a second home for a number the probe already declares [§2F], and the
+        -- failure would be a dictionary staged into a block nothing reads: the parser would find
+        -- no words and it would look like a tokeniser defect.
+        -- ★★★ AND SLOT 5 GOES BACK TO ph_blk_slot5, not to a remembered value. The guest's own
+        -- phase_vocab_out uses that byte; using anything else here would leave the host and the
+        -- guest disagreeing about what slot 5 holds while the object table lives in it.
+        -- ★★ The flat configuration takes neither branch: no ph_blk_vocab symbol, no remap.
+        local VBLK = SYM.ph_blk_vocab and prog:read_u8(SYM.ph_blk_vocab) or nil
+        local V5   = SYM.ph_blk_slot5 and prog:read_u8(SYM.ph_blk_slot5) or nil
+        if VBLK and not V5 then
+            w("★★★ ph_blk_vocab is in the map and ph_blk_slot5 is not -- cannot restore slot 5")
+            return false
+        end
+        if VBLK then prog:write_u8(SLOT5, VBLK) end
         for i = 1, #words do prog:write_u8(VOCAB + i - 1, words:byte(i)) end
         -- ★★ A SAMPLE, NOT BYTE 1. WORDS.TOK's first byte is zero (the 'a' bucket's head offset,
         -- high half), so a one-byte readback passes on RAM nothing was written to -- which is
@@ -216,9 +242,42 @@ local function stage()
             local off = math.floor((#words - 1) * k / 32)
             if prog:read_u8(VOCAB + off) ~= words:byte(off + 1) then bad = bad + 1 end
         end
-        w("  vocabulary %d B -> $%04X; window self-test clean; %d/33 sample points match %s",
-          #words, VOCAB, 33 - bad, bad == 0 and "OK" or "★★★ MISMATCH")
+        if VBLK then prog:write_u8(SLOT5, V5) end
+        w("  vocabulary %d B -> $%04X%s; window self-test clean; %d/33 sample points match %s",
+          #words, VOCAB,
+          VBLK and string.format(" (block %d, slot 5; restored to %d)", VBLK, V5) or " (flat)",
+          33 - bad, bad == 0 and "OK" or "★★★ MISMATCH")
         if bad ~= 0 then return false end
+        -- ═══════════════════════════════════════════════════════════════════════════════
+        -- ★★★★★ AND THE CHECK THAT SAYS THE TWO BLOCKS ARE DIFFERENT MEMORY [§2W]. Everything
+        -- above would read back perfectly if ph_blk_vocab named the block slot 5 ALREADY holds:
+        -- the poke and the readback would be the same bytes in the same place, the sample would
+        -- be 33/33, and the dictionary would be sitting on top of the 8,160-byte object table.
+        -- ★★★★ **A readback through the window cannot distinguish a window from no window.** So
+        -- this reads the SAME address with the window SHUT and requires it to differ: if it does
+        -- not, either the block is the object table's or the remap did nothing, and both are the
+        -- failure this staging has to be unable to hide.
+        -- ★★★ At a NON-ZERO byte, deliberately. WORDS.TOK's first byte is zero and so is freshly
+        -- initialised VM_OBJ, so a check at offset 0 would pass on exactly the case it is for --
+        -- the same trap the 33-point sample exists to avoid one paragraph up.
+        if VBLK then
+            local probe_off = nil
+            for i = 1, #words do
+                if words:byte(i) ~= 0 then probe_off = i - 1; break end
+            end
+            if not probe_off then
+                w("★★★ WORDS.TOK is entirely zero -- refusing to stage a dictionary with no content")
+                return false
+            end
+            local shut = prog:read_u8(VOCAB + probe_off)
+            local open = words:byte(probe_off + 1)
+            w("  %s window discrimination: $%04X reads $%02X shut and $%02X open %s",
+              shut ~= open and "★" or "★★★", VOCAB + probe_off, shut, open,
+              shut ~= open and "-- block " .. VBLK .. " is distinct memory"
+                            or "★★★ IDENTICAL -- the remap did nothing, or the dictionary is on "
+                               .. "top of the object table")
+            if shut == open then return false end
+        end
         prog:write_u8(SYM.par_vocab, math.floor(VOCAB / 256))
         prog:write_u8(SYM.par_vocab + 1, VOCAB % 256)
         -- ★★★★★ READ IT BACK. The first version printed "the parser is LIVE: par_vocab = $E000"
@@ -708,8 +767,21 @@ _G._n = emu.add_machine_frame_notifier(function()
             if words then
                 local sl = {}
                 for s = 0, 7 do sl[#sl+1] = string.format("%02X", prog:read_u8(0xFFA0 + s)) end
-                w("     MMU $FFA0-7: %s   (slot 7 = $E000, the vocabulary window)",
-                  table.concat(sl, " "))
+                local vblk = SYM.ph_blk_vocab and prog:read_u8(SYM.ph_blk_vocab) or nil
+                w("     MMU $FFA0-7: %s   (%s)", table.concat(sl, " "),
+                  vblk and string.format("slot 5 = $A000, the vocabulary window; block %d", vblk)
+                        or "slot 7 = $E000, the vocabulary window")
+                -- ★★★★★ MAP IT BEFORE READING IT, OR THIS DUMP ACCUSES THE WRONG PLANE
+                -- [T-P0-091]. Windowed, $A000 holds the vocabulary only during par_parse; a stall
+                -- anywhere else leaves the OBJECT TABLE there, and eight bytes of object table
+                -- printed under the label "vocab" would read as "the window has been overwritten"
+                -- on every healthy run. **A diagnostic that labels a side must name the side it
+                -- actually has** [§2W.3, and said_gate.py printing the 6809 under `oracle`].
+                -- ★★★★ The restore is unconditional and comes from the guest's own byte: the
+                -- probe is stalled, not dead, and leaving its object table unmapped would change
+                -- what every line BELOW this one reads.
+                local v5 = SYM.ph_blk_slot5 and prog:read_u8(SYM.ph_blk_slot5) or nil
+                if vblk and v5 then prog:write_u8(SLOT5, vblk) end
                 local got, want = {}, {}
                 local bad = 0
                 for i = 0, 7 do
@@ -718,7 +790,8 @@ _G._n = emu.add_machine_frame_notifier(function()
                     want[#want+1] = string.format("%02X", words:byte(i + 1))
                     if g ~= words:byte(i + 1) then bad = bad + 1 end
                 end
-                w("     vocab $E000: %s  (staged: %s)  %s",
+                if vblk and v5 then prog:write_u8(SLOT5, v5) end
+                w("     vocab $%04X: %s  (staged: %s)  %s", VOCAB,
                   table.concat(got, " "), table.concat(want, " "),
                   bad == 0 and "MATCHES -- the window still holds WORDS.TOK"
                            or "★★★ DIFFERS -- the vocabulary window has been overwritten")
@@ -1132,7 +1205,7 @@ _G._n = emu.add_machine_frame_notifier(function()
                 -- ★★ Slot 6 ($FFA6) covers $C000 and slot 5 ($FFA5) covers $A000, which is the
                 -- pair mmu_phase.s owns. The host restores nothing afterwards because the probe
                 -- is finished; the next cycle would re-map for itself.
-                local SLOT6, SLOT5 = 0xFFA6, 0xFFA5
+                -- ★ SLOT5/SLOT6 come from the module scope now; this was their only home.
                 local blk_fb  = SYM.ph_blk_fb  and prog:read_u8(SYM.ph_blk_fb)  or nil
                 local blk_pri = SYM.ph_blk_pri and prog:read_u8(SYM.ph_blk_pri) or nil
                 if not blk_fb or not blk_pri then
@@ -1195,8 +1268,47 @@ _G._n = emu.add_machine_frame_notifier(function()
                 for i = 1, #feed do prog:write_u8(SYM.P3_INBUF + i - 1, feed:byte(i)) end
                 prog:write_u8(SYM.P3_INBUF + #feed, 0)
                 prog:write_u8(SYM.P3_FEED, 1)
+                _G._parse_due = n + 1
                 w("  ★ COMMAND TYPED at cycle %d (%d chars) -- watch the screen", n + 1, #feed)
             end
+        end
+
+        -- ═══════════════════════════════════════════════════════════════════════════════
+        -- ★★★★★ AND READ BACK WHAT THE PARSE PRODUCED [T-P0-091]. Before this, a command was fed
+        -- and NOTHING on the host ever looked at the result: the log said "COMMAND TYPED" and the
+        -- next thing it said was the cycle count. **A windowed dictionary that maps the wrong
+        -- block parses every word as unknown and produces exactly that log** -- which is why the
+        -- window could not be gated by any row in the suite before this line existed.
+        -- ★★★★ par_egon IS THE OBSERVABLE AND IT IS THE RIGHT ONE: par_find returns the word
+        -- NUMBER and par_parse stores it, so a dictionary that is absent, unmapped or on top of
+        -- the object table gives egon = 0 with par_notfound naming the first word. A parse
+        -- against the real dictionary gives a non-zero count for any line built from its words.
+        -- ★★★ §2P: word NUMBERS, never the text -- the same rule parser_gate.lua states for the
+        -- byte gate. The line itself was the game's and is not echoed here.
+        -- ★★ One cycle late, deliberately: the guest checks P3_FEED after vm_pace inside the
+        -- cycle this arming released, so the result exists at the NEXT park and not before.
+        -- ═══════════════════════════════════════════════════════════════════════════════
+        -- ★★★★★ AND par_cli IS **NOT** READ HERE, THOUGH THE FIRST VERSION PRINTED IT AND IT
+        -- PRINTED 0 ON A HEALTHY PARSE. par_parse sets par_cli to 1 whenever it stored a word
+        -- [parser.s:446-449] -- so the column looked like a contradiction with `1 word(s)` beside
+        -- it. It is not: **vmtest_said reloads par_cli from VM flag 2 before every said()
+        -- evaluation** [vm_tests.s], and vm_post_cycle clears that flag at the end of the cycle.
+        -- By the next park the byte is the VM's, not the parse's.
+        -- ★★★★ THAT IS §2W.3 EXACTLY -- a diagnostic labelling a side it does not have -- and it
+        -- would have been read as a parser defect by whoever met it first. par_egon, par_ego and
+        -- par_notfound have no second writer and survive the cycle, so those are what is printed.
+        if _G._parse_due and n > _G._parse_due and SYM.par_egon then
+            local egon = prog:read_u8(SYM.par_egon)
+            local ids = {}
+            for i = 0, math.min(egon, 8) - 1 do
+                ids[#ids+1] = tostring(rd16(SYM.par_ego + i * 2))
+            end
+            w("  %s parse at cycle %d: %d word(s) [%s] notfound=%d %s",
+              egon > 0 and "★" or "★★★", _G._parse_due, egon, table.concat(ids, ","),
+              SYM.par_notfound and prog:read_u8(SYM.par_notfound) or -1,
+              egon > 0 and "-- the dictionary was reachable"
+                        or "★★★ NO WORDS MATCHED -- the vocabulary window is not holding WORDS.TOK")
+            _G._parse_due = nil
         end
 
         -- ★★★ THE JUMP, one release before the cycle that should dispatch it -- the same seam the
