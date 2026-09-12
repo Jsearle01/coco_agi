@@ -19,6 +19,10 @@ local SYMF  = os.getenv("P3B_SYMBOLS") or "build/p3b/symbols.txt"
 local NCYC  = tonumber(os.getenv("P3B_CYCLES") or "60")
 -- ★ How long a cycle may take before the watchdog calls it stuck. See the watchdog below for
 -- why this is 1800 and not 240: the first cycle renders a room.
+-- ★★★★ 1800 frames is 30 emulated seconds, which is generous for a machine and WRONG for a
+-- person. With the blocking message box the guest legitimately waits for a keypress, so on the
+-- eye-gate path the watchdog is measuring how fast Jay reads. P3B_STALL_FRAMES is the override
+-- and the eye-gate invocation passes it; the headless default is unchanged so no gate moves.
 local STALL_FRAMES = tonumber(os.getenv("P3B_STALL_FRAMES") or "1800")
 local DUMP  = os.getenv("P3B_DUMP")            -- write the planes out for the gate
 os.execute('mkdir "' .. OUT:gsub("/", "\\") .. '" 2>nul')
@@ -297,7 +301,9 @@ local vms_prev, vms_max, vms_max_at = nil, 0, 0
 -- records a jump written to the wrong address reading as "the room jump does nothing". Writing it
 -- back is not enough on its own -- a write nothing consumes looks identical to a working jump --
 -- so flag 5 being CLEARED later is what says logic.0 actually saw it.
-local JUMP_ROOM = tonumber(os.getenv("P3B_ROOM") or "0")
+-- ★ _p3b_room_default is p3b_room.lua's handover: that file used to default the room to 1, and it
+--   chains here, so the default follows the jump rather than being lost with the notifier.
+local JUMP_ROOM = tonumber(os.getenv("P3B_ROOM") or _G._p3b_room_default or "0")
 local JUMP_AT   = tonumber(os.getenv("P3B_ROOM_AT") or "8")
 -- ★★★★★ P3B_SETVAR -- GAME STATE THE ROOM NEEDS, WRITTEN WITH THE JUMP [T-P0-086 §4C].
 -- Every room reachable by a cold jump that prints on entry is AGI's ERROR ROOM:

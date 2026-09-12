@@ -40,17 +40,24 @@ local prog = cpu.spaces["program"]
 -- success and the room never changed. ★★ An upper bound is the guard: a cycle number above the
 -- run length is not a cycle number [L-37 -- instrument something that can contradict you; the
 -- printed 65535 is what did].
-local SANE_MAX = 4096
-local done = false
-_G._room = emu.add_machine_frame_notifier(function()
-    if done then return end
-    local n = prog:read_u8(CYCLE) * 256 + prog:read_u8(CYCLE + 1)
-    if n < ROOM_AT or n > SANE_MAX then return end
-    prog:write_u8(VM_VARS + 0, ROOM)
-    local b = prog:read_u8(VM_FLAGS + 0)          -- flag 5 is byte 0, bit 5
-    prog:write_u8(VM_FLAGS + 0, b | 0x20)
-    done = true
-    print(string.format("  ★ room jump at cycle %d: var0 <- %d, flag 5 set", n, ROOM))
-end)
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+-- ★★★★★ THE JUMP MOVED INTO p3b_run.lua, AND THIS FILE IS NOW THE SHIM THAT KEEPS ITS DEFAULT.
+-- The notifier that used to live here is gone. It is not a deletion of the technique -- the same
+-- two writes, the same cycle guard and the same landing checks are in p3b_run.lua -- it is the
+-- removal of a SECOND COPY of them [§2F: one home per fact].
+--
+-- ★★★★★ WHY IT HAD TO GO, AND IT WOULD HAVE BITTEN THE EYE GATE FIRST. p3b_run.lua's jump also
+-- writes var 17 (P3B_SETVAR), because the only rooms that print on a cold jump are AGI's error
+-- room and `print.v(v17)` with var 17 at zero resolves to message index -1 and draws NOTHING
+-- [P6.31]. This file's notifier wrote var 0 and flag 5 and knew nothing about var 17, and it is
+-- registered FIRST, so on the eye-gate path (p3b_show.lua -> here -> p3b_run.lua) it could win
+-- the race and dispatch the room before the message number was set. **The box would silently not
+-- appear, and the cause would look like a rendering defect rather than a harness one.**
+--
+-- ★★★ EVERY CALLER STILL WORKS. p3b_show.lua, p3b_palwatch.lua and p3b_time.lua all chain through
+-- this file and all of them reach the same driver they always did.
+-- ★★ The one thing that was ONLY here is the implicit default of room 1 -- p3b_run.lua's own
+-- default is 0, meaning "no jump" -- so it is handed over rather than dropped.
+_G._p3b_room_default = ROOM
 
 dofile("harness/tools/p3b_run.lua")
