@@ -31,6 +31,12 @@ vmop_set_cursor_char    equ     vm_op_modelled
 vmop_set_text_attribute equ     vm_op_modelled
 vmop_status_line_on     equ     vm_op_modelled
 vmop_status_line_off    equ     vm_op_modelled
+* ★★★ $77/$78 ARE INPUT OPCODES, NOT TEXT ONES, AND THEY LIVE HERE ANYWAY [T-P0-092]. This file is
+* the one every probe includes and it is where AD-176's rule bites: once vm_tables.s names a label
+* it must resolve in EVERY build, wired or not. A second file with the same two-branch shape would
+* be a second place to get that wrong.
+vmop_accept_input       equ     vm_op_modelled
+vmop_prevent_input      equ     vm_op_modelled
                 else
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -494,8 +500,34 @@ tx_wt_done:
 * set.text.attribute is the one with a real argument this probe ignores -- display sets its own
 * attribute per call, so honouring it here would change nothing the eye gate can see. Recorded so
 * the next task knows it is deliberate rather than forgotten.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ accept.input / prevent.input, REAL [op_cmd.cpp:1980-1997, T-P0-092].
+* ★★★★ THEY ARE TWO LINES EACH IN THE ORACLE AND THE SECOND LINE IS THE ONE THAT MATTERS:
+*     accept.input   promptEnable();  promptRedraw();                       [:1985-1986]
+*     prevent.input  promptDisable(); inputEditOn(); clearLine(row, 0);     [:1994-1997]
+* **prevent.input CLEARS THE ROW.** A port that only dropped the flag would leave the last typed
+* line on screen with nothing able to edit it, and every byte gate would agree it was fine.
+* ★★★ Behind TEXT_PROMPT, so a wired build without the command line keeps the modelled behaviour
+* rather than failing to assemble on txt_prompt_on.
+                ifdef   TEXT_PROMPT
+vmop_accept_input:
+                jmp     txt_prompt_on
+vmop_prevent_input:
+                jmp     txt_prompt_off
+                else
+vmop_accept_input       equ     vm_op_modelled
+vmop_prevent_input      equ     vm_op_modelled
+                endc
+
 vmop_clear_lines:
                 rts
+* ★★★★★ STILL A STUB, AND NOW WITH THE EVIDENCE RATHER THAN THE INTENTION [T-P0-092 §4A(4)].
+* _inputCursorChar is 0 at text.cpp:58 and **inputEditOn and inputEditOff are both no-ops while it
+* is zero** [text.cpp:673, :682]. So the command line renders completely without this opcode: there
+* is no cursor glyph until a game sets one, and no title this probe runs does.
+* ★★★ AND THE ARGUMENT IS A MESSAGE NUMBER, NOT A CHARACTER [op_cmd.cpp:2106-2112] -- it indexes
+* _curLogic->texts[] and passes the FIRST CHARACTER. The opcode's name invites the other reading,
+* which is why this is written down beside the stub rather than in a report nobody rereads.
 vmop_set_cursor_char:
                 rts
 vmop_set_text_attribute:

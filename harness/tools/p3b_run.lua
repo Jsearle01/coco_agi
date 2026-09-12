@@ -382,6 +382,23 @@ local VM_FLAGS  = 0x0900        -- MAP_VM_FLAGS; flag 5 is byte 0, bit 5
 local jumped, jump_seen_clear = false, false
 
 -- ═══════════════════════════════════════════════════════════════════════════════════════════
+-- ★★★★★ P3B_TYPE -- THE LINE IS **TYPED**, THROUGH THE KEY MATRIX [T-P0-092 §1.4].
+--
+-- ★★★★★ THIS IS NOT THE SAME TEST AS P3B_FEED AND THE DIFFERENCE IS THE POINT. The scripted feed
+-- writes P3_INBUF from the host and sets a flag; it exercises par_parse and **not one instruction
+-- of the editor** -- no key decode, no echo, no bound, no ENTER arm. A component gated only by
+-- that path is a component gated by nothing [§2W, and P6.36 §4E one layer down].
+--
+-- ★★★★ natkeyboard DRIVES MAME's OWN KEYBOARD, which drives the CoCo3 matrix, which is what
+-- HAL_key_scan reads [input_gate.lua, P6.24]. ★★★ Idiom 14b: `in_use` must be armed FRAMES before
+-- the first post or the post is silently dropped, so it is armed at script load below and not at
+-- the moment of typing.
+-- ★ §2P: the LENGTH and the resulting word COUNT are printed. The line is the operator's.
+local TYPE_TEXT = os.getenv("P3B_TYPE")
+local TYPE_AT   = tonumber(os.getenv("P3B_TYPE_AT") or "20")
+local typed, type_report = false, nil
+
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
 -- ★★★★★ WAIT FOR DECB'S "OK" PROMPT, NOT FOR A FRAME COUNT. [Jay, T-P0-060]
 -- This file poked the image and set PC at FRAME 4 -- while DECB is still booting. The machine
 -- is not ready to be taken over until it has finished its own start-up and printed `OK`, and a
@@ -499,6 +516,10 @@ _G._n = emu.add_machine_frame_notifier(function()
     -- ★ A HARNESS fix. It touches no shared HAL file (§2M) and is the host doing what a real
     -- loader would have done before handing over.
     if state == "load" then
+        -- ★★★ ARMED HERE, NOT AT THE POST [idiom 14b]. natkeyboard.in_use defaults to false and
+        -- arming it in the same frame as the first post loses the keys. This is hundreds of
+        -- frames early, which is the margin that idiom asks for.
+        if TYPE_TEXT then m.natkeyboard.in_use = true end
         for i = 0, 7 do prog:write_u8(0xFFA0 + i, 0x38 + i) end
         local blob = slurp(PROG)
         if not blob then w("★★★ no program at %s", PROG); m:exit(); return end
@@ -929,6 +950,32 @@ _G._n = emu.add_machine_frame_notifier(function()
             w("    final room %d, sprites %d, err %d, status=$%02X",
               prog:read_u8(ROOM), prog:read_u8(NSPR), prog:read_u8(ERR), prog:read_u8(STATUS))
             -- ═══════════════════════════════════════════════════════════════════════════════
+            -- ★★★★★ THE COMMAND LINE's VERDICT LINE [T-P0-092]. Printed on EVERY run that links
+            -- the prompt, not only on typing runs, because "the prompt is enabled" and "nobody
+            -- typed" are different facts and a row that conflates them cannot fail usefully.
+            -- ★★★ The wording is what p3b_show.ps1 adjudicates on, so it is exact rather than
+            -- descriptive: NO KEYS REACHED / NOT PARSED are the two failures.
+            if SYM.txt_penab then
+                local nk   = SYM.P3_NKEY and prog:read_u8(SYM.P3_NKEY) or 0
+                local lastk= SYM.P3_KEY  and prog:read_u8(SYM.P3_KEY)  or 0
+                local ppos = prog:read_u8(SYM.txt_ppos or 0)
+                local prow = SYM.txt_prow and prog:read_u8(SYM.txt_prow) or -1
+                w("    prompt: enabled=%d row=%d  keys to the editor=%d (last $%02X)  buffer=%d"
+                  .. "  (posts attempted %d)",
+                  prog:read_u8(SYM.txt_penab), prow, nk, lastk, ppos, _G._type_posts or 0)
+                if TYPE_TEXT then
+                    if nk == 0 then
+                        w("    ★★★ NO KEYS REACHED THE EDITOR -- the matrix or the poll guard "
+                          .. "swallowed every posted character")
+                    elseif not type_report then
+                        w("    ★★★ TYPED LINE NOT PARSED -- %d key(s) arrived and no said() input "
+                          .. "was produced", nk)
+                    else
+                        w("    ★ the typed line reached the parser")
+                    end
+                end
+            end
+            -- ═══════════════════════════════════════════════════════════════════════════════
             -- ★★★★★ THE BLOCKING BOX's OBSERVABLES [AC-4, AC-5, AC-7]. All three are properties,
             -- never text [§2P].
             -- ★★★★ var 21 reading 0 at the end is text.cpp:411's zeroing, which happens ONLY on the
@@ -1309,6 +1356,80 @@ _G._n = emu.add_machine_frame_notifier(function()
               egon > 0 and "-- the dictionary was reachable"
                         or "★★★ NO WORDS MATCHED -- the vocabulary window is not holding WORDS.TOK")
             _G._parse_due = nil
+        end
+
+        -- ═══════════════════════════════════════════════════════════════════════════════
+        -- ★★★★★ TYPE IT. The post is one call; what follows is the ADJUDICATION, and it is the
+        -- part that makes this a gate rather than a demonstration.
+        -- ★★★★ THREE OBSERVABLES, EACH ANSWERING A DIFFERENT "did nothing happen":
+        --   P3_NKEY   the matrix delivered keys to the editor        (0 = no keyboard)
+        --   txt_ppos  the editor accumulated them, then ENTER cleared it
+        --   par_egon  the parse those keys caused found words        (0 = no dictionary)
+        -- **Without all three, a dead matrix, a dead editor and a dead dictionary look the same
+        -- from the framebuffer** [§2W.3], and the framebuffer is all an eye gate can see.
+        -- ★★★★★ ONE CHARACTER PER PARK, HANDSHAKEN ON P3_NKEY -- AND THE FIRST VERSION POSTED THE
+        -- WHOLE LINE AT ONCE AND LOST THREE FIFTHS OF IT [T-P0-092].
+        -- ★★★★★ THE CAUSE IS A REAL PROPERTY OF THE PORT, NOT OF THE TEST HARNESS. The oracle's
+        -- key dispatch is fed from an event QUEUE [cycle.cpp:350]; HAL_key_scan reads the matrix
+        -- STATE at one instant, once per cycle. **A character that goes down and up between two
+        -- polls never existed as far as the guest is concerned**, and natkeyboard types far faster
+        -- than a cycle. Posted whole, "look\r" delivered 2 of 5 keys and parsed an unknown word.
+        -- ★★★★ SO THE HANDSHAKE IS THE HONEST TEST: post the next character only once the guest's
+        -- own counter says it consumed the last. That exercises the matrix for EVERY character
+        -- rather than papering over the loss with a slower rate that might still be lucky.
+        -- ★★★ The loss itself is reported as a finding rather than fixed here -- a key queue is a
+        -- HAL change and this task is the editor [§22.5].
+        if TYPE_TEXT and not typed and n >= TYPE_AT then
+            local sent = _G._type_i or 0
+            local nk = SYM.P3_NKEY and prog:read_u8(SYM.P3_NKEY) or 0
+            -- ★★ ONCE, NOT EVERY PARK. The first version keyed the banner on `sent == 0`, which
+            -- stays true for as long as nothing arrives -- so a run that delivered no keys printed
+            -- the announcement 180 times and buried its own verdict [the same shape as the 900
+            -- copies of "final room 22" this file already guards against].
+            if not _G._type_said then
+                _G._type_said = true
+                local penab = SYM.txt_penab and prog:read_u8(SYM.txt_penab) or -1
+                w("  ★ TYPING %d character(s) from cycle %d, one per cycle through the matrix "
+                  .. "(prompt enabled=%d)", #TYPE_TEXT + 1, n, penab)
+                -- ★★ Prompt disabled means the keys will be dropped by p3_poll_key's own guard,
+                -- which is correct behaviour and a useless test. Say so when it is knowable.
+                if penab == 0 then
+                    w("  ★★★ the prompt is NOT enabled -- accept.input has not run, so these keys "
+                      .. "will be discarded by the poll guard, not by the editor")
+                end
+            end
+            -- ★★★★★ RE-POST UNTIL THE GUEST'S OWN COUNTER MOVES, and only while natkeyboard's queue
+            -- is drained. A single post holds the key down for a frame or two; the guest looks once
+            -- per CYCLE, which is ~9 frames here -- so one post has roughly a one-in-five chance of
+            -- being seen. **Posting once and waiting delivered ZERO of five characters.**
+            -- ★★★★ THE `empty` GUARD IS WHAT KEEPS THIS FROM BEING A FLOOD: without it every park
+            -- queues another copy and the guest eventually sees the same character several times.
+            -- With it there is at most one key in flight, and P3_NKEY says when it landed.
+            if nk > sent then sent = nk; _G._type_i = nk end
+            if sent > #TYPE_TEXT then
+                typed = true
+            elseif m.natkeyboard.empty then
+                m.natkeyboard:post(sent < #TYPE_TEXT
+                                   and TYPE_TEXT:sub(sent + 1, sent + 1) or "\r")
+                _G._type_posts = (_G._type_posts or 0) + 1
+            end
+        end
+        if typed and not type_report and SYM.P3_NKEY then
+            local nk = prog:read_u8(SYM.P3_NKEY)
+            local egon = SYM.par_egon and prog:read_u8(SYM.par_egon) or 0
+            local ppos = SYM.txt_ppos and prog:read_u8(SYM.txt_ppos) or -1
+            -- ★★★ REPORT ONCE, WHEN THE PARSE HAS HAPPENED -- ENTER is the last character posted
+            -- and natkeyboard feeds over many frames, so a fixed cycle offset would read the
+            -- buffer mid-line. egon > 0 with ppos back at 0 is "the line was submitted".
+            if egon > 0 and ppos == 0 then
+                local ids = {}
+                for i = 0, math.min(egon, 8) - 1 do
+                    ids[#ids+1] = tostring(rd16(SYM.par_ego + i * 2))
+                end
+                type_report = true
+                w("  ★ TYPED LINE PARSED at cycle %d: %d key(s) reached the editor, "
+                  .. "%d word(s) [%s], buffer empty", n, nk, egon, table.concat(ids, ","))
+            end
         end
 
         -- ★★★ THE JUMP, one release before the cycle that should dispatch it -- the same seam the

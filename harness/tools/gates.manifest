@@ -182,7 +182,19 @@ p3b	src/harness/p3b_probe.s	build/p3b_probe_pk_fresh.bin	-DHAL_GFX_MODE_SERVICE 
 # headroom goes 277 -> 2,289 bytes** and region B still has 4,918 free.
 # ★★★ THE FLAGS ARE UNCHANGED, so this is not AD-96's shape: same program, same corpus, and this
 # row carries no median to invalidate (purpose=correctness).
-p3b_text	src/harness/p3b_probe.s	build/p3b_probe_text.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ	correctness probe: text opcodes, no cel staging, room 83, windowed vocabulary; binary 7B58CE6B 15,591 B, re-baselined T-P0-091	purpose=correctness
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ RE-BASELINED AGAIN AT T-P0-092 -- THE COMMAND LINE.
+#     retired:  7B58CE6BD16CEE065B6F37CA7E56B671  15,591 B   (valid P6.36 only)
+#     current:  0D7EBA163C0D8DA3AACB375C5119A3E5  16,157 B
+# ★★★★ WHY: 566 bytes. text.s's TEXT_PROMPT block (promptKeyPress, promptRedraw, the edit pair,
+# clearLine, the prompt state), accept.input / prevent.input made real, the per-cycle key poll and
+# its one-deep latch, and src/hal/coco3-dsk/input.s -- which this probe had NEVER linked, so
+# HAL_input_init's PIA precondition had never been asserted here [input.s's own header].
+# ★★★★★ WHAT THIS ROW STILL CANNOT SEE, AND IT IS THE THING THE TASK BUILT: it stages no keyboard
+# input at all. The prompt reads `enabled=0` on this corpus because Kingquest1's room 83 never
+# calls accept.input. **A green run here says the command line ASSEMBLES and changes nothing else**
+# [L-121: state what a row cannot see]. p3b_type is the row that exercises it.
+p3b_text	src/harness/p3b_probe.s	build/p3b_probe_text.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ	correctness probe: text opcodes, no cel staging, room 83, windowed vocabulary, command line linked but never enabled; binary 0D7EBA16 16,157 B, re-baselined T-P0-092	purpose=correctness
 # ═══════════════════════════════════════════════════════════════════════════════════════════
 # ★★★★★ THE FAULT ARM, AND IT HAS NOW BEEN SEEN RED. Blocked for three tasks; §2W is satisfied.
 #     retired:  2268DAB7...  15,033 B   (built but unexercisable, P6.29c..P6.31)
@@ -206,7 +218,10 @@ p3b_text	src/harness/p3b_probe.s	build/p3b_probe_text.bin	-DHAL_GFX_MODE_SERVICE
 # ★★ Still exactly 3 bytes below p3b_text, which is the one omitted `jsr vm_step_clock` and
 # nothing else. Re-shown RED on THIS binary: STUCK in cycle 9 under the p3b_box trigger [§2W,
 # L-62 -- fault-detectability does not survive a rebuild, so it was re-run rather than cited].
-p3b_notick	src/harness/p3b_probe.s	build/p3b_probe_notick.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ -DTEXT_FAULT_NOTICK	fault arm for print's wait loop -- shown RED T-P0-087+, re-shown T-P0-091; binary 5C4200DA 15,588 B	purpose=fault
+# ★★ T-P0-092: 5C4200DA 15,552 B RETIRED -> 454576C1 16,154 B. Re-shown RED on this binary:
+# STUCK in cycle 9 under the p3b_box trigger [L-62 -- fault-detectability does not survive a
+# rebuild, so every re-baseline re-runs the arm rather than citing it].
+p3b_notick	src/harness/p3b_probe.s	build/p3b_probe_notick.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ -DTEXT_FAULT_NOTICK	fault arm for print's wait loop -- shown RED T-P0-087+, re-shown T-P0-092; binary 454576C1 16,154 B	purpose=fault
 # ═══════════════════════════════════════════════════════════════════════════════════════════
 # ★★★★★ p3b_nomap -- THE VOCABULARY WINDOW's FAULT ARM [T-P0-091, §2W].
 # ★★★★★ IT EXISTS BECAUSE NO ROW IN THE SUITE EXERCISES THE DICTIONARY AT ALL, and that was true
@@ -225,7 +240,21 @@ p3b_notick	src/harness/p3b_probe.s	build/p3b_probe_notick.bin	-DHAL_GFX_MODE_SER
 # the same runaway this probe's own history records twice [P6.3's bucket walk; the CP_CEL collision
 # that zeroed par_vocab]. The discrimination is total, which is what §2W asks for.
 # ★★ NOT in run_gates.sh: a fault arm belongs beside its gate, not inside the green path.
-p3b_nomap	src/harness/p3b_probe.s	build/p3b_probe_nomap.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ -DP3B_VOCAB_NOMAP	fault arm for the vocabulary window -- run with -WithInput; shown RED T-P0-091; binary 0A0B7F1B 15,588 B	purpose=fault
+# ★★ T-P0-092: 0A0B7F1B 15,588 B RETIRED -> DC9260A0 16,154 B, re-shown RED (STUCK in cycle 30).
+p3b_nomap	src/harness/p3b_probe.s	build/p3b_probe_nomap.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ -DP3B_VOCAB_NOMAP	fault arm for the vocabulary window -- run with -WithInput; shown RED T-P0-091, re-shown T-P0-092; binary DC9260A0 16,154 B	purpose=fault
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ p3b_type -- THE TYPED PATH. Same binary as p3b_text; what differs is P3B_TYPE, which posts
+# characters through MAME's natural keyboard into the CoCo3 matrix [T-P0-092 §1.4].
+# ★★★★★ NOT A GATE YET, AND THE ROW SAYS SO RATHER THAN BEING OMITTED. Posting delivers ZERO keys
+# for a reason that is now understood and is NOT the port: a posted key is down for two or three
+# frames and the guest looks once per cycle, twelve frames apart. **A HUMAN's keypress lasts tens
+# of frames and arrives** -- Jay's eye-gate run recorded 23 keys reaching the editor, last $0D, and
+# the game answered with its own "I don't understand" box. The path works; the harness cannot drive
+# it. Five explanations were tested and discarded before that was established [see the report].
+# ★★★ Kept in the manifest UNRUN so the next task inherits the invocation and the measurement
+# rather than rediscovering both. It is not in run_gates.sh.
+#     P3B_TITLE=Kingquest1 P3B_ROOM=1 P3B_ROOM_AT=8 P3B_VAR21=2 P3B_TYPE=look -Text -WithInput
+p3b_type	src/harness/p3b_probe.s	build/p3b_probe_text.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ	typed command line -- BLOCKED: natkeyboard cannot hold a key across a once-per-cycle poll; verified by hand instead	purpose=blocked
 # ═══════════════════════════════════════════════════════════════════════════════════════════
 # ★★★★★ p3b_parse -- SAME BINARY AS p3b_text; WHAT DIFFERS IS -WithInput, AND THAT IS THE ROW.
 # §2F: the scope and the invocation of a gate are part of its definition, and this project has now

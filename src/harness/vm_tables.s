@@ -254,8 +254,8 @@ VMOP_TAB:
                 fdb     vm_op_unimpl            ; 74 word.to.string(nn)
                 fdb     vm_op_unimpl            ; 75 parse(n)
                 fdb     vm_op_unimpl            ; 76 get.num(nv)
-                fdb     vm_op_modelled          ; 77 prevent.input()  [modelled]
-                fdb     vm_op_modelled          ; 78 accept.input()  [modelled]
+                fdb     vmop_prevent_input      ; 77 prevent.input()
+                fdb     vmop_accept_input       ; 78 accept.input()
                 fdb     vm_op_modelled          ; 79 set.key(nnn)  [modelled]
                 fdb     vm_op_modelled          ; 7A add.to.pic(nnnnnnn)  [modelled]
                 fdb     vm_op_modelled          ; 7B add.to.pic.v(vvvvvvv)  [modelled]

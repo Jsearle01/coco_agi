@@ -129,6 +129,10 @@ $WANT = @("res_volbase","res_slicebase","res_curblk","vm_quit","vm_badop","vm_cy
 # the dictionary is windowed, so listing them for the cel build would both fail the extraction and
 # make a flat build claim a window it does not have.
 if ($Text -or $Fault -or $DecodeFault -or $NoTick -or $Diag -or $NoMap) { $WANT += @("P3_FONT","P3_FONT_BYTES","P3_PBUF","ph_blk_vocab","ph_blk_slot5") }
+# ★★★★ THE COMMAND LINE's SYMBOLS [T-P0-092]. They exist wherever TEXT_PROMPT does, which
+# p3b_probe.s conditions exactly as TEXT_WIRED -- so every wired text arm has them and the
+# -Fault arm (TEXT_MODELLED) does not. Asking for them there would fail the extraction.
+if ($Text -or $DecodeFault -or $NoTick -or $Diag -or $NoMap) { $WANT += @("txt_penab","txt_ppos","txt_prow","P3_KEY","P3_NKEY") }
 # ★★★★ WIRED BUILDS ONLY. -DTEXT_MODELLED keeps TEXT_WIRED undefined (p3b_probe.s:1004), so the nine
 # handlers become `equ vm_op_modelled` and **the whole body -- tx_wt_key included -- is never
 # assembled**. Asking for it in the -Fault arm fails the symbol extraction, which is why this is a
@@ -194,8 +198,21 @@ if ($Headless) {
   # is stated here rather than left as a number nobody has weighed.
   # ★★ -nothrottle: nothing in this arm is a human judgement (§2U); the eye-gate arm below
   # never gets it (§2U.2).
+  # ═══════════════════════════════════════════════════════════════════════════════════════
+  # ★★★★★ -video none AND natkeyboard DO NOT MIX, AND THAT COST FOUR WRONG DIAGNOSES [T-P0-092].
+  # A typed run posted 180 characters, natkeyboard reported its queue drained after every one, and
+  # the guest saw ZERO. Throttling, a missing HAL_input_init, the post rate and a one-deep key
+  # latch were each tried and each was not the cause. **MAME's natural keyboard needs a video
+  # target**; with `-video none` the posts are accepted and never delivered to the machine.
+  # ★★★★ input_gate.lua's posting arm has always used `-resolution 640x480` and its READBACK arms
+  # use `-video none` -- the distinction was already in the tree, in the file that posts keys, and
+  # it reads as a resolution preference rather than as a precondition [input_run.ps1:127].
+  # ★★★ SO THE TYPED ARM GETS A RENDERER AND EVERY OTHER ARM DOES NOT. It is still unattended and
+  # still -nothrottle: §2U.2 excludes gates whose output is a HUMAN JUDGEMENT, and this one's
+  # output is a word count.
   $secs = if ($env:P3B_SECONDS) { $env:P3B_SECONDS } else { "900" }
-  C:\mame\mame.exe coco3 -video none -sound none -window -nomaximize -skip_gameinfo -nothrottle `
+  $vid = if ($env:P3B_TYPE) { @("-resolution","640x480") } else { @("-video","none") }
+  C:\mame\mame.exe coco3 @vid -sound none -window -nomaximize -skip_gameinfo -nothrottle `
     -seconds_to_run $secs `
     -rompath C:/mame/roms -cfg_directory harness\mame-cfg `
     -autoboot_script C:/Projects/coco_agi/harness/tools/p3b_run.lua -autoboot_delay 0 | Out-Null
@@ -215,14 +232,21 @@ if ($Headless) {
   # word count and this is what makes it a verdict rather than a log entry.
   # ★★ Silent when no command is fed: the pattern cannot match a run that never parsed.
   $nowords = Select-String -Path $log -Pattern 'NO WORDS MATCHED' -Quiet
+  # ★★★★★ AND THE TYPED PATH's TWO FAILURES [T-P0-092]. Both finish the run normally -- a prompt
+  # that never receives a key and a line that never parses are quiet, not fatal -- so neither the
+  # watchdog nor the completion check can see them. This is what makes p3b_type a gate.
+  $nokeys  = Select-String -Path $log -Pattern 'NO KEYS REACHED THE EDITOR' -Quiet
+  $noparse = Select-String -Path $log -Pattern 'TYPED LINE NOT PARSED' -Quiet
   # ★★★ P3_PBUF IS IN THE PATTERN BECAUSE IT IS A VERDICT LINE. An allowlist filter drops what it
   # does not name, and what it does not name is always the newest thing -- here AC-3's whole
   # observable printed to the log and never to the console [the same shape as the star-in-a-pattern
   # loss two tasks ago: the filter kept every table and removed the conclusion].
-  Select-String -Path $log -Pattern 'OK prompt|program \d+ bytes|vocabulary |window discrimination|par_vocab written|COMMAND TYPED|parse at cycle|STUCK|cycles in|final room|P3_PBUF' |
+  Select-String -Path $log -Pattern 'OK prompt|program \d+ bytes|vocabulary |window discrimination|par_vocab written|COMMAND TYPED|parse at cycle|TYPING |TYPED LINE|prompt: enabled|NO KEYS REACHED|STUCK|cycles in|final room|P3_PBUF' |
     ForEach-Object { $_.Line }
   if ($stuck) { "★★★ p3b FAILED -- the watchdog fired"; exit 1 }
   if ($nowords) { "★★★ p3b FAILED -- a fed command matched no dictionary words"; exit 1 }
+  if ($nokeys)  { "★★★ p3b FAILED -- posted keys never reached the command line"; exit 1 }
+  if ($noparse) { "★★★ p3b FAILED -- a typed line did not reach the parser"; exit 1 }
   if (-not $done) { "★★★ p3b FAILED -- no completion line; the run did not reach $Cycles cycles"; exit 1 }
   "★ p3b headless: $Cycles cycles, no stall"
   exit 0

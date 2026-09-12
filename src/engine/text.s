@@ -1001,6 +1001,337 @@ tc_ok:
 tc_out:         rts
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE COMMAND LINE <- text.cpp:704-874. A TRANSCRIPTION, NOT A REDESIGN [T-P0-092].
+*
+*     txt_prompt_on   <- text.cpp:710 promptEnable    (+ op_cmd.cpp:1985's promptRedraw)
+*     txt_prompt_off  <- text.cpp:713 promptDisable   (+ op_cmd.cpp:1994-1997)
+*     txt_pkey        <- text.cpp:720 promptKeyPress
+*     txt_predraw     <- text.cpp:848 promptRedraw
+*     txt_editon/off  <- text.cpp:670/679 inputEditOn / inputEditOff
+*     txt_clearline   <- text.cpp:884's clearLine(row, background)
+*
+* ★★★★★ IT IS PER-CYCLE AND IT DOES NOT BLOCK. cycle.cpp:350-351 polls
+* `if (_text->promptIsEnabled()) _text->promptKeyPress(key)` inside the main cycle's key dispatch.
+* **That is the opposite of messageBox**, which blocks in a nested inner loop [text.cpp:397-407].
+* One key per call, no loop of our own.
+*
+* ★★★★★ AND IT IS NOT get.string's EDITOR. text.cpp:987 stringKeyPress is a DIFFERENT routine for a
+* different feature, and getstring.s is the port of that one. Both take characters, honour
+* backspace, end on ENTER and fill a buffer the parser reads -- **which is exactly why the wrong
+* one reads as the right one** [T-P0-090 §4B; the captured candidate says it in one line: a
+* component that does something similar is not the component].
+*
+* ★★★ BEHIND -DTEXT_PROMPT so a build that does not want a command line pays nothing. text_probe
+* and gs_probe have no framebuffer and no key source.
+                ifdef   TEXT_PROMPT
+* ★★★ TEXT_BOX IS A PRECONDITION, NOT A COINCIDENCE: txt_clearline is one tx_boxfill, and that
+* routine and its txf_* block are inside the TEXT_BOX guard. A build that asked for a prompt
+* without a box would fail to assemble on an undefined symbol several hundred lines away, which is
+* the kind of error that sends the reading to the wrong file.
+                ifndef  TEXT_BOX
+                error   "TEXT_PROMPT needs TEXT_BOX -- txt_clearline is a tx_boxfill and tx_boxfill is inside that guard"
+                endc
+* ★ Declared FIRST because it is an indexed OFFSET (`ldb VM_VAR_MAX_INPUT_CHARS,x`) and lwasm sizes
+* the operand on pass 1; a forward reference there is a phase error, not a late resolution.
+VM_VAR_MAX_INPUT_CHARS equ 24           ; agi.h VM_VAR_MAX_INPUT_CHARACTERS
+
+TXT_PROMPT_MAX  equ     42              ; text.h:170 `byte _prompt[42]`
+* ★★★★ 42 IS THE ARRAY AND 40 IS THE LIMIT. TEXT_STRING_MAX_SIZE is 40 and the bound arithmetic at
+* text.cpp:753-763 works in those units; the extra two bytes are the terminator and the slack the
+* oracle's own buffer carries. §2V.2: state the maximum, and these are two different maxima.
+TXT_STRING_MAX  equ     40              ; text.h TEXT_STRING_MAX_SIZE
+
+txt_prompt      fill    0,TXT_PROMPT_MAX  ; _prompt
+txt_ppos        fcb     0               ; _promptCursorPos
+txt_penab       fcb     0               ; _promptEnabled  [text.cpp:716]
+* ★★★★★ 22, NOT 0, AND text.cpp:63 SAYS 0. The constructor initialises _promptRow to 0 and
+* **cycle.cpp:442 sets it to 22 in runGame(), before the main loop, without any game asking.**
+* ★★★★ Reading only the declaration would have put the command line at the top of the screen, over
+* the status row. §2H's second check -- name the routine that CALLS it, not only the one that
+* implements it -- is what found this, and the caller is where the real value lives.
+* ★★★ configure.screen ($6F) can move it [op_cmd.cpp:1844]; that opcode is not wired here, so 22
+* stands for every title this probe runs.
+txt_prow        fcb     22              ; _promptRow
+* ★★★★★ ZERO, AND THAT IS WHY set.cursor.char STAYS A STUB. _inputCursorChar is 0 at text.cpp:58
+* and **inputEditOn and inputEditOff are both NO-OPS while it is zero** [text.cpp:673, :682]. So
+* the prompt renders completely without it: there is simply no cursor glyph until a game calls
+* set.cursor.char, and no title this probe runs does.
+* ★★★ set.cursor.char takes a MESSAGE NUMBER and passes the message's FIRST CHARACTER
+* [op_cmd.cpp:2106-2112] -- the opcode's name invites the other reading and this byte is where it
+* would land.
+txt_curch       fcb     0               ; _inputCursorChar
+txt_edit        fcb     0               ; _inputEditEnabled  [text.cpp:666]
+
+* ── the three vectors the caller installs, for the same reason txt_restore is one ──
+* ★★★★★ THE PARSE IS A VECTOR AND THAT IS §1.3's ANSWER IN ONE LINE. text.cpp:789 calls
+* parseUsingDictionary from INSIDE promptKeyPress, so ENTER would otherwise make the command line a
+* SECOND caller of par_parse -- and on this target the dictionary lives in an MMU window that only
+* the harness knows how to open [P6.36]. **A vector means text.s never calls par_parse at all**, so
+* there is exactly one call site in the tree's windowed configuration and the bracket is part of it.
+txt_parse       fdb     0               ; -> the caller's BRACKETED parse. 0 = none
+* ★★★★ AND THE WINDOW IS TWO MORE, BECAUSE THE ECHO AND THE PARSE WANT DIFFERENT MAPPINGS.
+* The blit needs the framebuffer mapped; on this target that mapping covers the slot the dictionary
+* rides. **They cannot both be open**, and the oracle's own order at text.cpp:782-793 is parse
+* first and redraw second, which is exactly the order that keeps them disjoint.
+txt_winon       fdb     0               ; -> map the framebuffer for a blit. 0 = none
+txt_winoff      fdb     0               ; -> put it back
+
+* ── inputEditOn / inputEditOff -- text.cpp:670, :679 ──
+* ★★ Both are guarded on the edit flag and both do nothing while _inputCursorChar is 0, so on this
+* corpus they are eight bytes of faithfulness. Ported anyway: the day a game sets a cursor
+* character, the alternative is a missing side effect that looks like a blitter defect.
+txt_editon:
+                tst     txt_edit
+                bne     txe_out
+                inc     txt_edit
+                tst     txt_curch
+                beq     txe_out
+                lda     #$08                    ; backspace [text.cpp:674]
+                jmp     txt_dispch
+txt_editoff:
+                tst     txt_edit
+                beq     txe_out
+                clr     txt_edit
+                lda     txt_curch
+                beq     txe_out
+                jmp     txt_dispch
+txe_out:        rts
+
+* ── txt_clearline -- A = row. clearLine(row, background) [text.cpp:884] ──
+* ★★★ clearBlock(row, 0, row, 39, colour) in the oracle. One character row is TXT_VH display rows
+* and 40 columns is TXT_COLS*TXT_VW = 160 BYTES at 2 pixels per byte, so this is one tx_boxfill.
+* ★★ txt_bg is the background attribute the display path already maintains.
+txt_clearline:
+                ldb     #TXT_VH
+                mul                             ; D = row * 8, the pixel row
+                std     txf_y
+                ldd     #0
+                std     txf_x
+                lda     #TXT_COLS*TXT_VW
+                sta     txf_w
+                lda     #TXT_VH
+                sta     txf_h
+                lda     txt_bg
+                jmp     tx_boxfill
+
+* ── txt_dispstr -- X -> a NUL-terminated string, through txt_dispch ──
+* ★ displayText(const char *) is a loop over displayCharacter [text.cpp:295]; txt_dispch is both.
+txt_dispstr:
+                lda     ,x+
+                beq     tds_out
+                pshs    x
+                jsr     txt_dispch
+                puls    x
+                bra     txt_dispstr
+tds_out:        rts
+
+* ── txt_predraw <- text.cpp:848 promptRedraw ──
+* ★★★ GUARDED ON _promptEnabled, and the guard is the oracle's own first line: a redraw while the
+* prompt is disabled would repaint a line prevent.input has just cleared.
+txt_predraw:
+                tst     txt_penab
+                beq     txp_out
+                ldx     txt_winon
+                beq     txr_nowin
+                jsr     ,x
+txr_nowin:
+                jsr     txt_editon
+                lda     txt_prow
+                jsr     txt_clearline
+* ★★ charPos_Set(_promptRow, 0) [text.cpp:857]. _reset_Column moves with it, because txt_dispch's
+* newline arm returns to txt_rcol and the prompt's left margin is column 0.
+                lda     txt_prow
+                sta     txt_crow
+                clr     txt_ccol
+                clr     txt_rcol
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE PREFIX IS STRING 0, AND IT IS SKIPPED WHEN THERE IS NO STRING TABLE.
+* text.cpp:860-862 takes `_game.getString(0)` -- "string 0 is the prompt string prefix"
+* [text.cpp:756's own comment] -- through stringPrintf and stringWordWrap before displaying it.
+* ★★★★ ON THIS PROBE THAT IS UNREACHABLE AND THE REASON IS A NAMED STUB, NOT AN OMISSION HERE:
+* `vmop_set_string` is a bare `rts` [vm_cmds.s], so no title ever populates a string slot, and
+* txt_strbase is deliberately left 0 [p3b_probe.s]. **A pointer left at zero is not inert** -- it
+* would substitute from the HAL's direct page, which is the null-base read that walked the seed
+* stack when par_vocab was zeroed -- so the prefix is skipped rather than read from address 0.
+* ★★★ THE VISIBLE CONSEQUENCE, STATED SO NOBODY READS IT AS A DEFECT: the command line shows what
+* you type with no `>` in front of it, because in a real interpreter that character is the game's
+* string 0 and this probe has no way to receive one.
+                ldx     txt_strbase
+                beq     txr_nopfx
+                stx     txt_msgp
+                jsr     txt_printf
+                ldd     #txt_dispch
+                std     txt_emit
+                jsr     txt_wrap
+                ldd     #0
+                std     txt_emit
+txr_nopfx:
+                ldx     #txt_prompt
+                jsr     txt_dispstr
+                jsr     txt_editoff
+                ldx     txt_winoff
+                beq     txp_out
+                jsr     ,x
+txp_out:        rts
+
+* ── txt_prompt_on / txt_prompt_off <- op_cmd.cpp:1980-1997 ──
+* ★★★ accept.input is promptEnable() THEN promptRedraw() [op_cmd.cpp:1985-1986] -- the line appears
+* immediately, it does not wait for a keystroke.
+txt_prompt_on:
+                lda     #1
+                sta     txt_penab
+                jmp     txt_predraw
+* ★★★★★ prevent.input CLEARS THE ROW, IT DOES NOT ONLY DROP THE FLAG [op_cmd.cpp:1994-1997]:
+* promptDisable(), inputEditOn(), clearLine(promptRow_Get(), 0). **The colour is 0, not the
+* background attribute** -- the oracle passes a literal there and passes _textAttrib.background in
+* promptRedraw, and the two are not the same call.
+* ★★★ No inputEditOff afterwards, which is the oracle's own asymmetry: the edit flag is left on so
+* the next inputEditOn is a no-op and no cursor glyph is drawn onto a line that was just cleared.
+txt_prompt_off:
+                clr     txt_penab
+                ldx     txt_winon
+                beq     txo_nowin
+                jsr     ,x
+txo_nowin:
+                jsr     txt_editon
+                lda     txt_bg
+                pshs    a
+                clr     txt_bg
+                lda     txt_prow
+                jsr     txt_clearline
+                puls    a
+                sta     txt_bg
+                ldx     txt_winoff
+                beq     txo_out
+                jsr     ,x
+txo_out:        rts
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ txt_pkey <- text.cpp:720 promptKeyPress. A = the key.
+*
+* ★★★★ THE ACCEPTABLE RANGE IS 0x20-0x7F [text.cpp:740, the `default:` language arm]. The Russian,
+* Hebrew and French arms widen it to 0xFF with one exclusion; this port is the default arm and says
+* so rather than implying AGI has one range. **§2.1: that switch is a ScummVM NORMALISATION** -- its
+* own comment reads "Sierra didn't check for valid characters" -- so the range is a ScummVM
+* behaviour we are choosing to reproduce, not a fact about AGI.
+*
+* ★★★ 0x0A (LF) IS EXPLICITLY IGNORED [text.cpp:780-781] -- a `break` with no body, which is not the
+* same as falling into `default:` and is why it is a branch here rather than an omission.
+* ★★ ESC IS NOT HANDLED HERE AT ALL. The switch has no 0x1B arm; cancelling a line is
+* promptCancelLine [text.cpp:816] and nothing in the corpus reaches it.
+txt_pkey:
+                sta     txt_pk_key
+* ── maxChars [text.cpp:753-763] ──
+* ★★★★ THREE TERMS AND THE ORDER MATTERS. TEXT_STRING_MAX_SIZE minus the prefix's length, minus one
+* more if anything is already typed, then clamped DOWN to var 24 -- and only down: a var 24 larger
+* than the geometric bound does not widen the line.
+* ★★★ The dialogue_Open arm [text.cpp:754, `TEXT_STRING_MAX_SIZE - 4`] is get.string's window and is
+* out of scope here; this is the `else` arm, with the prefix length zero for the reason txt_predraw
+* gives. Recorded rather than silently collapsed, because the two arms differ by the prefix and
+* that is the term this probe cannot have.
+                lda     #TXT_STRING_MAX
+                tst     txt_ppos
+                beq     txk_nodec
+                deca
+txk_nodec:
+                sta     txt_pk_max
+                ldx     txt_vars
+                beq     txk_novar
+                ldb     VM_VAR_MAX_INPUT_CHARS,x
+                cmpb    txt_pk_max
+                bhs     txk_novar
+                stb     txt_pk_max
+txk_novar:
+* ★★ txk_ret0 IS A LOCAL `rts`, NOT A STYLE CHOICE. The four early exits below are each more than
+* 127 bytes from the routine's tail once the three arms are in place, and a `beq` to it is a byte
+* overflow at assembly time. One local return costs one byte and keeps every branch short.
+                lda     txt_pk_key
+                cmpa    #$08
+                beq     txk_bs
+                cmpa    #$0A
+                beq     txk_ret0                ; LF: ignored [text.cpp:780]
+                cmpa    #$0D
+                beq     txk_enter
+                bra     txk_char
+txk_ret0:       rts
+* ── BACKSPACE [text.cpp:768-778] ──
+* ★★★ GUARDED ON _promptCursorPos: a backspace on an empty line does nothing at all, and in
+* particular does not emit the character. The cell clear lives in txt_dispch's own backspace arm,
+* which P6.21 ported for get.string's echo and which this reuses unchanged.
+txk_bs:
+                tst     txt_ppos
+                beq     txk_ret0
+                dec     txt_ppos
+                ldx     #txt_prompt
+                ldb     txt_ppos
+                abx
+                clr     ,x
+                ldx     txt_winon
+                beq     txk_bs_now
+                jsr     ,x
+txk_bs_now:
+                jsr     txt_editon
+                lda     #$08
+                jsr     txt_dispch
+                jsr     txt_editoff
+                ldx     txt_winoff
+                beq     txk_ret
+                jsr     ,x
+                rts
+* ── ENTER [text.cpp:782-795] ──
+* ★★★★★ THE ORDER IS THE ORACLE'S AND IT IS ALSO WHAT KEEPS THE TWO MAPPINGS DISJOINT: parse, then
+* reset the cursor, then redraw. The parse runs with NO framebuffer window open, which is the only
+* state in which the caller can have the dictionary mapped [see txt_parse's note above].
+* ★★★ GUARDED ON _promptCursorPos: ENTER on an empty line parses nothing and redraws nothing, so a
+* stray return cannot clear ENTERED_CLI or fire a said() against an empty word list.
+txk_enter:
+                tst     txt_ppos
+                beq     txk_ret0
+                ldx     txt_parse
+                beq     txk_en_noparse
+                jsr     ,x
+txk_en_noparse:
+                clr     txt_ppos
+                clr     txt_prompt
+                jmp     txt_predraw
+* ── a printable character [text.cpp:797-810] ──
+* ★★★★ THE BOUND IS CHECKED BEFORE THE RANGE, which is the oracle's nesting: `if (maxChars >
+* _promptCursorPos) { if (acceptableInput) {...} }`. At the limit the key is DROPPED SILENTLY --
+* no beep, no truncation, no terminator moved. ★★ That is worth stating because "nothing happens"
+* is indistinguishable from a dead key matrix to anyone watching.
+txk_char:
+                lda     txt_ppos
+                cmpa    txt_pk_max
+                bhs     txk_ret
+                lda     txt_pk_key
+                cmpa    #$20
+                blo     txk_ret
+                cmpa    #$7F
+                bhi     txk_ret
+                ldx     #txt_prompt
+                ldb     txt_ppos
+                abx
+                sta     ,x+
+                clr     ,x
+                inc     txt_ppos
+                ldx     txt_winon
+                beq     txk_ch_now
+                jsr     ,x
+txk_ch_now:
+                jsr     txt_editon
+                lda     txt_pk_key
+                jsr     txt_dispch
+                jsr     txt_editoff
+                ldx     txt_winoff
+                beq     txk_ret
+                jsr     ,x
+txk_ret:        rts
+
+txt_pk_key      fcb     0
+txt_pk_max      fcb     0
+                endc
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ tx_drawbox <- graphics.cpp:1079 GfxMgr::drawBox, called from text.cpp:507.
 *
 * ★★★★★ THIS WAS MISSING ENTIRELY AND NO BYTE GATE COULD SEE IT. txt_msgbox computed

@@ -158,6 +158,14 @@ P3_PHASE        equ     MAP_STATUS+30
 * and the assertion at the foot of this file is what keeps that true rather than this sentence.
 P3_FEED         equ     MAP_STATUS+88
 P3_VOCAB_BAD    equ     MAP_STATUS+89   ; 2 B: first vocabulary-window address that failed
+* ★★★ THE TYPED PATH'S OBSERVABLES [T-P0-092]. P3_KEY is the last key the editor was handed and
+* P3_NKEY counts them, so the host can say "the matrix delivered N keys" independently of anything
+* on screen. **A dead matrix and a dead editor are indistinguishable from the framebuffer alone**,
+* and that is the discrimination AC-3 needs [§2W.3].
+* ★★ +91 and +92, past P3_VOCAB_BAD's two bytes; the block's 224-byte assertion at the foot of this
+* file is what keeps that true rather than this sentence.
+P3_KEY          equ     MAP_STATUS+91
+P3_NKEY         equ     MAP_STATUS+92
 
 * ── the subsystems' instrumentation, which is NOT optional ───────────────────────
 * ★★★ EVERY ONE OF THESE IS REQUIRED TO ASSEMBLE. pic_draw.s does `ldd CNT_VERT / addd #1 /
@@ -303,6 +311,18 @@ TXD_EACH        equ     8                       ; records kept per site
 * the reason the probe could not use the engine's own address**, so the two maps converge here
 * rather than diverging further.
 TEXT_BOX        equ     1
+* ★★★★★ AND THE COMMAND LINE [T-P0-092]. text.s's TEXT_PROMPT block is the port of
+* text.cpp:720 promptKeyPress -- per-cycle, not blocking -- plus promptRedraw, the two
+* input opcodes and the edit-cursor pair. It needs TEXT_BOX (txt_clearline is a tx_boxfill)
+* and text.s asserts that rather than failing on an undefined symbol elsewhere.
+* ★★★★ CONDITIONED EXACTLY AS TEXT_WIRED IS, AND THE FAULT ARM IS WHY. -DTEXT_MODELLED links
+* text.s and declines to call the nine handlers, so it leaves TEXT_WIRED undefined -- and
+* tx_window_enter / tx_window_exit live in vm_text_ops.s's wired branch. **A prompt in that arm
+* would install two vectors to symbols that do not exist.** Mirroring the same condition keeps the
+* two flags from drifting into a combination nobody built.
+                ifndef  TEXT_MODELLED
+TEXT_PROMPT     equ     1
+                endc
 P3_FONT_BYTES   equ     2048            ; ★ the staging length; p3b_run.lua reads this symbol
 * ★★★★★ DECLARED HERE, WHICH IS EARLIER THAN IT READS. Both are `ifdef`-tested, and an `ifdef` is
 * resolved WHEN THE LINE IS PARSED rather than when the symbol is finally known -- so a flag
@@ -511,6 +531,23 @@ p3_vt_done:     std     P3_VOCAB_BAD
 * substitute from address 0, which is the HAL's direct page -- the same null-base read that walked
 * the seed stack when par_vocab was zeroed [p3b_probe.s's CP_CEL collision]. They are set together
 * so none can be forgotten individually.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ HAL_input_init, WHICH THIS PROBE HAS NEVER CALLED [T-P0-092]. input.s's header states the
+* precondition in as many words: it "asserts PIA0 data-register access mode" -- CRA/CRB bit 2 = 1 --
+* and HAL_key_scan reads $FF00/$FF02 assuming it. **p3b has called HAL_key_scan since P6.29c without
+* it**, from print's wait loop, and got away with it because DECB leaves the PIA in data mode and
+* nothing between the handover and the first scan puts it back.
+* ★★★★ IT STOPPED BEING SURVIVABLE THE MOMENT A KEY HAD TO ARRIVE ON TIME. The wait loop polls
+* continuously and a human holds ENTER for many frames, so an occasional missed scan is invisible.
+* The command line polls ONCE PER CYCLE, and 180 cycles of posted characters delivered ZERO.
+* ★★★ input_probe.s:95 RECORDED THIS EXACT FAILURE ALREADY -- "HAL_input_init FIRST, AND ITS
+* ABSENCE COST THE FIRST RUN" -- in the probe that was built to gate the key decoder. **The lesson
+* was written down in the file next door and this probe did not inherit it**, which is §2H's third
+* check (grep the reports for the same subsystem) failing at the source level.
+* ★★ input.s is SHARED and is included read-only; this calls it and changes nothing in it [§2M].
+                ifdef   HAL_KEYBOARD
+                jsr     HAL_input_init
+                endc
                 ifdef   P3B_NO_CEL
                 ldx     #P3_PBUF
                 stx     txt_pbuf
@@ -530,6 +567,26 @@ p3_vt_done:     std     P3_VOCAB_BAD
                 std     txt_strbase
                 clr     txt_l0n
                 clr     txt_curn
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE COMMAND LINE'S THREE VECTORS [T-P0-092]. text.s owns the editor and knows nothing
+* about MMU slots or about the parser; the probe supplies all three, exactly as it already
+* supplies txt_restore and txt_emit.
+* ★★★★★ txt_parse IS THE ONE THAT MATTERS. text.cpp:789 calls parseUsingDictionary from inside
+* promptKeyPress, so ENTER is a second consumer of the parser -- and the dictionary rides an MMU
+* window only this file knows how to open [P6.36]. Pointing the vector at p3_parse_line means the
+* probe still has exactly ONE `jsr par_parse`, with the bracket inside it.
+* ★★★★ txt_winon/off ARE NOT DECORATION EITHER: tx_window_enter maps the framebuffer across slots
+* 4-6, and slot 5 is the vocabulary window. **The two mappings cannot both be open**, so the echo
+* brackets its own blit and the ENTER path parses first and redraws second -- which is also the
+* oracle's order at text.cpp:782-793.
+                ifdef   TEXT_PROMPT
+                ldd     #p3_parse_line
+                std     txt_parse
+                ldd     #tx_window_enter
+                std     txt_winon
+                ldd     #tx_window_exit
+                std     txt_winoff
+                endc
                 endc
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -616,8 +673,32 @@ p3_cal:         leax    -1,x
                 endc
 p3_loop:
                 clr     P3_GO
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ LATCH A KEY WHILE PARKED, AND THIS IS A HARNESS MECHANISM STANDING IN FOR A QUEUE THE
+* PORT DOES NOT HAVE [T-P0-092]. The oracle's key dispatch drains an event QUEUE filled
+* asynchronously [cycle.cpp:350]; HAL_key_scan reads the matrix STATE at one instant, and
+* p3_poll_key reads it once per cycle.
+* ★★★★★ MEASURED, NOT REASONED: with the host posting a character every park and natkeyboard's
+* queue drained each time, **180 posts delivered ZERO keys.** It is not bad luck -- a posted
+* keypress is down for two or three frames and the guest's single poll comes twelve frames later,
+* so it misses EVERY time. The first three explanations (throttling, a missing HAL_input_init, a
+* slow post) were each tested and each wrong.
+* ★★★★ A HUMAN IS NOT AFFECTED THE SAME WAY and that is the distinction this note exists to draw:
+* a finger holds a key for tens of frames, so the once-per-cycle poll catches it -- which is why
+* print's ENTER dismissal has worked under the eye gate since P6.33 with no latch at all.
+* ★★★ SO THE PORT's REAL LIMIT IS A FAST TYPIST, not a broken matrix, and the engine-level answer
+* is a key queue or a VBL-driven latch. Neither is this task [§22.5], and neither belongs in the
+* SHARED interrupt handler. **This latch lives in the probe's own park loop, which is a harness
+* construct with no counterpart in a shipped interpreter** -- stated so nobody reads it as the
+* engine having solved the problem.
+                ifdef   TEXT_PROMPT
+p3_wait:        jsr     p3_key_latch
+                lda     P3_GO
+                beq     p3_wait
+                else
 p3_wait:        lda     P3_GO
                 beq     p3_wait
+                endc
                 lda     P3_MODE
                 cmpa    #1
                 beq     p3_do_cycle
@@ -758,6 +839,18 @@ p3_run_vm:
                 clr     P3_FEED
                 jsr     p3_feed
 p3_nofeed:
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE TYPED PATH, AT THE SAME SEAM AND FOR THE SAME REASON [T-P0-092]. cycle.cpp:350-351
+* polls `if (_text->promptIsEnabled()) _text->promptKeyPress(key)` inside the main cycle's key
+* dispatch -- **once per cycle, not in a loop**, which is the whole shape difference from print's
+* blocking window.
+* ★★★★ IT SITS BESIDE THE SCRIPTED FEED RATHER THAN REPLACING IT, and the two are complementary
+* by design: the host's feed writes P3_INBUF directly and **cannot exercise one instruction of the
+* editor**, while this path cannot be driven from a script. §1.4 of the dispatch is right, and the
+* gate rows are split the same way [gates.manifest: p3b_parse vs p3b_type].
+                ifdef   TEXT_PROMPT
+                jsr     p3_poll_key
+                endc
                 lda     #2
                 sta     P3_PHASE
                 lda     #3
@@ -781,7 +874,43 @@ p3_nofeed:
 * probes have disjoint maps (§2F is about addresses, and these are eleven instructions against
 * two different buffer pairs). ★★ If a third client appears this belongs in src/engine/ beside
 * parser.s -- recorded so the second instance does not quietly become three.
-p3_feed:
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ TWO CALLERS NOW, ONE CALL SITE -- AND THAT IS T-P0-092's ANSWER TO §1.3 [P6.36 §7.2].
+* The host's scripted feed and the command line's ENTER both need a parse, and P6.36 left the
+* vocabulary bracket as a CONVENTION: two instructions around one `jsr`, with nothing asserting it.
+* ★★★★★ A SECOND CALLER IS EXACTLY HOW A CONVENTION LIKE THAT DIES, so there is no second call.
+* p3_parse_line holds the ONLY `jsr par_parse` in this probe and the bracket is inside it. **A third
+* caller cannot get the bracket wrong because there is nothing for it to get wrong** -- it calls
+* this, or it does not parse.
+* ★★★★ THE ALTERNATIVE WAS TO PUT THE BRACKET INSIDE par_parse ITSELF, which would make the
+* invariant structural for every client rather than for this probe. It is proposed in the report
+* rather than taken here: parser.s is shared by four probes, three of which have no window and no
+* phase_vocab_* symbol at all, so it needs the same -DPHASE_VOCAB treatment mmu_phase.s got and
+* that is a change to gated engine source, not to harness glue [§22.5].
+p3_parse_line:
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ REFUSE WITHOUT A DICTIONARY, AND THIS IS A REAL DEFECT THE TYPED PATH EXPOSED [T-P0-092].
+* par_vocab is 0 until the host stages a WORDS.TOK, and the host stages one only when an input
+* script is requested. **par_said has a guard for that and par_parse has none**: par_find computes
+* `vocab + letter*2` from ADDRESS ZERO and walks the HAL's direct page and the seed stack for a
+* terminator that is not there [the CP_CEL collision, L-86, this file's own history].
+* ★★★★ IT WAS UNREACHABLE UNTIL NOW AND IS NOT ANY MORE. The scripted feed only fires when the
+* host has a script, and a script implies a dictionary -- so the two always arrived together. **A
+* typed line arrives from the keyboard and has no such pairing**, and the first typed run hung in
+* cycle 27 for exactly this reason.
+* ★★★ IT DOES NOT BLUNT THE FAULT ARM. p3b_nomap leaves par_vocab at $A000 and unmaps the block,
+* so it still parses against the object table and still hangs; this refuses only the case where
+* there is no dictionary anywhere, which is a configuration and not a fault.
+* ★★★★ SCOPED TO THE COMMAND-LINE CONFIGURATION, AND THE FIRST VERSION WAS NOT -- it cost `p3b`
+* six bytes and its byte identity, which is §6's own stop condition. The hazard is real in both
+* builds and REACHABLE in only one: without the command line the sole caller is the scripted feed,
+* which the host arms only when it has a script, and a script implies a staged dictionary.
+                ifdef   TEXT_PROMPT
+                ldd     par_vocab
+                bne     ppl_have
+                rts
+ppl_have:
+                endc
                 ldx     #P3_INBUF
                 stx     par_inbuf
                 ldx     #P3_CLNBUF
@@ -820,6 +949,66 @@ p3_feed:
                 jsr     vm_setvar
 p3_feed_nonf:
                 rts
+
+* ★★ p3_feed is now the host-scripted ENTRY to that routine and nothing else. Kept as a name
+* because p3_run_vm's `jsr p3_feed` reads as what it is -- the scripted stand-in -- and the typed
+* path enters the same routine from txt_parse [see the vector install at init].
+p3_feed         equ     p3_parse_line
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★ p3_poll_key -- one key per cycle into the command line [cycle.cpp:350-351].
+* ★★★★★ GUARDED ON promptIsEnabled, WHICH IS THE ORACLE'S OWN GUARD AND IS NOT A SHORTCUT. With
+* the prompt disabled a keystroke must not reach the editor at all -- not merely go unechoed --
+* because txt_pkey's ENTER arm parses, and a parse while the game has called prevent.input would
+* set ENTERED_CLI for a line the game refused to accept.
+* ★★★ P3_KEY publishes what was seen, so the host can assert that a posted key ARRIVED rather than
+* inferring it from the screen. Without it a dead matrix and a dead editor look identical [§2W.3].
+* ★★ VM_VAR_KEY is NOT written here. cycle.cpp does set var 19, but the opcodes that read it are
+* not wired and writing it would be a side effect with no reader -- the shape mmu_phase.s's
+* phase_vm note refuses for the same reason.
+* ★★★ GUARDED, AND THE FIRST DRAFT GUARDED ONLY THE CALL. The cel configuration links neither
+* text.s nor the keyboard HAL, so an unguarded body here is three undefined symbols -- and lwasm
+* then reported the CP_CEL collision guard as well, from a pass that had already failed. **The
+* second error named a region that was fine** (P3_CODE_END $52F8 against CP_CEL $5300, eight bytes
+* spare, exactly as always), which is how a cascade sends the reading to the wrong place.
+                ifdef   TEXT_PROMPT
+* ★★★★ THE LATCH IS ONE BYTE DEEP AND IT DOES NOT OVERWRITE. A second key arriving before the
+* cycle consumes the first is DROPPED rather than replacing it, which is the same thing a
+* one-character queue does and is what keeps the order right: replacing would deliver the second
+* character and lose the first, so a fast "lo" would read as "o".
+* ★★★ It scans only while the prompt is enabled, so a disabled command line costs nothing and a
+* stray key cannot sit latched across an accept.input.
+p3_keybuf       fcb     0
+p3_key_latch:
+                lda     txt_penab
+                beq     pkl_out
+                lda     p3_keybuf
+                bne     pkl_out                 ; one deep: do not overwrite an unread key
+                jsr     HAL_key_scan
+                tsta
+                beq     pkl_out
+                sta     p3_keybuf
+pkl_out:        rts
+
+* ★★ p3_poll_key takes the latched key first and falls back to a live scan, so a key held across
+* the cycle boundary is still seen on a build where the park loop did not run (the first cycle).
+p3_poll_key:
+                lda     txt_penab
+                beq     ppk_out
+                lda     p3_keybuf
+                beq     ppk_scan
+                clr     p3_keybuf
+                bra     ppk_have
+ppk_scan:
+                jsr     HAL_key_scan
+                tsta
+                beq     ppk_out
+ppk_have:
+                sta     P3_KEY
+                inc     P3_NKEY
+                jmp     txt_pkey
+ppk_out:        rts
+                endc
 
 * ── p3_room_check — fetch and render the room's PICTURE when the room changes ────
 * ★★★ THE FETCH RUNS IN THE VM PHASE AND THE RENDER IN THE DRAW PHASE, and they cannot be
@@ -1443,6 +1632,15 @@ P3_TABLES_END   equ     *
                 include "src/hal/coco3-dsk/time.s"
                 include "src/hal/coco3-dsk/irq_vbl.s"
                 include "src/hal/coco3-dsk/gfx.s"
+* ★★★★★ input.s ARRIVES WITH THE KEYBOARD AND NOT BEFORE [T-P0-092]. hal_globals.s defines
+* HAL_key_scan under -DHAL_KEYBOARD; **HAL_input_init lives in input.s and this probe never
+* included it**, so the PIA precondition HAL_key_scan documents has never been asserted here.
+* ★★★ SHARED and included READ-ONLY, exactly as input_probe.s includes it and for the same one
+* routine [§2M: the mechanism is reused, nothing in it is changed].
+* ★★ Guarded, so every build that does not ask for the keyboard is byte-identical.
+                ifdef   HAL_KEYBOARD
+                include "src/hal/coco3-dsk/input.s"
+                endc
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★ THE MEASUREMENT THAT DECIDES WHETHER THE MAP SURVIVES INTEGRATION.
@@ -1520,8 +1718,12 @@ P3_CODE_END     equ     *
                 ifgt    CP_CTRLSTEP+4-P3_FEED
                 error   "P3_FEED overlaps the compositing counters -- the status block is full up to CP_CTRLSTEP+4"
                 endc
-                ifgt    P3_VOCAB_BAD+2-(MAP_STATUS+224)
+                ifgt    P3_NKEY+1-(MAP_STATUS+224)
                 error   "the status block overruns its 224 bytes into the seed stack"
+                endc
+* ★ And the new pair against the old highest offset, so neither can be moved onto the other.
+                ifgt    P3_VOCAB_BAD+2-P3_KEY
+                error   "P3_KEY overlaps P3_VOCAB_BAD's two bytes"
                 endc
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════
