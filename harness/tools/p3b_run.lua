@@ -358,8 +358,24 @@ local function decb_ready()
     return ok_streak >= 3
 end
 
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+-- ★★★★★ THE STACK LOW-WATER MARK [Jay: "that can lead to stack corruption and the PC jumping
+-- into lala land"]. A 6809 IRQ stacks 12 bytes of machine state on S, on top of whatever depth
+-- the VM's own recursion has reached. MAP_HWSTACK is $0800 and the seed stack ends at $0500, so
+-- there are 768 bytes and the question is how much of it the deepest path already uses.
+-- ★★★★ Sampled from the HOST, every frame, so it costs the guest nothing and cannot itself
+-- perturb what it measures -- which matters more than usual here, because the thing being
+-- measured is whether adding 12 bytes is safe [§2W.3].
+-- ★★★ It is a low-water mark and not a spot reading: S at the end of a run is S in the handshake
+-- loop, which is the shallowest point there is and would report a reassuring number forever.
+local s_low, s_low_frame = 0xFFFF, 0
 _G._n = emu.add_machine_frame_notifier(function()
     frame = frame + 1
+    if state ~= "load" then
+        local s = cpu.state["S"].value
+        -- ★★ Ignore the pre-handover value: DECB's stack is elsewhere and would peg the mark.
+        if s > 0x0400 and s < s_low then s_low, s_low_frame = s, frame end
+    end
     if state == "load" and not _G._p3b_ok then
         if decb_ready() then
             -- ★★★★ HOLD THE PROMPT, THEN BLANK, THEN TAKE OVER [Jay's ruling, T-P0-060].
@@ -511,6 +527,23 @@ _G._n = emu.add_machine_frame_notifier(function()
             w("★★★ STUCK in cycle %d after %d frames (%.1f emulated s) -- most-visited PCs:",
               n, STALL_FRAMES, STALL_FRAMES / 60.0)
             for i = 1, math.min(6, #l) do w("     $%04X  x%d", l[i][1], l[i][2]) end
+            -- ★★★★★ THE INTERRUPT VECTOR CHAIN, READ FROM THE MACHINE [after the IRQ crash].
+            -- On the CoCo3 an IRQ fetches its vector from $FFF8/$FFF9, which lands in ROM; the ROM
+            -- stub then does JMP [$010C], and HAL_time_init patches $010C with a JMP to our
+            -- handler. **In SAM all-RAM mode ($FFDF) that stub may not be there any more**, and
+            -- then the CPU jumps into whatever RAM holds -- which is the S=$F41C, PC=$D7F5 crash.
+            -- ★★★ Printed rather than reasoned about: this is three reads and it names which link
+            -- of the chain is broken, where an argument about GIME modes would not.
+            do
+                local v = prog:read_u8(0xFFF8) * 256 + prog:read_u8(0xFFF9)
+                local b = {}
+                for i = 0, 4 do b[#b+1] = string.format("%02X", prog:read_u8(v + i)) end
+                local c = {}
+                for i = 0, 2 do c[#c+1] = string.format("%02X", prog:read_u8(0x010C + i)) end
+                w("     IRQ vector $FFF8 -> $%04X; bytes there: %s", v, table.concat(b, " "))
+                w("     $010C dispatch slot: %s  (expect 7E + handler address)",
+                  table.concat(c, " "))
+            end
             if _G._stall0 then
                 local f1 = SYM.hal_frame_hi and rd16(SYM.hal_frame_hi) or -1
                 local v1 = SYM.vm_vms and rd32(SYM.vm_vms) or -1
@@ -706,6 +739,18 @@ _G._n = emu.add_machine_frame_notifier(function()
             -- ★★★ tx_wt_key distinguishes ESC from ENTER-or-timer. It is the port's
             -- _messageBoxCancelled and **nothing consumes it yet** [T-P0-085 §7.3]; it is read here
             -- so AC-7 is a measurement rather than an eye-only claim.
+            -- ★★★★ THE STACK, AND WHETHER THE IRQ'S 12 BYTES FIT. $0800 base, $0500 floor.
+            w("    stack low-water S=$%04X at frame %d -- %d bytes used of 768, %d free"
+              .. " (an IRQ frame is 12) %s",
+              s_low, s_low_frame, 0x0800 - s_low, s_low - 0x0500,
+              s_low <= 0x0500 and "★★★ COLLIDED WITH THE SEED STACK"
+                or (s_low - 0x0500 < 64 and "★★★ UNDER 64 BYTES -- too close" or "★ safe"))
+            if SYM.hal_frame_hi then
+                local f = rd16(SYM.hal_frame_hi)
+                w("    hal_frame=%d -- %s", f,
+                  f > 0 and "★ the VBL IRQ IS LIVE (P6.31 measured this frozen at 0)"
+                        or "★★★ FROZEN: no VBL interrupt is being taken")
+            end
             if SYM.vm_vms then
                 w("    game clock: vm_vms=%d, largest per-cycle delta %d ticks at cycle %d"
                   .. " (%.2f s at 16.667 ms/tick)",

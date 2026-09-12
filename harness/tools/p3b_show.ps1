@@ -34,6 +34,7 @@ param(
   [switch]$DecodeFault,
   [switch]$NoTick,
   [switch]$Diag,
+  [switch]$Irq,
   [double]$Hold   = 3.0
 )
 $ErrorActionPreference = "Stop"
@@ -80,6 +81,13 @@ if ($NoTick) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DTEXT_FAULT_NOTICK"
 # auditing arithmetic that is identical either way. Records live in MAP_INPUT's tail, not the code
 # region. ★★ Diagnostic only -- not in the clean build, not in any gate row.
 if ($Diag) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DTX_MSGDIAG") }
+# ★★★★★ -Irq TURNS THE VBL INTERRUPT ON [Jay's ruling, after P6.31]. print's wait loop paces off
+# hal_frame, which no probe had ever advanced because nothing installed the $010C vector. It is
+# OPT-IN and the text arms only: `p3b` is purpose=timing and an interrupt every 16.667 ms would
+# move every figure in that row, so the cel build must stay byte-identical at 58AD3C27.
+# ★★★ It is a separate switch rather than being folded into -Text precisely so the wait loop can
+# be run in BOTH directions -- IRQs off is the measured hang, IRQs on is the fix [§2W].
+if ($Irq) { $FLAGS += @("-DP3B_IRQ") }
 & $LW --format=raw --output=build/p3b_probe_pk_fresh.bin --map=build/p3b_probe_pk.map -I. @FLAGS src/harness/p3b_probe.s
 if ($LASTEXITCODE -ne 0) { throw "p3b assemble failed" }
 "p3b_probe: $((Get-Item build\p3b_probe_pk_fresh.bin).Length) bytes"

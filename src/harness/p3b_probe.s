@@ -414,6 +414,47 @@ p3_cal:         leax    -1,x
                 bne     p3_cal
                 lda     #12
                 sta     P3_PHASE
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ TURN THE VBL INTERRUPT ON -- HERE, AND NOWHERE EARLIER [Jay's ruling, after P6.31].
+* P6.31 measured hal_frame frozen at 0 for the life of every run: irq_vbl.s supplies the handler
+* and NOTHING had ever installed it, so print's wait loop could not see a tick and var 21 could
+* never expire. This is the two instructions that fix that, and they are POP's [loader.s:119-120],
+* not invented here -- §2L: "vector installation is sys.s and time.s, both SHARED, both already
+* solved. Do not re-derive them."
+*
+* ★★★★★ THE PLACEMENT IS THE WHOLE SAFETY ARGUMENT. Four things had to be true:
+*   1. AFTER THE CLOCK CALIBRATION, which is the two instructions above. p3_cal times a known
+*      160,009 CPU cycles to DERIVE the machine clock; an IRQ landing inside it adds cycles the
+*      calibration cannot see, so CLOCK would read low and the run would report "SLOW CLOCK --
+*      missing -DHAL_SYS_FAST_CLOCK" about a build that has it. **Enabling one instruction earlier
+*      corrupts a measurement rather than crashing, which is the worse failure.**
+*   2. AFTER HAL_sys_init and the graphics init. gfx.s already writes $FF90=$6C with IEN=1 (its
+*      "IEN PRESERVATION NOTE"), so whichever of the two runs last, IEN survives. That ordering
+*      hazard is already solved in the shared HAL and is not ours to re-solve.
+*   3. HAL_time_init PATCHES $010C BEFORE ANY SOURCE IS ENABLED, and enables GIME sources while
+*      IEN=0 (time.s steps 2-4). So no interrupt can be taken against an unpatched vector -- which
+*      is the "PC into lala land" case, and the HAL already closes it.
+*   4. CC.I STAYS SET UNTIL THIS andcc. HAL_time_init deliberately does not clear it (time.s step
+*      5, the E1.c invariant), so the CPU cannot take an interrupt until this exact instruction.
+*
+* ★★★★ THE HANDLER IS ALWAYS MAPPED, which is the other half of "PC into lala land". It assembles
+* into MAP_CODE ($2000-$5FFF) = MMU slots 1-2, and mmu_phase.s's contract is that slots 0-4 and 7
+* are set once at init and never touched; the phase machinery owns 5-6 and the text blit borrows 4.
+* $010C, the stack and hal_frame's DP bytes ($10/$11) are all in slot 0. **Nothing the handler
+* touches can be paged out under it.**
+*
+* ★★★ THE STACK COST IS 12 BYTES, ONCE. A 6809 IRQ stacks the full machine state and the handler
+* RTIs without re-enabling, so frames never nest. MAP_HWSTACK is $0800 and the seed stack ends at
+* $0500; the harness now samples S every frame and reports the low-water mark, because "it should
+* fit" is not a measurement [Jay's warning; §2W].
+*
+* ★★ OPT-IN, SO `p3b` IS UNTOUCHED. The cel configuration is purpose=timing and an interrupt every
+* 16.667 ms would move every figure in that row. -DP3B_IRQ is added to the text arms only, and
+* `p3b` stays byte-identical at 58AD3C27.
+                ifdef   P3B_IRQ
+                jsr     HAL_time_init           ; $010C <- hal_vbl_handler; VBORD on; IEN on
+                andcc   #$EF                    ; opt in -- CC.I clear, IRQs live from here
+                endc
 p3_loop:
                 clr     P3_GO
 p3_wait:        lda     P3_GO
