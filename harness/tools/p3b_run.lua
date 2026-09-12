@@ -597,6 +597,44 @@ _G._n = emu.add_machine_frame_notifier(function()
                 w("     $010C dispatch slot: %s  (expect 7E + handler address)",
                   table.concat(c, " "))
             end
+            -- ═══════════════════════════════════════════════════════════════════════════════
+            -- ★★★★★ §4A's ONE READ: IS THE SOURCE CONTAMINATED? [T-P0-088]
+            -- p3_restore_box copies SHADOW -> VISIBLE. If box pixels reached the SHADOW plane,
+            -- the restore is innocent and is faithfully re-rendering them. This samples the
+            -- shadow WHILE THE BOX IS STILL UP -- the watchdog fires with var 21 unarmed, so the
+            -- guest is parked in the wait loop and txt_close has not run.
+            -- ★★★★ $44 is the discriminator and nothing else is: it is the box's line colour and
+            -- the one value a picture cannot supply [P6.32 §7.4, where a difference count was
+            -- confounded by the compositor and then by white-on-white].
+            -- ★★★ The two clean rows are controls. A read that only looks at rows already known
+            -- to be bad cannot tell contamination from coincidence.
+            if SYM.txt_bgx then
+                local function rd16s(a)
+                    local v = rd16(a); if v >= 0x8000 then v = v - 0x10000 end; return v
+                end
+                local bx = rd16s(SYM.txt_bgx)
+                local by = rd16s(SYM.txt_bgy) + (SYM.txb_yoff and rd16s(SYM.txb_yoff) or 0)
+                local bw = rd16(SYM.txt_bgw)
+                w("     ── §4A: the SHADOW plane, box still up (rect x=%d y=%d w=%d) ──",
+                  bx, by, bw)
+                w("     %-6s %8s %8s   %s", "row", "shadow", "visible", "verdict")
+                for _, dr in ipairs({0, 5, 8, 13, 16, 2, 9}) do
+                    local r = by + dr
+                    local sred, vred = 0, 0
+                    for c = math.max(0, bx), bx + bw - 1 do
+                        local off = r * 160 + c
+                        if off >= 0 and off < 26880 then
+                            local sl, wi = off >> 13, off & 0x1FFF
+                            prog:write_u8(0xFFA6, 2 + sl)          -- P3_BLK_SHADOW
+                            if prog:read_u8(0xC000 + wi) == 0x44 then sred = sred + 1 end
+                            prog:write_u8(0xFFA6, 40 + sl)         -- P3_BLK_VISIBLE
+                            if prog:read_u8(0xC000 + wi) == 0x44 then vred = vred + 1 end
+                        end
+                    end
+                    w("     %-6d %8d %8d   %s", r, sred, vred,
+                      (dr == 2 or dr == 9) and "(control -- a clean row)" or "(residue row)")
+                end
+            end
             if _G._stall0 then
                 local f1 = SYM.hal_frame_hi and rd16(SYM.hal_frame_hi) or -1
                 local v1 = SYM.vm_vms and rd32(SYM.vm_vms) or -1
@@ -953,6 +991,27 @@ _G._n = emu.add_machine_frame_notifier(function()
                     rowtxt[#rowtxt+1] = string.format("r%d:%d%s", r, n, straddle)
                 end
                 w("       per row: %s", table.concat(rowtxt, "  "))
+                -- ★★★★★ §4B(ii): WHAT THE COPY ACTUALLY DID, recorded by the guest per iteration.
+                -- §4A ruled out source contamination, so the question is which of row, within or
+                -- n is wrong -- and the host can recompute the arithmetic but cannot see what the
+                -- routine executed. `want` is this side's independent computation of `within`;
+                -- a mismatch names the arithmetic, a match moves the suspicion to the copy.
+                if SYM.P3_RBTRACE and SYM.p3rb_tn then
+                    local n = prog:read_u8(SYM.p3rb_tn)
+                    w("       p3_restore_box trace, %d row(s) recorded:", n)
+                    local t = {}
+                    for i = 0, math.min(n, 24) - 1 do
+                        local a = SYM.P3_RBTRACE + i * 4
+                        local row = prog:read_u8(a)
+                        local within = rd16(a + 1)
+                        local cnt = prog:read_u8(a + 3)
+                        local off = row * 160 + bx
+                        local want = off & 0x1FFF
+                        t[#t+1] = string.format("r%d:w%d/n%d%s", row, within, cnt,
+                                                want ~= within and (" WANT" .. want) or "")
+                    end
+                    w("       %s", table.concat(t, "  "))
+                end
                 -- ★★★★★ COUNT THE RED, because the difference count UNDERCOUNTS and I read it as
                 -- if it did not. The box background is $FF and this room's picture is largely $FF
                 -- too, so an unrestored background byte MATCHES the shadow and scores zero. **The

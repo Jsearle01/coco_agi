@@ -944,6 +944,15 @@ p3_blk_vis      fcb     P3_BLK_VISIBLE  ; the harness display reads this; it nev
 * ★ 160 x 168, one byte per pixel. Declared here rather than forward-referencing P3B_PRI_BYTES,
 *   which is defined 550 lines below this and only for the budget asserts.
 P3RB_PLANE      equ     26880
+* ★★★★★ §4B(ii)'s PER-ROW TRACE. §4A ruled out source contamination -- the shadow is clean on all
+* seven sampled rows -- so the copy is not landing, and the question is which of row, offset,
+* within, n or the straddle is wrong. **Recorded by the guest at the moment it acts**, because the
+* host can recompute the arithmetic but cannot see what the routine actually did.
+* ★★★ 4 bytes per row x 24 rows into MAP_INPUT's tail, the same region the tx_msgptr differential
+* used. Free here: P3_TXDIAG only exists under -DTX_MSGDIAG and this build has it off.
+P3_RBTRACE      equ     MAP_INPUT+576   ; row, within(2), n -- one 4-byte record per iteration
+P3_RBTRACE_MAX  equ     24
+p3rb_tn         fcb     0               ; records written
 p3rb_row        fdb     0
 p3rb_rend       fdb     0
 p3rb_x          fdb     0
@@ -971,7 +980,7 @@ p3rb_yok:       std     p3rb_row
 p3rb_loop:
                 ldd     p3rb_row
                 cmpd    p3rb_rend
-                bhs     p3rb_done
+                lbhs    p3rb_done               ; ★ long: the trace pushed the target out of range
 * offset = row*160 + x   (row < 256 within the plane, so one MUL)
                 tfr     b,a
                 ldb     #160
@@ -1000,6 +1009,23 @@ p3rb_loop:
                 bhs     p3rb_copy
                 stb     p3rb_n                  ; short: the span straddles
 p3rb_copy:
+* ★★ Trace BEFORE the copy, so a row that copies zero bytes still leaves a record. A trace written
+* after the work cannot describe work that did not happen.
+                lda     p3rb_tn
+                cmpa    #P3_RBTRACE_MAX
+                bhs     p3rb_notrace
+                inc     p3rb_tn
+                ldb     #4
+                mul
+                ldx     #P3_RBTRACE
+                leax    d,x
+                lda     p3rb_row+1
+                sta     ,x
+                ldd     p3rb_within
+                std     1,x
+                lda     p3rb_n
+                sta     3,x
+p3rb_notrace:
                 jsr     p3rb_span
 * did it straddle?
                 lda     p3rb_w
@@ -1027,7 +1053,7 @@ p3rb_next:
                 ldd     p3rb_row
                 addd    #1
                 std     p3rb_row
-                bra     p3rb_loop
+                lbra    p3rb_loop
 p3rb_done:
 * ★ leave the mapping as p3_present does: ph_blk_fb on the visible plane, slot 5 back to priority
                 lda     #P3_BLK_VISIBLE
@@ -1056,14 +1082,25 @@ p3rb_map:
                 rts
 
 * p3rb_span: copy p3rb_n bytes at p3rb_within, shadow ($C000) -> visible ($A000).
+* ★★★★★ THE COUNT IS LOADED AFTER THE ADDRESSES, AND THE ORDER IS THE WHOLE DEFECT [T-P0-088].
+* The first version did `ldb p3rb_n` and then `ldd p3rb_within` -- and **`ldd` loads A AND B**, so
+* the loop count was silently replaced by the LOW BYTE OF THE OFFSET.
+* ★★★★ IT REPRODUCED AS A PERIOD-8 PATTERN AND THAT IS WHY: `within` grows by 160 per row, so its
+* low byte cycles $0B, $AB, $4B, $EB, $8B, $2B, $CB, $6B. Two of those are below the 74-byte row
+* width -- $0B = 11 and $2B = 43 -- so two rows in every eight copied short and the rest copied
+* enough (some far too much, overrunning into the next row). Rows 91, 96, 99, 104 and 107 are
+* exactly the ones whose low byte is 11 or 43.
+* ★★★ Every trace field was CORRECT -- row, within and n all matched an independent host
+* computation -- which is what made this invisible to the parameters and visible only in the
+* result. **The arithmetic was never wrong; a register was.**
 p3rb_span:
-                ldb     p3rb_n
-                beq     p3rbs_out
-                ldx     #FB_BASE
                 ldd     p3rb_within
+                ldx     #FB_BASE
                 leax    d,x
                 ldu     #PRI_BASE
                 leau    d,u
+                ldb     p3rb_n
+                beq     p3rbs_out
 p3rbs_b:        lda     ,x+
                 sta     ,u+
                 decb
