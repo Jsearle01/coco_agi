@@ -282,4 +282,5 @@ None.
 - `seeds/AGI/live/2026-09-12-a-census-entry-asserting-a-mechanism-is-live-must-name-who-runs-it.md`
 
 ### 11 — Commit
-`<filled at commit>`  (pushed to origin/wip before this report)
+`e2f4379` — the diagnostic and this report (pushed to origin/wip before reporting).
+Pool: `methodology-candidate-pool` `4b23982`, two rows under `seeds/AGI/live/`.
