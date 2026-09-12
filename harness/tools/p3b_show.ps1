@@ -132,7 +132,11 @@ New-Item -ItemType Directory -Force build\p3b | Out-Null
 $WANT = @("res_volbase","res_slicebase","res_curblk","vm_quit","vm_badop","vm_cycle","vm_tdelay",
           "res_err","ph_blk_fb","ph_blk_pri","par_vocab","P3_INBUF","P3_FEED","P3_VOCAB_BAD","P3_VOCAB","P3_VOCAB_END","P3_CODE_END","P3_PARSER_BASE","P3_PARSER_TOTAL",
           "par_egon","par_ego","par_notfound","par_cli",
-          "vm_badlogic","res_depth","hal_frame_hi")
+          "vm_badlogic","res_depth","hal_frame_hi",
+          # ★★★ vm_curlogic NAMES THE LOGIC THAT WAS INTERPRETING when a room changed [T-P0-094].
+          # It exists in every build and was in vm_run.ps1's list and not this one, so p3b's room
+          # trajectory could say WHEN and never WHICH.
+          "vm_curlogic")
 # ★★★ MAP_FONT only exists in the text configuration, and vm_symbols.py fails on a missing name,
 # so it is appended rather than added to the list every build shares.
 # ★★★★ ph_blk_vocab / ph_blk_slot5 EXIST ONLY WHERE -DPHASE_VOCAB DOES, which p3b_probe.s defines

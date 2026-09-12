@@ -317,6 +317,37 @@ local function stage()
         -- machine into the ground -- the run ended at cycle 8 with no tap output at all, which
         -- reads as "nothing wrote it" and is the most misleading answer available. A tap fires
         -- on the store, so it must be cheap: append to a table, print it later.
+        -- ═══════════════════════════════════════════════════════════════════════════════
+        -- ★★★★★ WATCH res_err, BECAUSE SIX TASKS HAVE LOGGED `err 1` AND NONE HAS NAMED IT
+        -- [T-P0-094 §4D]. RES_E_EMPTY is "the DIR slot is FF FF FF" [res_core.s:182] and the probe
+        -- reports only the byte, at the END of the run -- so the resource, the cycle and the call
+        -- site have never been in any log.
+        -- ★★★★ A WRITE TAP NAMES THE PC, which names the call site, and the cycle and the room at
+        -- that instant give the request its context. **res_open takes the type and index in A and
+        -- B and publishes neither**, so without a guest change (out of scope here, §1.3) the PC
+        -- plus the room is what is recoverable -- and it is enough to say WHICH fetch.
+        -- ★★ Cheap, as taps must be: append to a table, print later. Writing to the log from
+        -- inside a tap ran the machine into the ground once already [the par_vocab tap's note].
+        -- ═══════════════════════════════════════════════════════════════════════════════
+        -- ═══════════════════════════════════════════════════════════════════════════════
+        -- ★★★★★ A WRITE TAP ON VAR 0 WAS TRIED AND ABANDONED [T-P0-094]. It would have named the
+        -- PC that stores the room, which is the strongest form of the answer. **MAME's write tap
+        -- covers the containing region, not the byte**, and $0800 is the VM state block -- written
+        -- on essentially every opcode -- so the run did not finish 400 cycles in ten minutes where
+        -- it normally takes forty seconds.
+        -- ★★★ What replaces it is vm_curlogic sampled at each ROOM TRANSITION: it names the LOGIC
+        -- that was executing, which is one level coarser than the PC and costs nothing. Recorded
+        -- so the next reader does not re-derive that a hot-byte tap is unaffordable here.
+        if SYM.res_err then
+            _G._re = {}
+            _G._retap = prog:install_write_tap(SYM.res_err, SYM.res_err, "reserr",
+                function(offset, data, mask)
+                    if (data % 256) ~= 0 and #_G._re < 16 then
+                        _G._re[#_G._re + 1] = { data % 256, cpu.state["PC"].value, n,
+                                                prog:read_u8(0x0800) }
+                    end
+                end)
+        end
         _G._pv = {}
         _G._pvtap = prog:install_write_tap(SYM.par_vocab, SYM.par_vocab + 1, "parvocab",
             function(offset, data, mask)
@@ -982,6 +1013,38 @@ _G._n = emu.add_machine_frame_notifier(function()
               prog:read_u8(SYM.res_err or 0))
             w("    final room %d, sprites %d, err %d, status=$%02X",
               prog:read_u8(ROOM), prog:read_u8(NSPR), prog:read_u8(ERR), prog:read_u8(STATUS))
+            -- ★★★ THE TRAJECTORY AND THE ERRORS, PRINTED TOGETHER so a room change and a failed
+            -- fetch on the same cycle are visible as one event rather than two lines apart.
+            -- ★★★★ ONCE. This whole block re-runs on every frame of the hold, and the log already
+            -- carries 49,877 copies of "final room" for that reason -- a fact this file warns about
+            -- in two other places and which my first version of these two lines tripled.
+            if not _G._traj_said then
+                _G._traj_said = true
+                if _G._rooms then
+                    local t = {}
+                    for _, e in ipairs(_G._rooms) do
+                        t[#t + 1] = string.format("c%d->%d[logic %d,flag5=%d]",
+                                                  e[1], e[2], e[3], e[4])
+                    end
+                    w("    rooms: %d transition(s)  %s", #_G._rooms, table.concat(t, "  "))
+                end
+                if _G._re and #_G._re > 0 then
+                    for _, e in ipairs(_G._re) do
+                        w("    res_err=%d written at PC $%04X, cycle %d, room %d",
+                          e[1], e[2], e[3], e[4])
+                    end
+                elseif _G._retap then
+                    w("    res_err: never written non-zero during the run")
+                else
+                    w("    res_err: NO TAP INSTALLED -- this run staged no vocabulary, so the "
+                      .. "watch in stage() never ran")
+                end
+                if _G._v0 then
+                    for _, e in ipairs(_G._v0) do
+                        w("    var0 <- %d  by PC $%04X at cycle %d", e[1], e[2], e[3])
+                    end
+                end
+            end
             -- ═══════════════════════════════════════════════════════════════════════════════
             -- ★★★★★ THE COMMAND LINE's VERDICT LINE [T-P0-092]. Printed on EVERY run that links
             -- the prompt, not only on typing runs, because "the prompt is enabled" and "nobody
@@ -1401,6 +1464,25 @@ _G._n = emu.add_machine_frame_notifier(function()
         -- n+1's body. **Both probes feed at the same seam or the eye gate and the byte gate are
         -- watching different programs.**
         -- ★ §2P: the CYCLE and the LENGTH are printed. The words are the game's.
+        -- ★★★★★ THE ROOM's TRAJECTORY, ONE SAMPLE PER PARK [T-P0-094 §4B(3)]. This cluster has had
+        -- two endpoints -- "final room 83" and "final room 1" -- for six tasks and never a
+        -- sequence, so "the game restarted" was an inference from where a run STOPPED. **A
+        -- transition list is the observation that inference was standing in for.**
+        -- ★★ Transitions only, not 400 samples: a room number repeated is not evidence, and this
+        -- file already guards against printing 900 copies of one fact.
+        -- ★★★ vm_curlogic IS SAMPLED WITH THE ROOM, not separately: it is the logic that was
+        -- interpreting when the change happened, and a transition without it is half an answer.
+        do
+            local room = prog:read_u8(VM_VARS + 0)
+            _G._rooms = _G._rooms or {}
+            local last = _G._rooms[#_G._rooms]
+            if not last or last[2] ~= room then
+                _G._rooms[#_G._rooms + 1] = { n, room,
+                    SYM.vm_curlogic and prog:read_u8(SYM.vm_curlogic) or -1,
+                    (prog:read_u8(VM_FLAGS + 0) & 0x20) ~= 0 and 1 or 0 }
+            end
+        end
+
         local feed = script[n + 1]
         if feed and words then
             if #feed >= INBUF_MAX then

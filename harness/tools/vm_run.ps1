@@ -165,10 +165,33 @@ foreach ($t in $TITLES) {
   Remove-Item -Force -ErrorAction SilentlyContinue "$stage\input.txt", "$stage\words.tok"
   $stageArgs = @((Join-Path $GAMES $t), "--out", $stage, "--cycles", $CYCLES)
   $fed = $false
-  if ($env:VM_INPUT) {
+  # ★★★★ VM_INPUT_FILE REPLAYS A SPECIFIC SCRIPT RATHER THAN GENERATING ONE [T-P0-094]. The eye
+  # gate's script comes from `vm_input_script.py --eye --max-lines 3` and is NOT what this runner
+  # generates, so "the VM gate ran with input" and "the VM gate ran the eye gate's input" are
+  # different statements. **A divergence that only one script provokes needs that script**, and
+  # regenerating would have quietly tested a different scenario [§2O.1: one producer].
+  if ($env:VM_INPUT_FILE) {
+    $stageArgs += @("--input", $env:VM_INPUT_FILE); $fed = $true
+    "★ input script: $($env:VM_INPUT_FILE) (replayed, not generated)"
+  }
+  elseif ($env:VM_INPUT) {
     python harness\tools\vm_input_script.py (Join-Path $GAMES $t) --out "$stage\input.gen.txt" --cycles $CYCLES
     if ($LASTEXITCODE -ne 0) { "★★★ $t : no verified input lines -- running WITHOUT input"; }
     else { $stageArgs += @("--input", "$stage\input.gen.txt"); $fed = $true }
+  }
+  # ═══════════════════════════════════════════════════════════════════════════════════════
+  # ★★★★★ VM_ROOM PASSES THROUGH TO **BOTH** LEGS [T-P0-094]. vm_stage.py has had --room since
+  # P6.36 and vm_sweep.lua has read VM_ROOM since P5.3, and **this runner connected neither** --
+  # so the nine-title gate has never once covered a forced room jump, and a divergence that only
+  # appears under one was outside every gated scenario [§1.1; the same shape as P6.36 §4E, where
+  # the parser was linked and gated by nothing].
+  # ★★★★ ONE ENVIRONMENT VARIABLE FEEDS BOTH SIDES, which is the rule the input script already
+  # follows: if the reference staged for no jump and the guest jumped, the diff would report a
+  # divergence at the jump cycle that means nothing [§2O.1 applied to the SCENARIO].
+  # ★★★ Absent by default, so the gate's nine titles are unchanged and this row still measures
+  # exactly what it measured before.
+  if ($env:VM_ROOM) {
+    $stageArgs += @("--room", $env:VM_ROOM, "--room-at", $(if ($env:VM_ROOM_AT) { $env:VM_ROOM_AT } else { "40" }))
   }
   python harness\tools\vm_stage.py @stageArgs | Out-Null
   if ($LASTEXITCODE -ne 0) { "★★★ $t : staging did not fit"; continue }
