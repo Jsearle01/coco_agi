@@ -390,6 +390,25 @@ _G._n = emu.add_machine_frame_notifier(function()
                 return
             end
             if frame - _G._p3b_okframe < OK_HOLD then return end
+            -- ★★★★★ THE VECTOR CHAIN **BEFORE WE TOUCH ANYTHING** [after the IRQ crash].
+            -- The crash dump showed $FFF8 -> $FEF7 holding non-JMP bytes and $010C zeroed, but
+            -- that was read from an already-remapped, already-crashed machine. This samples the
+            -- same three things at the DECB prompt, before takeover, and separates the two
+            -- explanations that dump cannot: either the CoCo3 never had a stub at $FEF7 and the
+            -- $010C route is not how interrupts reach a handler here, or DECB HAD one and our own
+            -- MMU remap paged it away. ★★★ Those need opposite fixes, so guessing is expensive.
+            do
+                local v = prog:read_u8(0xFFF8) * 256 + prog:read_u8(0xFFF9)
+                local b, c = {}, {}
+                for i = 0, 4 do b[#b+1] = string.format("%02X", prog:read_u8(v + i)) end
+                for i = 0, 2 do c[#c+1] = string.format("%02X", prog:read_u8(0x010C + i)) end
+                w("AT THE DECB PROMPT: IRQ vector $FFF8 -> $%04X, bytes there %s  [$%02X = %s]",
+                  v, table.concat(b, " "), prog:read_u8(v),
+                  prog:read_u8(v) == 0x7E and "JMP -- a stub IS here"
+                    or (prog:read_u8(v) == 0x6E and "JMP indirect -- a stub IS here"
+                        or "NOT a jump"))
+                w("AT THE DECB PROMPT: $010C = %s", table.concat(c, " "))
+            end
             _G._p3b_ok = true
             -- ★ p3b_show.lua defines this; p3b_run.lua standalone is headless and defines none.
             if _G._p3b_blank then _G._p3b_blank() end
@@ -481,6 +500,20 @@ _G._n = emu.add_machine_frame_notifier(function()
     if state == "boot" then
         if prog:read_u8(GO) ~= 0 then return end
         w("guest at its gate (frame %d) -- all-RAM live, MMU up", frame)
+        -- ★★★★★ THE SAME THREE READS, AFTER THE PROBE HAS REMAPPED AND BEFORE ANY INTERRUPT.
+        -- At the DECB prompt the chain is $FFF8 -> $FEF7 (LBRA, wrapping to $010C) -> $010C
+        -- (JMP $D8AF). The crash dump showed both hops holding other bytes -- but a crash with
+        -- S=$F41C pushes wildly through high memory and could have destroyed $FEF7 ITSELF, so
+        -- that dump cannot say whether the remap broke the chain or the crash did.
+        -- ★★★ Read here, with IRQs still masked, the answer is unambiguous.
+        do
+            local v = prog:read_u8(0xFFF8) * 256 + prog:read_u8(0xFFF9)
+            local b, c = {}, {}
+            for i = 0, 4 do b[#b+1] = string.format("%02X", prog:read_u8(v + i)) end
+            for i = 0, 2 do c[#c+1] = string.format("%02X", prog:read_u8(0x010C + i)) end
+            w("AFTER TAKEOVER (IRQs still masked): $FFF8 -> $%04X, bytes %s; $010C = %s",
+              v, table.concat(b, " "), table.concat(c, " "))
+        end
         if not stage() then m:exit(); return end
         t0 = m.time:as_double(); tprev = t0
         state = "cycle"; return
@@ -554,8 +587,16 @@ _G._n = emu.add_machine_frame_notifier(function()
                   (f1 == _G._stall0.frame)
                     and "★★★ THE VBL COUNTER IS FROZEN -- the tick source never advances here, so"
                      .. " the wait loop can never see a tick and var 21 can never expire"
+                    -- ★★★ NAME BOTH READINGS, because this branch has two causes and the fault
+                    -- arm is one of them. "the tick edge is missed" was the only label here and
+                    -- it is wrong for -DTEXT_FAULT_NOTICK, where the edge is seen and the clock
+                    -- advance was deliberately removed. **A label that names the usual cause
+                    -- instead of the actual one is the defect this project keeps paying for**
+                    -- [§2W.3; said_gate.py printing the 6809 side as `oracle`].
                     or ((v1 == _G._stall0.vms)
-                        and "★★★ hal_frame moves but vm_vms does NOT -- the tick edge is missed"
+                        and "★★★ hal_frame ADVANCES and vm_vms does NOT -- the wait loop is not"
+                         .. " advancing the game clock. EXPECTED under -DTEXT_FAULT_NOTICK (that"
+                         .. " is the injected fault); otherwise the tick edge is being missed"
                         or "★ both clocks advance -- the deadline arithmetic is the suspect"))
                 if SYM.tx_wt_end then
                     w("     tx_wt_end=%d tx_wt_timed=%d (var21 as read at entry)",

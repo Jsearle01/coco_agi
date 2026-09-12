@@ -453,6 +453,26 @@ p3_cal:         leax    -1,x
 * `p3b` stays byte-identical at 58AD3C27.
                 ifdef   P3B_IRQ
                 jsr     HAL_time_init           ; $010C <- hal_vbl_handler; VBORD on; IEN on
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ AND RESTORE THE FIRST HOP, WHICH HAL_time_init DOES NOT KNOW ABOUT. **This is what the
+* first attempt was missing, and it crashed exactly as Jay predicted: S=$F41C, PC looping in
+* $D7F4-$D7F7, every downstream number garbage.**
+* ★★★★★ THE CHAIN IS TWO HOPS, MEASURED AT THE DECB PROMPT:
+*     $FFF8 -> $FEF7   holds `16 02 12` = LBRA, and $FEFA+$0212 wraps to $010C
+*     $010C            holds `7E D8 AF` = JMP into DECB's own handler
+*   HAL_time_init patches the SECOND hop only [time.s step 2], which is correct on a machine whose
+*   $FExx page is still the one the ROM set up.
+* ★★★★★ THIS PROBE'S MMU REMAP DESTROYS THE FIRST HOP. Read after takeover with IRQs still
+*   masked, $FEF7 holds `52 5D 5C 5F 5E` while $010C is still intact -- so it is the REMAP that
+*   breaks it, not the crash. Without this, the CPU vectors into whatever slot 7 now holds.
+* ★★★ A DIRECT JMP, not a rebuilt LBRA: one hop instead of two, and it cannot be wrong about a
+*   branch offset that has to wrap through $FFFF to be correct. $010C stays patched by the HAL and
+*   is simply no longer traversed -- harmless, and it keeps the shared contract untouched.
+* ★★ 3 bytes, inside the 16 reserved out of the vocabulary window (see P3_VOCAB_END).
+                lda     #$7E                    ; JMP
+                sta     $FEF7
+                ldx     #hal_vbl_handler
+                stx     $FEF8
                 andcc   #$EF                    ; opt in -- CC.I clear, IRQs live from here
                 endc
 p3_loop:
@@ -1203,7 +1223,20 @@ P3_PARSER_TOTAL equ     P3_CLNBUF+42-P3_PARSER_BASE
 * the whole VM phase -- is the ENGINE's answer and is recorded there [AC-6]. **This probe cannot
 * use it**: slot 5 is p3b's PRIORITY slice, live in every draw phase.
 P3_VOCAB        equ     P3_CLNBUF+42
+* ★★★★★ WITH INTERRUPTS ON, THE TOP OF THIS WINDOW IS NOT OURS EITHER [after the IRQ crash].
+* The CoCo3 redirects the 6809 vectors into the $FExx page as 3-byte stubs -- $FFF8 reads $FEF7,
+* which at the DECB prompt holds `16 02 12` = LBRA wrapping to $010C. **Measured, not assumed.**
+* ★★★★ The dictionary is staged from P3_VOCAB upward and the harness only refuses when it exceeds
+* the window, so a title with a big enough WORDS.TOK would write over the IRQ stub. That failure
+* would be title-dependent and intermittent -- the worst kind -- so the window is shortened rather
+* than left to luck. 16 bytes reserved; the assert below still has 138 bytes of slack.
+* ★★★ CONDITIONAL, so `p3b` and `p3b_text` do not move: P3_VOCAB_END is compared in emitted code
+* (the window self-test above), so changing it unconditionally would change every binary.
+                ifdef   P3B_IRQ
+P3_VOCAB_END    equ     $FEF0           ; ★ $FEF0-$FF00 = the vector redirect stubs
+                else
 P3_VOCAB_END    equ     $FF00           ; ★ $FF00-$FFFF is the I/O page and is not ours
+                endc
                 ifgt    6828-(P3_VOCAB_END-P3_VOCAB)
                 error   "the vocabulary window is smaller than the largest corpus WORDS.TOK (6,828 B)"
                 endc
