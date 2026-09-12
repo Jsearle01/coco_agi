@@ -1102,6 +1102,7 @@ txf_out:        rts
 * left before the font, and the assert at p3b_probe.s:1275 caught that rather than letting the
 * code silently overwrite glyphs. The table costs 15 bytes and the loop 35.
 txb_n           fcb     0
+txb_yoff        fdb     0               ; txt_rowmin * TXT_VH, added when the box is DRAWN
 txb_tab         fcb     0,0,0,0,TXF_BG          ; dx, dy, dw, dh, colour
                 fcb     1,1,-2,-2,TXF_LINE
                 fcb     2,2,-4,-4,TXF_BG
@@ -1109,6 +1110,22 @@ txb_tab         fcb     0,0,0,0,TXF_BG          ; dx, dy, dw, dh, colour
 tx_drawbox:
                 tst     txt_noblit
                 bne     txf_out
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE WINDOW OFFSET IS ADDED AT DRAW TIME, NOT STORED. txt_bgy is srow*8-5 and the GLYPHS
+* go at txt_trow = txt_srow + txt_rowmin -- so the box and the text are in different spaces, and
+* without this the box lands txt_rowmin*8 = 16 pixels ABOVE the text it is supposed to contain.
+* Jay, on the eye gate: "i see the box with the same text underneath it."
+* ★★★★ THE ORACLE DOES EXACTLY THIS AND AT EXACTLY THIS POINT: backgroundPos_y is stored in
+* game-screen coordinates [text.cpp:503] and drawBox adds the offset when it draws
+* [graphics.cpp:1089, `y = y + _renderStartDisplayOffsetY`]. **So the fix is to match the oracle's
+* split, not to change the stored value.**
+* ★★★ WHICH ALSO KEEPS THE GATE HONEST: txt_bgy is what text_probe compares, and it matches the
+* oracle on 4,594 rectangles. Folding the offset into it would have "fixed" the screen by breaking
+* the comparison -- the geometry was never wrong, only the space it was drawn in.
+                lda     txt_rowmin
+                ldb     #TXT_VH
+                mul
+                std     txb_yoff
                 ldu     #txb_tab
                 lda     #3
                 sta     txb_n
@@ -1122,6 +1139,7 @@ txb_loop:
                 ldb     ,u+
                 sex
                 addd    txt_bgy
+                addd    txb_yoff        ; ★ the window offset, applied at DRAW time
                 std     txf_y
                 ldb     ,u+
                 addb    txt_bgw+1

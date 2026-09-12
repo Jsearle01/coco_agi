@@ -405,8 +405,14 @@ tx_wt_end       fdb     0               ; vm_vms+2 value at which the box auto-c
 tx_wt_timed     fcb     0               ; non-zero = var 21 was set, so a deadline exists
 tx_wt_last      fcb     0               ; hal_frame_lo as last seen, for edge detection
 tx_wt_key       fcb     0
+tx_wt_nwait     fcb     0               ; times the blocking wait was ENTERED this run
 
 tx_wait_dismiss:
+* ★★★ HOW MANY TIMES THE BOX WAS PUT UP. Jay: "it also seems like my first enter press is being
+* eaten." Two explanations fit that and they need opposite fixes -- print running TWICE (so the
+* first ENTER dismissed a first box the eye read as the same one), or ONE box whose key scan
+* misses the first press. **A counter separates them; reasoning about it cannot** [§2W].
+                inc     tx_wt_nwait
                 clr     tx_wt_key
 * ── the deadline, if var 21 is non-zero ──
                 lda     #VM_VAR_WINDOW_AUTO_CLOSE_TIMER

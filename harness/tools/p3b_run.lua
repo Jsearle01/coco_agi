@@ -865,8 +865,10 @@ _G._n = emu.add_machine_frame_notifier(function()
                   JUMP_ROOM, tostring(jumped), tostring(jump_seen_clear), prog:read_u8(ROOM))
             end
             if SYM.tx_wt_key then
-                w("    var21 now %d (0 = a box was entered and left), tx_wt_key=%d (1 = ESC)",
-                  prog:read_u8(VAR_AUTOCLOSE), prog:read_u8(SYM.tx_wt_key))
+                w("    var21 now %d (0 = a box was entered and left), tx_wt_key=%d (1 = ESC),"
+                  .. " boxes waited on = %d",
+                  prog:read_u8(VAR_AUTOCLOSE), prog:read_u8(SYM.tx_wt_key),
+                  SYM.tx_wt_nwait and prog:read_u8(SYM.tx_wt_nwait) or -1)
             end
             -- ═══════════════════════════════════════════════════════════════════════════════
             -- ★★★★★ AC-3's OBSERVABLE, AS A PROPERTY RATHER THAN THE TEXT [§2P].

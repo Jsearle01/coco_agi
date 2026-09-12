@@ -116,7 +116,7 @@ if ($Text -or $Fault -or $DecodeFault -or $NoTick -or $Diag) { $WANT += @("P3_FO
 # assembled**. Asking for it in the -Fault arm fails the symbol extraction, which is why this is a
 # second line rather than three more names on the one above.
 # ★ vm_vms and vm_passed exist in every build; they are here because only these arms read them.
-if ($Text -or $DecodeFault -or $NoTick -or $Diag) { $WANT += @("vm_vms","vm_passed","tx_wt_key") }
+if ($Text -or $DecodeFault -or $NoTick -or $Diag) { $WANT += @("vm_vms","vm_passed","tx_wt_key","tx_wt_nwait") }
 # * P3_TXDIAG exists only in the -Diag build; vm_symbols.py fails on a missing name.
 if ($Diag) { $WANT += @("P3_TXDIAG","tx_diag_n1","tx_diag_n2") }
 # * tx_wt_* exist in every wired build; the stall dump reads them to separate the three shapes a
