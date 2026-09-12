@@ -34,7 +34,7 @@ param(
   [switch]$DecodeFault,
   [switch]$NoTick,
   [switch]$Diag,
-  [switch]$Irq,
+  [switch]$NoIrq,
   [double]$Hold   = 3.0
 )
 $ErrorActionPreference = "Stop"
@@ -57,8 +57,22 @@ $FLAGS = @("-DHAL_GFX_MODE_SERVICE","-DHAL_SYS_FAST_CLOCK","-DPLANE_WINDOWED","-
 # blocks until ENTER or ESC, so the text configuration needs HAL_key_scan -- ~318 B [P6.24] into
 # 624 of headroom. **It re-baselines p3b_text's binary and gates.manifest records that; `p3b` is
 # untouched and gains nothing.**
-if ($Text)  { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD") }
-if ($Fault) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DTEXT_MODELLED") }
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ -DP3B_IRQ IS NOW PART OF THE TEXT CONFIGURATION, NOT AN OPT-IN [Jay's ruling].
+# print's wait loop paces off hal_frame, and no probe had ever advanced it because the CoCo3's
+# vector chain has two hops and this probe's MMU remap destroys the first [a07895e]. Without
+# interrupts the loop cannot exit, so a text build without them cannot run the code it exists to
+# test. **It belongs in the configuration, not behind a switch nobody remembers to pass.**
+# ★★★★ EVERY TEXT ARM GETS IT, SO EACH FAULT ARM DIFFERS FROM THE CLEAN ARM BY EXACTLY ONE
+# VARIABLE. Adding it to -Text alone would have left -NoTick differing by two things, which is
+# L-73's ablation defect: an arm that moves two variables cannot exonerate either.
+# ★★★ -NoIrq still turns it off, so the loop remains runnable in BOTH directions -- IRQs off is
+# the measured hang [P6.31], IRQs on is the fix. §2W needs that to stay reachable.
+# ★★ `p3b` never gets it: that row is purpose=timing and an interrupt every 16.667 ms would move
+# every figure in it. The cel build stays byte-identical at 58AD3C27.
+$IRQ = if ($NoIrq) { @() } else { @("-DP3B_IRQ") }
+if ($Text)  { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD") + $IRQ }
+if ($Fault) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DTEXT_MODELLED") + $IRQ }
 # ★★★★★ -DecodeFault IS AC-4's ARM AND ITS CONSUMER IS NOW vm_run.s [T-P0-084h]. The decode moved
 # off res_open's miss path to the LOGIC bind, so the fault moved with it: -DRES_FAULT_DECODE_HIT
 # drops the `bcs vbl_nodec`, and the decode then runs on EVERY bind including cached ones.
@@ -67,7 +81,7 @@ if ($Fault) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DTEXT_MODELLED") }
 # ★★★ It exists so the fresh-open placement can be FALSIFIED rather than trusted, and it is RUN in
 # both directions: clean 16 of 16 printable (DECODED), fault NOT DECODED [§2W, L-62 -- re-shown on
 # the build that shipped].
-if ($DecodeFault) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DRES_FAULT_DECODE_HIT") }
+if ($DecodeFault) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DRES_FAULT_DECODE_HIT") + $IRQ }
 # ★★★★★ -NoTick IS AC-8's FAULT ARM AND IT IS ONE OMITTED `jsr vm_step_clock` [§2W.1]. print's wait
 # loop measures var 21 as a mark on the GAME clock, exactly as the oracle does [text.cpp:395-409,
 # cycle.cpp:558], so a loop that does not tick that clock can never reach the mark and the box hangs
@@ -75,19 +89,13 @@ if ($DecodeFault) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DRES_FAULT_DEC
 # headless run is evidence only once this arm has been seen to go red.
 # ★★★★ The arm is 3 bytes smaller than the clean build, which is the `jsr` and nothing else. A fault
 # arm that hung by some other route would prove the watchdog works and nothing about this loop.
-if ($NoTick) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DTEXT_FAULT_NOTICK") }
+if ($NoTick) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DTEXT_FAULT_NOTICK") + $IRQ }
 # ★★★★★ -Diag IS §4A's DIFFERENTIAL ARM [T-P0-087]. tx_msgptr is one routine with two callers;
 # display substitutes and print does not, so it records both callers' INPUTS in one run rather than
 # auditing arithmetic that is identical either way. Records live in MAP_INPUT's tail, not the code
 # region. ★★ Diagnostic only -- not in the clean build, not in any gate row.
-if ($Diag) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DTX_MSGDIAG") }
-# ★★★★★ -Irq TURNS THE VBL INTERRUPT ON [Jay's ruling, after P6.31]. print's wait loop paces off
-# hal_frame, which no probe had ever advanced because nothing installed the $010C vector. It is
-# OPT-IN and the text arms only: `p3b` is purpose=timing and an interrupt every 16.667 ms would
-# move every figure in that row, so the cel build must stay byte-identical at 58AD3C27.
-# ★★★ It is a separate switch rather than being folded into -Text precisely so the wait loop can
-# be run in BOTH directions -- IRQs off is the measured hang, IRQs on is the fix [§2W].
-if ($Irq) { $FLAGS += @("-DP3B_IRQ") }
+if ($Diag) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DTX_MSGDIAG") + $IRQ }
+
 & $LW --format=raw --output=build/p3b_probe_pk_fresh.bin --map=build/p3b_probe_pk.map -I. @FLAGS src/harness/p3b_probe.s
 if ($LASTEXITCODE -ne 0) { throw "p3b assemble failed" }
 "p3b_probe: $((Get-Item build\p3b_probe_pk_fresh.bin).Length) bytes"

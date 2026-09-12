@@ -135,25 +135,67 @@ p3b	src/harness/p3b_probe.s	build/p3b_probe_pk_fresh.bin	-DHAL_GFX_MODE_SERVICE 
 # 13,918 B, byte-identical, with P3_CODE_END still $52F8 and 8 bytes of spare against CP_CEL
 # $5300. The nine `equ vm_op_modelled` aliases emit no bytes, which is what keeps that true.
 # ═══════════════════════════════════════════════════════════════════════════════════════════
-# ★★★★★ WHAT THIS ROW CANNOT GATE, MEASURED AND STATED [T-P0-085c §7]. The blocking path is NOT
-# exercised by this gate, because **no title in the pinned set reaches print at all**:
+# ★★★★★ RE-BASELINED AGAIN AT T-P0-087+ (Jay: "do it"), AND THE FLAG SET GAINED -DP3B_IRQ.
+#     retired:  AF0B2A027A960DF4...  15,036 B   (valid P6.29c..P6.31)
+#     now:      9D2F925F03D21B2E...  15,052 B
+# ★★★★★ WHY: print's wait loop paces off hal_frame, and NO PROBE HAS EVER ADVANCED IT. The CoCo3
+# redirects the 6809 vectors into the $FExx page, so the chain is TWO hops -- $FFF8 -> $FEF7
+# (LBRA, wrapping to $010C) -> $010C (JMP handler) -- and HAL_time_init patches only the second.
+# This probe's MMU remap destroys the first, measured with IRQs still masked [a07895e]. So the
+# text configuration installs its own JMP at $FEF7 and reserves $FEF0-$FF00 out of the vocabulary
+# window. **Without interrupts this row cannot run the code it exists to test.**
+# ★★★★ EVERY TEXT ARM CARRIES -DP3B_IRQ, so each fault arm differs from the clean arm by exactly
+# one variable [L-73]. -NoIrq turns it off and is how the IRQs-off hang stays reproducible [§2W].
+# ★★★ `p3b` is UNTOUCHED and verified so: 58AD3C27..., 13,918 B, spare 8. That row is
+# purpose=timing and an interrupt every 16.667 ms would move every figure in it.
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ WHAT THIS ROW STILL CANNOT GATE -- CORRECTED, AND THE CORRECTION IS SMALLER THAN IT LOOKS
+# [was: "the wait loop is dead code under this corpus", T-P0-085c §7].
+# ★★★★ The wait loop is no longer dead: it runs, holds and auto-closes, and its fault arm goes red
+# [p3b_notick, below]. **But THIS ROW still does not reach it.** It runs Kingquest1 at room 83, and
+# no title in the pinned set executes print from its intro:
 #   - vm_opcov.py: $65/$66 in the NEVER-REACHED list for all nine titles at 600 cycles
 #   - print_first_cycle.py: nine titles, 3,000 cycles, no input -- print NEVER executes
 #   - vm_input_script.py --wants-print: six titles, every synthesisable said() line -- zero reach it
-# ★★★★ So a green run of this row says the wired opcodes and the decode still work; it says
-# NOTHING about the wait loop, which is dead code under this corpus. **Recorded here rather than
-# left for a reader to infer from a pass** [L-86: a sample that always passes is evidence about
-# the sample first]. AC-4..AC-8 and AC-11 are blocked on this and are reported unmet.
+# ★★★★★ REACHING IT NEEDS A ROOM JUMP, WHICH IS A DIFFERENT ROW, NOT A FLAG: SpaceQuest-2 room 101
+# with P3B_ROOM/P3B_SETVAR/P3B_VAR21 [p3b_box, below]. **A green run of THIS row says the wired
+# opcodes, the decode and the text engine still work, and says nothing about the blocking window.**
+# ★★★ Kept as a separate statement rather than folded away, because the flag changing and the
+# coverage changing are different facts and only one of them happened here [L-86].
 # ★★★ Room 83 stages ZERO sprites, so nothing is lost by stripping the compositing path HERE --
 # and that is scoped to this row, not a claim about the engine.
 # ★★ purpose=correctness: this row is gated on health and on what a person sees, not on a clock.
 # **No timing figure may be quoted from it** -- the row above is the timing build.
-p3b_text	src/harness/p3b_probe.s	build/p3b_probe_text.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD	correctness probe: text opcodes, no cel staging, room 83; binary AF0B2A02 15,036 B, re-baselined T-P0-085c	purpose=correctness
-# ★★★★★ AC-8's FAULT ARM, AND IT IS NOT IN THE SUITE BECAUSE IT CANNOT YET BE RUN. -DTEXT_FAULT_NOTICK
-# drops ONE `jsr vm_step_clock` from print's wait loop, so the game clock stops and var 21's mark --
-# which sits ON that clock -- is never reached: the box hangs and the headless watchdog must fire.
-# ★★★★ 15,033 B, exactly 3 bytes smaller than the row above, which is the `jsr` and nothing else.
-# ★★★ IT HAS NEVER BEEN SEEN TO GO RED, because no title reaches print (see the block above), so
-# **the wait loop's instrument is unproven and is reported as such** [§2W: a green check is evidence
-# only once the same check has been seen red]. Do not quote a p3b_text pass as covering it.
-p3b_notick	src/harness/p3b_probe.s	build/p3b_probe_notick.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DTEXT_FAULT_NOTICK	fault arm for print's wait loop -- NOT in run_gates.sh; unexercised, see above	purpose=fault
+p3b_text	src/harness/p3b_probe.s	build/p3b_probe_text.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ	correctness probe: text opcodes, no cel staging, room 83; binary 9D2F925F 15,052 B, re-baselined T-P0-087+	purpose=correctness
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ THE FAULT ARM, AND IT HAS NOW BEEN SEEN RED. Blocked for three tasks; §2W is satisfied.
+#     retired:  2268DAB7...  15,033 B   (built but unexercisable, P6.29c..P6.31)
+#     now:      EEBA4C73...  15,049 B
+# ★★★★ -DTEXT_FAULT_NOTICK drops ONE `jsr vm_step_clock` from print's wait loop -- 3 bytes, and
+# nothing else differs from the row above. var 21's deadline is a mark ON the game clock, so a loop
+# that does not advance that clock can never reach it.
+# ★★★★★ MEASURED, under the p3b_box trigger below:
+#     clean  40 cycles, no stall; box held 66 ticks (1.10 s) against var21=2's 60, then closed
+#     fault  STUCK in cycle 9, watchdog fires at 1800 frames
+#     and the discrimination is clean: hal_frame advances +1799 in BOTH arms while vm_vms advances
+#     +66 clean and +0 fault. **Interrupts stay healthy and only the game clock is starved**, which
+#     is exactly the defect the §4A census named rather than a hang arranged by some other route.
+# ★★★ NOT in run_gates.sh: a fault arm belongs beside its gate, not inside the green path.
+p3b_notick	src/harness/p3b_probe.s	build/p3b_probe_notick.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ -DTEXT_FAULT_NOTICK	fault arm for print's wait loop -- shown RED T-P0-087+; see above	purpose=fault
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ p3b_box -- THE ROW THAT ACTUALLY GATES THE BLOCKING WINDOW. Same binary as p3b_text; what
+# differs is the TRIGGER, and the trigger is the part that was missing for four tasks.
+# ★★★★ IT IS THE ENVIRONMENT, NOT THE FLAGS, AND THAT IS WHY IT IS A ROW. §2F says the scope and
+# the invocation of a gate are part of its definition; this project has recorded that five times
+# (res 74-vs-1,264, cel 1-title-vs-6, pic without picgate, the VM's nine titles in an env var, and
+# p3b itself). A second row with the same flags and a different corpus is the honest shape.
+#     P3B_TITLE=SpaceQuest-2  P3B_ROOM=101  P3B_ROOM_AT=8  P3B_SETVAR=17=1  P3B_VAR21=2
+# ★★★ WHY THIS ROOM, MEASURED NOT CHOSEN [P6.30 §4A/§4B]: logic 101 is `print.v(v17); quit(1)`,
+# unconditional, has a PICTURE (so the integration probe can be IN it), does not halt the VM, and
+# reaches print at cycle 8 identically across runs. var 17 must be set or the message number
+# resolves to -1 and print draws nothing -- "the opcode executed" and "a box was drawn" are
+# different facts [P6.31].
+# ★★ Its determinism evidence and its two arms are in the block above. It is NOT in run_gates.sh
+# yet: the clean arm ends via quit(1), so the suite's completion adjudicator needs a verdict for
+# "ended early and deliberately" before this can join the green path.
+p3b_box	src/harness/p3b_probe.s	build/p3b_probe_text.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ	blocking message window: SpaceQuest-2 room 101 via P3B_ROOM/P3B_SETVAR/P3B_VAR21; gates what p3b_text cannot	purpose=correctness
