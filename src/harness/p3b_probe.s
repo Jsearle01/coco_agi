@@ -262,6 +262,28 @@ p3b_entry:
 * measurement of a new subsystem often measures the scaffolding].
 * ★ vm_probe.s:126 calls it before its loop; copying the sequence rather than inventing one is
 * what keeps this build's VM identical to the gated one.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ INSTALL THE WINDOW RESTORE. Jay, on the eye gate: "i don't see the box close, mame just
+* ends." txt_close was a stub that clamped a value and returned, so the box stayed on screen.
+* ★★★★ THE ORACLE NEEDS NO SAVED PIXELS -- it re-renders a rectangle of the game screen into the
+* display screen [text.cpp:560-564]. Our game screen is the SHADOW plane and our display screen is
+* the VISIBLE plane, and p3_present is already exactly that copy.
+* ★★★★★ AND IT IS THE WHOLE PLANE, NOT THE BOX'S RECTANGLE -- A STATED DIVERGENCE, NOT AN
+* OVERSIGHT [§2I]. The planes are mapped one 8,192-byte slice at a time and a 74x26 box straddles
+* a slice boundary at 160 bytes per row, so a scoped copy needs per-row slice arithmetic that the
+* full present does not. **Cost: 26,880 bytes of 16-bit moves, about 75 ms, once per window
+* close.** For the box's own area the result is identical.
+* ★★★ WHAT THE WIDER SCOPE COSTS, SAID PLAINLY: the compositor draws sprites onto the VISIBLE
+* plane, so a full present erases them until the next cycle recomposites -- a one-cycle flicker
+* that the oracle's rectangle would not produce outside the box. Room 101 stages one sprite and
+* quits immediately, so this trigger cannot show it. **The scoped version is the follow-up.**
+* ★★ Installed here rather than in text.s because the block model is this probe's, not the
+* engine's; txt_restore is a vector for that reason.
+* ★ Guarded: the cel configuration does not link text.s, so txt_restore does not exist there.
+                ifdef   P3B_NO_CEL
+                ldd     #p3_present
+                std     txt_restore
+                endc
                 jsr     vm_start
 * ★★★★ ALLOCATE THE PHASE BLOCKS. mmu_phase.s declares ph_blk_pri / ph_blk_fb "filled at init by
 * the allocator" and **nothing filled them** -- they were 0, so every phase_draw mapped BOTH

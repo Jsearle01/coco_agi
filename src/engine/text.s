@@ -963,12 +963,27 @@ tpg_ret:        rts
 * ★★ print.at with y = 0 puts the border over the menu bar and backgroundPos_y goes negative;
 * the engine clamps before render_Block and the log records the CLAMPED value (bugs #13820,
 * #15241 -- MixedUpMotherGoose's nursery rhymes are the corpus case).
+* ★★★★★ txt_restore -- THE RESTORE, AS A VECTOR THE CALLER INSTALLS.
+* The oracle closes a window by RE-RENDERING a rectangle of the game screen into the display
+* screen: "There is no save-under buffer anywhere" [text.cpp:560-564, this project's own oracle
+* instrumentation at P6.15]. Nothing is saved and nothing is copied back.
+* ★★★★ THE ENGINE CANNOT NAME THE PORT'S VERSION OF THAT. Our game screen is the SHADOW plane and
+* our display screen is the VISIBLE plane, and both are the probe's block model, not text.s's. So
+* this is a vector, the same idiom txt_emit already uses in this file -- the probe installs its
+* routine and the engine stays independent of how planes are mapped.
+* ★★ Zero = no restore, which is what text_probe and gs_probe want: they have no framebuffer.
+txt_restore     fdb     0
+
 txt_close:
                 ldd     txt_bgy
                 bpl     tc_ok
                 ldd     #0
                 std     txt_bgy
-tc_ok:          rts
+tc_ok:
+                ldx     txt_restore
+                beq     tc_out
+                jsr     ,x
+tc_out:         rts
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ tx_drawbox <- graphics.cpp:1079 GfxMgr::drawBox, called from text.cpp:507.
