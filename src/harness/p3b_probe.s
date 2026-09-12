@@ -196,6 +196,20 @@ PIC_DATA        equ     MAP_ARENA_WIN
                 ifdef   P3B_NO_CEL
 P3_PBUF         equ     MAP_INPUT
 * ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE tx_msgptr DIFFERENTIAL RECORD [T-P0-087 §4A]. ONE routine, TWO callers: display
+* substitutes correctly and print does not, so the arithmetic is not the suspect -- the INPUTS are.
+* This holds one record per call at each site so they can be compared in a single run.
+* ★★★★ IT LIVES IN MAP_INPUT's TAIL, NOT IN THE CODE REGION. p3b_text has 170 bytes of headroom to
+* P3_FONT and this needs more than that; $1C00+576 leaves 448 bytes of MAP_INPUT unused, in slot 0,
+* resident in every phase -- which is also what makes it safe to write from inside a draw phase.
+* ★★★ DIAGNOSTIC ONLY, behind -DTX_MSGDIAG. It is not in the clean build and not in any gate row.
+P3_TXDIAG       equ     MAP_INPUT+576           ; TXT_PBUF_MAX; asserted at the foot of this file
+TXD_REC         equ     12                      ; bytes per record
+TXD_EACH        equ     8                       ; records kept per site
+* ★★ FIRST-N PER SITE, NOT A SHARED RING. The intro's display calls come first and the jumped
+* room's print comes at cycle 8+, so one shared ring would fill with display and lose the case
+* under test. Two sub-arrays guarantee the comparison this task exists to make.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ THE FONT IS **NOT** AT MAP_FONT IN THIS PROBE, AND THE FIRST ATTEMPT PUT IT THERE.
 * memmap.inc puts the authored font at MAP_FONT ($E0B8) in slot 7 -- correct for the ENGINE. This
 * probe orgs the PARSER at $E000 (slot 5 is its priority slice, so the engine's vocabulary window
@@ -1166,6 +1180,19 @@ CP_CEL_END      equ     CP_CEL+4784
 * text.s and lwasm needs pass-1 constants. §2V.2: "a 6809 array does not grow -- state the maximum."
                 ifgt    P3_PBUF+TXT_PBUF_MAX-MAP_INPUT_END
                 error   "the text substitution buffer overruns MAP_INPUT ($1C00-$2000)"
+                endc
+* ★★★ And the diagnostic record against the same region. It sits ABOVE the substitution buffer, so
+* an over-large record would corrupt nothing in the clean build and silently scribble on whatever
+* follows MAP_INPUT in the diagnostic one -- which is exactly the class of failure a diagnostic must
+* not have [§2W.3: a diagnostic that can be wrong about its own storage testifies, it does not
+* measure]. 2 sites x 8 records x 12 bytes = 192, into 448 free.
+                ifdef   TX_MSGDIAG
+                ifgt    P3_TXDIAG+2*TXD_EACH*TXD_REC-MAP_INPUT_END
+                error   "the tx_msgptr diagnostic record overruns MAP_INPUT ($1C00-$2000)"
+                endc
+                ifgt    P3_PBUF+TXT_PBUF_MAX-P3_TXDIAG
+                error   "the tx_msgptr diagnostic record overlaps the substitution buffer"
+                endc
                 endc
 * ★★★★★ AND THE ONE THAT WOULD HAVE CAUGHT THE FONT COLLISION HAD IT EXISTED. The font sits at the
 * top of MAP_RESERVED and the code grows up toward it; without this, code reaching $5800 would

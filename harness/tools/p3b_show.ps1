@@ -33,6 +33,7 @@ param(
   [switch]$Fault,
   [switch]$DecodeFault,
   [switch]$NoTick,
+  [switch]$Diag,
   [double]$Hold   = 3.0
 )
 $ErrorActionPreference = "Stop"
@@ -74,6 +75,11 @@ if ($DecodeFault) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DRES_FAULT_DEC
 # ★★★★ The arm is 3 bytes smaller than the clean build, which is the `jsr` and nothing else. A fault
 # arm that hung by some other route would prove the watchdog works and nothing about this loop.
 if ($NoTick) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DTEXT_FAULT_NOTICK") }
+# ★★★★★ -Diag IS §4A's DIFFERENTIAL ARM [T-P0-087]. tx_msgptr is one routine with two callers;
+# display substitutes and print does not, so it records both callers' INPUTS in one run rather than
+# auditing arithmetic that is identical either way. Records live in MAP_INPUT's tail, not the code
+# region. ★★ Diagnostic only -- not in the clean build, not in any gate row.
+if ($Diag) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DTX_MSGDIAG") }
 & $LW --format=raw --output=build/p3b_probe_pk_fresh.bin --map=build/p3b_probe_pk.map -I. @FLAGS src/harness/p3b_probe.s
 if ($LASTEXITCODE -ne 0) { throw "p3b assemble failed" }
 "p3b_probe: $((Get-Item build\p3b_probe_pk_fresh.bin).Length) bytes"
@@ -84,16 +90,22 @@ if ($LASTEXITCODE -ne 0) { throw "p3b assemble failed" }
 # without it rather than falling back to a literal [P6.3 §3.F.2].
 New-Item -ItemType Directory -Force build\p3b | Out-Null
 $WANT = @("res_volbase","res_slicebase","res_curblk","vm_quit","vm_badop","vm_cycle","vm_tdelay",
-          "res_err","ph_blk_fb","ph_blk_pri","par_vocab","P3_INBUF","P3_FEED","P3_VOCAB_BAD","P3_VOCAB","P3_VOCAB_END","P3_CODE_END","P3_PARSER_BASE","P3_PARSER_TOTAL")
+          "res_err","ph_blk_fb","ph_blk_pri","par_vocab","P3_INBUF","P3_FEED","P3_VOCAB_BAD","P3_VOCAB","P3_VOCAB_END","P3_CODE_END","P3_PARSER_BASE","P3_PARSER_TOTAL",
+          "vm_badlogic","res_depth","hal_frame_hi")
 # ★★★ MAP_FONT only exists in the text configuration, and vm_symbols.py fails on a missing name,
 # so it is appended rather than added to the list every build shares.
-if ($Text -or $Fault -or $DecodeFault -or $NoTick) { $WANT += @("P3_FONT","P3_PBUF") }
+if ($Text -or $Fault -or $DecodeFault -or $NoTick -or $Diag) { $WANT += @("P3_FONT","P3_PBUF") }
 # ★★★★ WIRED BUILDS ONLY. -DTEXT_MODELLED keeps TEXT_WIRED undefined (p3b_probe.s:1004), so the nine
 # handlers become `equ vm_op_modelled` and **the whole body -- tx_wt_key included -- is never
 # assembled**. Asking for it in the -Fault arm fails the symbol extraction, which is why this is a
 # second line rather than three more names on the one above.
 # ★ vm_vms and vm_passed exist in every build; they are here because only these arms read them.
-if ($Text -or $DecodeFault -or $NoTick) { $WANT += @("vm_vms","vm_passed","tx_wt_key") }
+if ($Text -or $DecodeFault -or $NoTick -or $Diag) { $WANT += @("vm_vms","vm_passed","tx_wt_key") }
+# * P3_TXDIAG exists only in the -Diag build; vm_symbols.py fails on a missing name.
+if ($Diag) { $WANT += @("P3_TXDIAG","tx_diag_n1","tx_diag_n2") }
+# * tx_wt_* exist in every wired build; the stall dump reads them to separate the three shapes a
+#   hang inside the wait loop can have.
+if ($Text -or $DecodeFault -or $NoTick -or $Diag) { $WANT += @("tx_wt_end","tx_wt_timed") }
 python harness\tools\vm_symbols.py build\p3b_probe_pk.map --out build\p3b\symbols.txt --want @WANT
 if ($LASTEXITCODE -ne 0) { throw "symbols missing" }
 

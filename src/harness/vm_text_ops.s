@@ -110,12 +110,27 @@ tx_msgpos       fdb     0
 tx_msgno        fcb     0
 
 tx_msgptr:
+* ★★★★★ THE clr GOES **ABOVE** THE sta, AND PUTTING IT BELOW BROKE THE ROUTINE IT MEASURES.
+* `clr` sets Z unconditionally, so with it between `sta tx_msgno` and `beq tx_mp_bad` **every call
+* took the out-of-range branch** -- and the diagnostic then faithfully reported msgpos $0000,
+* count 0, ok 0 for a message number of 4. ★★★★ That is §2W.3 exactly: the instrument manufactured
+* the failure it was installed to explain, and its output was entirely self-consistent.
+* ★★★ `sta` sets Z from A, which is the test this routine wants, so the clear must precede it.
+                ifdef   TX_MSGDIAG
+                clr     tx_diag_cnt             ; ★ so a stale count is never logged
+                endc
                 sta     tx_msgno
                 beq     tx_mp_bad               ; message 0 does not exist
                 ldd     vm_code
                 addd    vm_codelen
                 std     tx_msgpos
                 tfr     d,x
+                ifdef   TX_MSGDIAG
+* ★★ B is dead here -- it holds the low half of the sum and is overwritten by `tfr a,b` below --
+* so capturing the count costs no save/restore. It is the byte the compare is ABOUT to read.
+                ldb     ,x
+                stb     tx_diag_cnt
+                endc
                 lda     tx_msgno
                 cmpa    ,x                      ; count
                 bhi     tx_mp_bad
@@ -132,11 +147,78 @@ tx_msgptr:
                 addd    #1                      ; offsets are relative to section + 1
                 tfr     d,x
                 andcc   #$FB                    ; clear Z -- success
+                ifdef   TX_MSGDIAG
+                jsr     tx_diag_ok
+                endc
                 rts
 tx_mp_bad:
                 ldx     #0
                 orcc    #$04                    ; set Z
+                ifdef   TX_MSGDIAG
+                jsr     tx_diag_bad
+                endc
                 rts
+
+                ifdef   TX_MSGDIAG
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE DIFFERENTIAL LOGGER [T-P0-087 §4A]. One record per call, first 8 per site.
+* ★★★★ IT MUST PRESERVE CC AND X, because they ARE tx_msgptr's return protocol -- Z says
+* in-range and X is the message pointer. `pshs cc` is the FIRST instruction of both entry points
+* for that reason; anything before it would report on a flag it had already changed.
+* ★★★ On the tx_mp_bad path tx_msgpos may be STALE (msgno 0 branches before it is computed) and
+* tx_diag_cnt is cleared at entry, so a zero count column means "never read", not "read as zero".
+tx_diag_site    fcb     0                       ; 1 = display, 2 = print; set by the caller
+tx_diag_cnt     fcb     0
+tx_diag_res     fcb     0
+tx_diag_n1      fcb     0
+tx_diag_n2      fcb     0
+
+tx_diag_ok:     pshs    cc,d,x
+                lda     #1
+                bra     txd_go
+tx_diag_bad:    pshs    cc,d,x
+                clra
+txd_go:         sta     tx_diag_res
+                lda     tx_diag_site
+                cmpa    #1
+                bne     txd_print
+                lda     tx_diag_n1
+                cmpa    #TXD_EACH
+                bhs     txd_out                 ; this site's slots are full
+                inc     tx_diag_n1
+                ldx     #P3_TXDIAG
+                bra     txd_have
+txd_print:
+                lda     tx_diag_n2
+                cmpa    #TXD_EACH
+                bhs     txd_out
+                inc     tx_diag_n2
+                ldx     #P3_TXDIAG+TXD_EACH*TXD_REC
+txd_have:
+                ldb     #TXD_REC
+                mul                             ; D = slot * 12
+                leax    d,x
+                lda     tx_diag_site
+                sta     ,x
+                lda     tx_msgno
+                sta     1,x
+                ldd     vm_code
+                std     2,x
+                ldd     vm_codelen
+                std     4,x
+                ldd     tx_msgpos
+                std     6,x
+                lda     tx_diag_cnt
+                sta     8,x
+                lda     vm_curlogic
+                sta     9,x
+                lda     tx_diag_res
+                sta     10,x
+                lda     vm_cycle+1
+                sta     11,x
+txd_out:
+                puls    cc,d,x,pc
+                endc
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★ tx_emit -- blit the substituted buffer at (tx_row, tx_col).
@@ -185,6 +267,12 @@ vmop_display_f:
                 jsr     vm_v2
 
 tx_display_common:
+                ifdef   TX_MSGDIAG
+                pshs    a                       ; ★ A is the message number -- do not disturb it
+                lda     #1
+                sta     tx_diag_site
+                puls    a
+                endc
                 jsr     tx_msgptr
                 beq     tx_disp_out
                 stx     txt_msgp
@@ -210,6 +298,12 @@ vmop_print_f:
                 jsr     vm_v0
 
 tx_print_common:
+                ifdef   TX_MSGDIAG
+                pshs    a
+                lda     #2
+                sta     tx_diag_site
+                puls    a
+                endc
                 jsr     tx_msgptr
                 beq     tx_print_out
                 stx     txt_msgp

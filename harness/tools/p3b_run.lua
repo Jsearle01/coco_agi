@@ -476,7 +476,21 @@ _G._n = emu.add_machine_frame_notifier(function()
     -- here", which is the difference between a finding and a shrug [L-59].
     if prog:read_u8(GO) ~= 0 then
         stuck = (stuck or 0) + 1
-        if stuck == 1 then spin = {} end
+        if stuck == 1 then
+            spin = {}
+            -- ★★★★★ SAMPLE THE TWO CLOCKS AT THE START OF A STALL [T-P0-087].
+            -- tx_wait_dismiss detects a tick by watching hal_frame_lo (IRQ-driven) and advances
+            -- the GAME clock (vm_vms) once per tick. A stall inside that loop has exactly three
+            -- shapes and these two numbers separate them: hal_frame frozen means the $010C IRQ is
+            -- not firing here, so no tick is ever seen; hal_frame moving with vm_vms frozen means
+            -- the edge is missed; both moving means the deadline arithmetic is wrong.
+            -- ★★★★ My own §4A census asserted hal_frame is "SELF-SERVICING -- the $010C IRQ
+            -- advances it through a block". **That was an assumption and this measures it** [§2W].
+            _G._stall0 = {
+                frame = SYM.hal_frame_hi and rd16(SYM.hal_frame_hi) or -1,
+                vms   = SYM.vm_vms and rd32(SYM.vm_vms) or -1,
+            }
+        end
         local pc = cpu.state["PC"].value
         spin[pc] = (spin[pc] or 0) + 1
         -- ★★★★★ THE THRESHOLD WAS 240 FRAMES AND THE MESSAGE SAID 900. Four emulated seconds is
@@ -497,6 +511,25 @@ _G._n = emu.add_machine_frame_notifier(function()
             w("★★★ STUCK in cycle %d after %d frames (%.1f emulated s) -- most-visited PCs:",
               n, STALL_FRAMES, STALL_FRAMES / 60.0)
             for i = 1, math.min(6, #l) do w("     $%04X  x%d", l[i][1], l[i][2]) end
+            if _G._stall0 then
+                local f1 = SYM.hal_frame_hi and rd16(SYM.hal_frame_hi) or -1
+                local v1 = SYM.vm_vms and rd32(SYM.vm_vms) or -1
+                w("     across the stall: hal_frame %d -> %d (%+d),  vm_vms %d -> %d (%+d)",
+                  _G._stall0.frame, f1, f1 - _G._stall0.frame,
+                  _G._stall0.vms, v1, v1 - _G._stall0.vms)
+                w("     %s",
+                  (f1 == _G._stall0.frame)
+                    and "★★★ THE VBL COUNTER IS FROZEN -- the tick source never advances here, so"
+                     .. " the wait loop can never see a tick and var 21 can never expire"
+                    or ((v1 == _G._stall0.vms)
+                        and "★★★ hal_frame moves but vm_vms does NOT -- the tick edge is missed"
+                        or "★ both clocks advance -- the deadline arithmetic is the suspect"))
+                if SYM.tx_wt_end then
+                    w("     tx_wt_end=%d tx_wt_timed=%d (var21 as read at entry)",
+                      rd16(SYM.tx_wt_end),
+                      SYM.tx_wt_timed and prog:read_u8(SYM.tx_wt_timed) or -1)
+                end
+            end
             w("     S=$%04X  U=$%04X  (hw stack base $0800, usable down to $0500;", cpu.state["S"].value, cpu.state["U"].value)
             w("      seed stack $0100-$04FF -- S below $0500 means they collided)")
             w("     status=$%02X (B1 fetched, B2 draw-phase, B3 planes cleared, B4 rendered, B5 closed)", prog:read_u8(STATUS))
@@ -638,6 +671,25 @@ _G._n = emu.add_machine_frame_notifier(function()
             -- ★★★ THE VM'S OWN STATE, READ THROUGH THE BUILD'S SYMBOLS. No guest code is added,
             -- so this costs nothing in a code region that is already at its ceiling -- which is
             -- why halt detection went in the host rather than the probe.
+            -- ★★★★★ THE HALT, DECODED [T-P0-087 §4A]. vm_res_fail does `lda res_err / ora #$F0`
+            -- (vm_run.s:114), so a vm_badop of $Fn means **the VM HALTED ON A RESOURCE BIND** and
+            -- n is the RES_E_* code -- $F6 is RES_E_DEPTH, more than RES_MAXDEPTH (8) resources
+            -- held at once. ★★★★ P6.30 read vm_quit=1 as proof that the instruction after print.v
+            -- had executed; it is the HALT setting vm_quit, and the VM never reached print.
+            -- ★★ Printed as a decoded line rather than a raw byte so the next reader does not have
+            -- to re-derive it [§2W.3: a diagnostic that reports a number nobody can read is one
+            -- step from a diagnostic nobody checks].
+            if SYM.vm_badop then
+                local bo = prog:read_u8(SYM.vm_badop)
+                if bo >= 0xF0 and bo <= 0xF7 then
+                    w("    ★★★ VM HALTED ON A RESOURCE BIND: vm_badop=$%02X -> res_err %d"
+                      .. " (%s), logic %d, res_depth %d", bo, bo - 0xF0,
+                      ({[1]="EMPTY",[2]="SIG",[3]="RANGE",[4]="BIG",[5]="FULL",[6]="DEPTH"})[bo-0xF0]
+                        or "?",
+                      SYM.vm_badlogic and prog:read_u8(SYM.vm_badlogic) or -1,
+                      SYM.res_depth and prog:read_u8(SYM.res_depth) or -1)
+                end
+            end
             w("    var0=%d flag0=$%02X  vm_quit=%d vm_badop=$%02X vm_cycle=%d vm_tdelay=%d res_err=%d",
               prog:read_u8(0x0800), prog:read_u8(0x0900),
               prog:read_u8(SYM.vm_quit or 0), prog:read_u8(SYM.vm_badop or 0),
@@ -664,6 +716,42 @@ _G._n = emu.add_machine_frame_notifier(function()
                       AUTOCLOSE, want, vms_max,
                       vms_max >= want and "the clock ADVANCED across the box"
                                       or "★★★ the box did not hold for its timer")
+                end
+            end
+            -- ═══════════════════════════════════════════════════════════════════════════════
+            -- ★★★★★ §4A's DIFFERENTIAL TABLE [T-P0-087]. tx_msgptr is ONE routine with TWO
+            -- callers: display substitutes correctly and print does not. The arithmetic is the
+            -- same in both cases, so this prints the INPUTS side by side and lets the comparison
+            -- be the finding.
+            -- ★★★ Record: site, msgno, vm_code, vm_codelen, tx_msgpos, count byte read, curlogic,
+            -- result, cycle low byte. 12 bytes; first 8 calls per site.
+            -- ★★ §2P: addresses, numbers and a result flag. Nothing from the message itself.
+            if SYM.P3_TXDIAG then
+                -- ★★★★★ THE COUNTERS ARE AUTHORITATIVE, THE BUFFER IS NOT [§2W.3]. The first
+                -- version of this dump decided a slot was empty by testing its site byte against
+                -- 0, and unwritten MAP_INPUT holds $FF -- so it printed eight fabricated "print"
+                -- rows of all-$FF and I nearly read them as data. **A diagnostic must not infer
+                -- how much was recorded from the recording.** tx_diag_n1/n2 are incremented at the
+                -- moment a record is written and are the only thing that knows.
+                local n1 = SYM.tx_diag_n1 and prog:read_u8(SYM.tx_diag_n1) or -1
+                local n2 = SYM.tx_diag_n2 and prog:read_u8(SYM.tx_diag_n2) or -1
+                w("    ── tx_msgptr call sites: %d display record(s), %d print record(s) "
+                  .. "(cap %d each) ──", n1, n2, 8)
+                w("      %-8s %6s %7s %8s %8s %6s %8s %6s %6s",
+                  "site", "msgno", "vm_code", "codelen", "msgpos", "count", "curlogic", "ok", "cyc")
+                for site = 0, 1 do
+                    local kept = (site == 0) and n1 or n2
+                    for slot = 0, math.min(kept, 8) - 1 do
+                        local a = SYM.P3_TXDIAG + (site * 8 + slot) * 12
+                        local s = prog:read_u8(a)
+                        if true then
+                            w("      %-8s %6d  $%04X   %6d   $%04X %6d %8d %6d %6d",
+                              s == 1 and "display" or "print",
+                              prog:read_u8(a + 1), rd16(a + 2), rd16(a + 4), rd16(a + 6),
+                              prog:read_u8(a + 8), prog:read_u8(a + 9),
+                              prog:read_u8(a + 10), prog:read_u8(a + 11))
+                        end
+                    end
                 end
             end
             if JUMP_ROOM > 0 then
