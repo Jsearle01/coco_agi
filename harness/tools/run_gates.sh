@@ -121,6 +121,58 @@ F=-DHAL_SYS_FAST_CLOCK
 FAILED=""
 note_fail() { FAILED="$FAILED $1"; }
 
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ SOURCE INTEGRITY, BEFORE ANY GATE RUNS [T-P0-087 §7.5, Jay's ruling].
+# PowerShell 5.1's `Get-Content -Raw` reads a BOM-less UTF-8 file using the ANSI codepage and
+# `Set-Content -Encoding utf8` writes a BOM back, so ANY read-modify-write of a tracked file
+# through PowerShell double-encodes every non-ASCII character. The damage is comment-only and
+# every affected script still runs, which is exactly why it survives commits unnoticed:
+# T-P0-061 did it to six files, four already pushed; T-P0-086 to 34 runs; T-P0-087 to 59.
+#
+# ★★★★ THE RULE EXISTED AND DID NOT HOLD, WHICH IS A FACT ABOUT ITS PLACEMENT. It lived only in
+# an agent's memory -- the weakest slot available -- and was broken twice in two tasks. The rule
+# belongs in CLAUDE.md beside §2J's heredoc ban (same failure shape: a shell construct that
+# corrupts silently and produces something that LOOKS PLAUSIBLE AND IS WRONG). **This is the
+# mechanical half**: §2J's own text is that a ban needs more than an intention to be careful.
+#
+# ★★★ IT RUNS FIRST AND ON EVERY INVOCATION, including `run_gates.sh pic`. Corruption in a file
+# this sweep never builds is still corruption, and the point is that it cannot survive a task --
+# the suite runs every task, so this is the cheapest enforcement point that covers the whole
+# tree rather than one gate's inputs.
+# ★★ fix_mojibake.py --check writes nothing and exits non-zero on any double-encoded run. It has
+# existed since T-P0-061 and was wired to nothing at all.
+# ★★★★★ ONE ALLOWLISTED FILE, BY EXPLICIT NAME -- never by pattern, so adding one is a visible
+# act [§2N's rule for harness probes, applied here]. P3.2's report DOCUMENTS this very defect and
+# spells the damaged forms out literally -- U+2605 shown as the three characters it decays to --
+# so it is byte-identical to the thing being detected.
+# ★★★★★ AND THIS COMMENT HAD TO BE REWRITTEN FOR THE SAME REASON, ONE MINUTE LATER. Its first
+# draft quoted the damaged sequence to explain the exclusion, so run_gates.sh flagged ITSELF on
+# the next run. **Describe the corruption in codepoints; never paste it.**
+# ★★★★ fix_mojibake.py's own header records the identical trap: it once flagged
+# its OWN docstring, and "running the repair over the tree would have fixed the illustration and
+# destroyed the one place the defect is recorded." The tool's answer was to spell examples in
+# codepoints; that report predates the convention and is left exactly as it is.
+# ★★★ THE EXCLUSION EXISTS SO THE CHECK CAN STAY ON. A gate that is permanently red for a
+# legitimate reason gets switched off, and then enforces nothing [§2M.8's graceful-skip lesson].
+# ★★ Found by running it: the first version of this block failed the suite on a clean tree.
+MOJI_ALLOW='reports/20260826-030000-p3-2-sync-entry-and-first-pixels.md'
+echo "═══ source integrity (mojibake) ═══"
+MOJI_FILES=$(git ls-files '*.s' '*.inc' '*.py' '*.lua' '*.sh' '*.ps1' '*.md' '*.manifest' 2>/dev/null \
+             | grep -v -F -x "$MOJI_ALLOW")
+if [ -z "$MOJI_FILES" ]; then
+    echo "★★★ could not list tracked files -- NOT treating that as clean"
+    note_fail mojibake
+else
+    # shellcheck disable=SC2086
+    if python harness/tools/fix_mojibake.py --check $MOJI_FILES; then
+        echo "★ source integrity: clean"
+    else
+        echo "★★★ DOUBLE-ENCODED SOURCE -- repair with: python harness/tools/fix_mojibake.py <file>"
+        note_fail mojibake
+    fi
+fi
+echo
+
 # ★★★ pic's SWEEP is whole -- PIC_LIST/order.txt names all 45 pictures, so one launch covers the
 # set -- but the sweep only WRITES framebuffers. picgate.py is what compares them and prints
 # 45/45, and this script never called it. **The renderer gate's headline number had no producer
