@@ -860,6 +860,125 @@ _G._n = emu.add_machine_frame_notifier(function()
                     end
                 end
             end
+            -- ═══════════════════════════════════════════════════════════════════════════════
+            -- ★★★★★ DID THE WINDOW RESTORE ACTUALLY COVER THE BOX? [Jay: "still saw remnants of
+            -- the box and text in pixels"]. txt_close copies the box's rectangle back from the
+            -- SHADOW plane to the VISIBLE plane, so after it runs those two planes must AGREE
+            -- over that rectangle. Anything left on screen is either a byte the copy missed
+            -- (inside the rect) or a byte drawn outside the rect the copy was sized for.
+            -- ★★★★ THE TWO CASES NEED OPPOSITE FIXES -- a wrong copy versus a wrong rectangle --
+            -- so this reports them separately: the rect itself, and a band above and below it.
+            -- ★★★ The rect is read from the guest's own symbols, including txb_yoff, so this
+            -- measures the rectangle the guest USED rather than one recomputed here [§2W.3].
+            if SYM.txt_bgx and SYM.ph_blk_fb then
+                local function rd16s(a)
+                    local v = rd16(a); if v >= 0x8000 then v = v - 0x10000 end; return v
+                end
+                local bx = rd16s(SYM.txt_bgx)
+                local by = rd16s(SYM.txt_bgy) + (SYM.txb_yoff and rd16s(SYM.txb_yoff) or 0)
+                local bw = rd16(SYM.txt_bgw)
+                local bh = rd16(SYM.txt_bgh)
+                -- ★★★★★ P3B_RECT IS THE CONTROL, AND WITHOUT IT THIS COMPARISON PROVES NOTHING.
+                -- The compositor draws sprites onto the VISIBLE plane, so visible and shadow
+                -- differ wherever a sprite sits whether or not a box was ever drawn. Forcing the
+                -- SAME rectangle in a run that draws NO box measures the sprite alone, and the
+                -- difference between the two numbers is what the restore actually left behind.
+                -- ★★★ Without this the instrument cannot tell "the copy missed 143 bytes" from
+                -- "the copy is perfect and 143 bytes are a sprite" -- and it reported the first
+                -- with some confidence [§2W: an instrument that cannot be wrong does not measure].
+                local ov = os.getenv("P3B_RECT")
+                if ov then
+                    local a, b, c, d = ov:match("^(%-?%d+),(%-?%d+),(%d+),(%d+)$")
+                    if a then bx, by, bw, bh = tonumber(a), tonumber(b), tonumber(c), tonumber(d) end
+                end
+                w("    box rect used by the restore: x=%d y=%d w=%d h=%d;  txt_winactive=%d txt_restore=$%04X", bx, by, bw, bh, SYM.txt_winactive and prog:read_u8(SYM.txt_winactive) or -1, SYM.txt_restore and rd16(SYM.txt_restore) or 0)
+                local BLK_VIS, BLK_SHA = 40, 2      -- P3_BLK_VISIBLE / P3_BLK_SHADOW
+                -- compare a row band, returning how many bytes differ
+                -- ★★★★ WHERE, NOT JUST HOW MANY. A count alone cannot tell the box's frame from
+                -- the room's sprite: the compositor draws sprites onto the VISIBLE plane every
+                -- cycle, so visible and shadow legitimately differ wherever a sprite sits, and
+                -- this comparison runs at the END of the run. **A differing-byte count is
+                -- confounded by design; the POSITIONS and VALUES are not** -- box pixels are
+                -- $FF (white fill) and $44 (red line), and they lie on the rectangle's edges.
+                local samples = {}
+                local function diffband(r0, r1)
+                    local bad, boxlike = 0, 0
+                    for r = math.max(0, r0), r1 - 1 do
+                        for c = math.max(0, bx), bx + bw - 1 do
+                            local off = r * 160 + c
+                            if off >= 0 and off < 26880 then
+                                local sl, wi = off >> 13, off & 0x1FFF
+                                prog:write_u8(0xFFA6, BLK_SHA + sl)
+                                local s = prog:read_u8(0xC000 + wi)
+                                prog:write_u8(0xFFA6, BLK_VIS + sl)
+                                local v = prog:read_u8(0xC000 + wi)
+                                if s ~= v then
+                                    bad = bad + 1
+                                    if v == 0xFF or v == 0x44 then boxlike = boxlike + 1 end
+                                    if #samples < 10 then
+                                        samples[#samples+1] = string.format(
+                                            "r%d c%+d vis=$%02X sha=$%02X", r, c - bx, v, s)
+                                    end
+                                end
+                            end
+                        end
+                    end
+                    return bad, boxlike
+                end
+                local inside, boxlike = diffband(by, by + bh)
+                local above  = diffband(by - 8, by)
+                local below  = diffband(by + bh, by + bh + 8)
+                w("    visible vs shadow: INSIDE the rect %d bytes differ (%d of them are box"
+                  .. " colours $FF/$44); 8 rows above %d; 8 rows below %d",
+                  inside, boxlike, above, below)
+                -- ★★★★ PER ROW, because the SHAPE names the cause and a total cannot. Only rows
+                -- whose span crosses an 8,192-byte slice boundary use the straddle path; if the
+                -- residue is confined to those, the split is wrong. If it is spread evenly the
+                -- copy is not running for whole rows, and if it is a contiguous blob it is the
+                -- compositor's sprite and not a restore failure at all.
+                local rowtxt = {}
+                for r = by, by + bh - 1 do
+                    local n, straddle = 0, ""
+                    for c = math.max(0, bx), bx + bw - 1 do
+                        local off = r * 160 + c
+                        if off >= 0 and off < 26880 then
+                            local sl, wi = off >> 13, off & 0x1FFF
+                            prog:write_u8(0xFFA6, BLK_SHA + sl)
+                            local s = prog:read_u8(0xC000 + wi)
+                            prog:write_u8(0xFFA6, BLK_VIS + sl)
+                            if s ~= prog:read_u8(0xC000 + wi) then n = n + 1 end
+                        end
+                    end
+                    if ((r * 160 + bx) & 0x1FFF) + bw > 8192 then straddle = " <- STRADDLES" end
+                    rowtxt[#rowtxt+1] = string.format("r%d:%d%s", r, n, straddle)
+                end
+                w("       per row: %s", table.concat(rowtxt, "  "))
+                -- ★★★★★ COUNT THE RED, because the difference count UNDERCOUNTS and I read it as
+                -- if it did not. The box background is $FF and this room's picture is largely $FF
+                -- too, so an unrestored background byte MATCHES the shadow and scores zero. **The
+                -- border colour $44 is the one value the picture cannot supply**, so surviving red
+                -- is unambiguous residue and its absence is unambiguous success.
+                local red = 0
+                for r = by, by + bh - 1 do
+                    for c = math.max(0, bx), bx + bw - 1 do
+                        local off = r * 160 + c
+                        if off >= 0 and off < 26880 then
+                            prog:write_u8(0xFFA6, BLK_VIS + (off >> 13))
+                            if prog:read_u8(0xC000 + (off & 0x1FFF)) == 0x44 then red = red + 1 end
+                        end
+                    end
+                end
+                w("       RED ($44) bytes still in the visible plane inside the rect: %d -- %s",
+                  red, red > 0 and "★★★ the border SURVIVED the restore"
+                                or "★ no border left; the frame was restored")
+                for i = 1, #samples do w("       %s", samples[i]) end
+                w("    %s", boxlike > 0
+                    and "★★★ BOX PIXELS SURVIVE inside the rect -- the copy missed them"
+                    or (inside > 0
+                        and "★ differences inside the rect but NONE are box colours -- that is"
+                         .. " the compositor's sprite, not a restore failure"
+                        or "★ the rect matches the shadow exactly"))
+            end
             if JUMP_ROOM > 0 then
                 w("    room jump: asked %d, landed %s, dispatched %s, final room %d",
                   JUMP_ROOM, tostring(jumped), tostring(jump_seen_clear), prog:read_u8(ROOM))

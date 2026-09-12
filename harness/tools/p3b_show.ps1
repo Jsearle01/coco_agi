@@ -118,6 +118,10 @@ if ($Text -or $Fault -or $DecodeFault -or $NoTick -or $Diag) { $WANT += @("P3_FO
 # ★ vm_vms and vm_passed exist in every build; they are here because only these arms read them.
 if ($Text -or $DecodeFault -or $NoTick -or $Diag) { $WANT += @("vm_vms","vm_passed","tx_wt_key","tx_wt_nwait") }
 # * P3_TXDIAG exists only in the -Diag build; vm_symbols.py fails on a missing name.
+# * text.s symbols exist in EVERY P3B_NO_CEL build, -Fault included: that arm links the engine and
+#   only declines to call the nine handlers. Kept off the line above because tx_wt_* need
+#   TEXT_WIRED, which -Fault deliberately leaves undefined.
+if ($Text -or $Fault -or $DecodeFault -or $NoTick -or $Diag) { $WANT += @("txt_bgx","txt_bgy","txt_bgw","txt_bgh","txb_yoff","txt_winactive","txt_restore") }
 if ($Diag) { $WANT += @("P3_TXDIAG","tx_diag_n1","tx_diag_n2") }
 # * tx_wt_* exist in every wired build; the stall dump reads them to separate the three shapes a
 #   hang inside the wait loop can have.
