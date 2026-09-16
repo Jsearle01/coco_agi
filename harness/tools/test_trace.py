@@ -46,6 +46,8 @@ def main():
     a_.add_argument("--at", type=int, required=True, help="the cycle to log")
     a_.add_argument("--logic", type=int, default=None,
                     help="only this logic number (default: all)")
+    a_.add_argument("--commands", action="store_true",
+                    help="log COMMANDS too, with their first two operand bytes")
     a = a_.parse_args()
 
     game = resource.load_from_files(a.game_dir)
@@ -109,6 +111,32 @@ def main():
                                  bool(st.test_result)))
             return wrapper
         entry.handler = make(op, entry, entry.handler)
+
+    # ═══════════════════════════════════════════════════════════════════════════════════════
+    # ★★★★★ COMMANDS TOO, AND THE ARMING IS DIFFERENT FROM THE TESTS' [T-P0-100 §4A]. A test only
+    # runs inside test_if_code, so `armed` could be set there; a COMMAND runs in run_logic's main
+    # dispatch, outside any expression. So the command wrapper tests the cycle itself.
+    # ★★★★ THE OPERAND BYTES ARE READ BEFORE THE HANDLER RUNS, at st.ip, which is where the port's
+    # recorder reads them too -- the same two bytes, so the two sides' p0/p1 are comparable.
+    if a.commands:
+        for op, entry in enumerate(vm.table.commands):
+            if entry is None or entry.handler is None:
+                continue
+
+            def makec(op_, entry_, h):
+                def wrapper(vm_, p):
+                    st = vm_.state
+                    on = (vm_.cycle_nr == a.at
+                          and (a.logic is None or st.cur_logic_nr == a.logic))
+                    ip0 = st.ip
+                    p0 = p[0] if len(p) > 0 else -1
+                    p1 = p[1] if len(p) > 1 else -1
+                    h(vm_, p)
+                    if on:
+                        rows.append(("cmd:" + entry_.name, st.cur_logic_nr, ip0,
+                                     (op_, [p0, p1]), None))
+                return wrapper
+            entry.handler = makec(op, entry, entry.handler)
 
     if a.room:
         vm.run(max_cycles=min(a.room_at, a.cycles))

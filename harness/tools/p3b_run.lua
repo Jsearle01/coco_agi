@@ -148,6 +148,8 @@ local PHASETAP = tonumber(os.getenv("P3B_PHASETAP") or "")
 -- ★★ P3B_SAIDAT=<vm_cycle> -- record one row per said() in that cycle [T-P0-098]. Declared here,
 --    above stage(), for the reason the comment on PHASETAP gives.
 local SAIDAT = tonumber(os.getenv("P3B_SAIDAT") or "")
+-- ★★ P3B_WATCHVAR=<n> -- which variable the writer recorder watches. 0 by default.
+local WATCHVAR = tonumber(os.getenv("P3B_WATCHVAR") or "0")
 local VOCAB, VOCAB_END = nil, nil
 local function rd16_early(a) return prog:read_u8(a) * 256 + prog:read_u8(a + 1) end
 
@@ -1191,11 +1193,19 @@ _G._n = emu.add_machine_frame_notifier(function()
                 -- running. **The caller address is the answer** -- the build's .lst names it.
                 if SYM.vm_v0_n and SYM.vm_v0_buf then
                     local n = prog:read_u8(SYM.vm_v0_n)
-                    w("    var-0 writers in vm_cycle %d : %d", SAIDAT or -1, n)
+                    w("    var-%d writers in vm_cycle %d : %d", WATCHVAR, SAIDAT or -1, n)
                     for i = 0, n - 1 do
-                        local b = SYM.vm_v0_buf + i * 5
-                        w("      var0 <- %-3d  opcode $%02X  logic %d  caller $%04X",
-                          prog:read_u8(b), prog:read_u8(b + 4), prog:read_u8(b + 3),
+                        local b = SYM.vm_v0_buf + i * 8
+                        local fl = prog:read_u8(b + 7)
+                        -- ★★★ p0/p1 ARE THE OPERAND BYTES the handler was about to read. For
+                        -- lindirect.v ($09) p0 names the variable holding the DESTINATION's
+                        -- number, which is the value this row's filter already proves was
+                        -- WATCHVAR -- so "var[p0] == WATCHVAR" is measured, not inferred.
+                        w("      var%d <- %-3d  opcode $%02X  logic %-3d  p0=%-3d p1=%-3d  "
+                          .. "flag2=%d flag4=%d  caller $%04X",
+                          WATCHVAR, prog:read_u8(b), prog:read_u8(b + 4), prog:read_u8(b + 3),
+                          prog:read_u8(b + 5), prog:read_u8(b + 6),
+                          (fl >> 2) & 1, (fl >> 4) & 1,
                           prog:read_u8(b + 1) * 256 + prog:read_u8(b + 2))
                     end
                 end
@@ -1643,8 +1653,12 @@ _G._n = emu.add_machine_frame_notifier(function()
         if SAIDAT and SYM.vm_v0_at and not _G._v0_armed then
             prog:write_u8(SYM.vm_v0_at, math.floor(SAIDAT / 256))
             prog:write_u8(SYM.vm_v0_at + 1, SAIDAT % 256)
+            -- ★★★ WHICH VARIABLE, from P3B_WATCHVAR. Defaults to 0 so an unset run reproduces
+            -- P6.44 exactly; the point of the parameter is to re-point the same recorder at the
+            -- variable that turns out to be lindirect.v's destination [T-P0-100 §1.3].
+            if SYM.vm_v0_var then prog:write_u8(SYM.vm_v0_var, WATCHVAR) end
             _G._v0_armed = true
-            w("  ★ var-0 writer recorder armed for vm_cycle %d", SAIDAT)
+            w("  ★ var-%d writer recorder armed for vm_cycle %d", WATCHVAR, SAIDAT)
         end
 
         -- ★★★★★ SAMPLE THE WHOLE VM STATE BLOCK [T-P0-096 §4A]. Seven arms have asked which BUILD

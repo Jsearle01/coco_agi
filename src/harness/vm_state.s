@@ -240,16 +240,27 @@ vm_setvar:
 * ★★★★ FIVE BYTES, AND THE FIFTH IS THE ANSWER. The first version recorded the caller address and
 * it resolved to vm_core.s's `jsr ,x` -- the opcode DISPATCH -- which says "a command handler did
 * it" and not WHICH. vm_op holds the opcode being dispatched, so one more byte names it outright.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ SEVEN BYTES NOW, AND THE WATCHED VARIABLE IS A PARAMETER [T-P0-100 §1.3]. P6.44's version
+* hard-coded var 0; finding who wrote the variable THAT one's destination came from needs the same
+* recorder pointed somewhere else, and re-deriving it is how the stack offsets were got wrong twice.
+* ★★★★ THE TWO NEW BYTES ARE THE OPERANDS. vm_core dispatches with `jsr ,x` and advances vm_ip only
+* AFTER the handler returns, so during the handler vm_code+vm_ip still points at the operand bytes
+* -- p0 at +0 and p1 at +1. **That is what turns "the destination number was 0" from a reading of
+* the handler's shape into a measurement of which variable it read** [P6.44 §7.1].
+* ★★★ vm_v0_var IS WHAT THE FILTER COMPARES, not a literal 0. The host sets it; it defaults to 0 so
+* an unset run reproduces P6.44 exactly.
 VM_V0_MAX       equ     12
 vm_v0_at        fdb     $FFFF           ; the cycle to record; the host writes it
+vm_v0_var       fcb     0               ; which variable to watch; the host writes it
 vm_v0_n         fcb     0
-vm_v0_buf       fill    0,VM_V0_MAX*5   ; value(1), caller(2), logic(1), opcode(1)
+vm_v0_buf       fill    0,VM_V0_MAX*8   ; value, caller(2), logic, opcode, p0, p1, flags0
 
 vm_v0_record:
 * ★★★ EVERYTHING IS SAVED, INCLUDING CC. vm_setvar's caller sees no difference: this runs before
 * the store and must leave A (the var number) and B (the value) exactly as they arrived.
-                pshs    cc,d,x
-                tsta                            ; var 0?
+                pshs    cc,d,x,y
+                cmpa    vm_v0_var               ; the watched variable
                 bne     vm_v0_out
                 ldd     vm_cycle
                 cmpd    vm_v0_at
@@ -257,13 +268,17 @@ vm_v0_record:
                 lda     vm_v0_n
                 cmpa    #VM_V0_MAX
                 bhs     vm_v0_out
-                ldb     #5
+                ldb     #8
                 mul
                 ldx     #vm_v0_buf
                 leax    d,x
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ THE STACK MAP, WRITTEN OUT, BECAUSE THE FIRST VERSION GOT BOTH OFFSETS WRONG.
-*     0,s CC   1,s A   2,s B   3,s X    5,s -> back into vm_setvar    7,s -> ITS CALLER
+* ★★★★★ AND IT MOVED AGAIN AT T-P0-100: reading the operands needs Y, so `pshs cc,d,x` became
+* `pshs cc,d,x,y` and **every offset below X shifted by two** -- exactly what the old note warned
+* would happen silently. The 6809 pushes in a fixed order (CC, A, B, DP, X, Y, U, PC) regardless
+* of how the operand list is written, so Y lands between X and the return addresses:
+*     0,s CC   1,s A   2,s B   3,s X   5,s Y   7,s -> back into vm_setvar   9,s -> ITS CALLER
 * ★★★★★ THE FIRST DRAFT TOOK THE VALUE FROM 1,s -- which is A, the var NUMBER -- and the caller
 * from 5,s, which is the return address of the `jsr vm_v0_record` two instructions above. **It
 * reported `var0 <- 0 from caller $24FA`, and $24FA is inside vm_setvar.**
@@ -276,14 +291,29 @@ vm_v0_record:
 * register in the pshs above moves both offsets, which is why the map is here and not in a head.
                 ldb     2,s                     ; B as it arrived -- the value being written
                 stb     ,x
-                ldd     7,s                     ; vm_setvar's own caller
+                ldd     9,s                     ; vm_setvar's own caller -- see the stack map
                 std     1,x
                 lda     vm_curlogic
                 sta     3,x
                 lda     vm_op                   ; ★ which COMMAND -- the dispatch's own byte
                 sta     4,x
+* ★★★★ THE OPERANDS, READ WHERE THE HANDLER READS THEM. vm_ip still points at them: vm_core.s
+* advances it after `jsr ,x` returns, not before. Y is used because X already holds the row.
+                ldy     vm_code
+                ldd     vm_ip
+                leay    d,y
+                lda     ,y                      ; p0
+                sta     5,x
+                lda     1,y                     ; p1
+                sta     6,x
+* ★★★★★ AND FLAG BYTE 0, WHICH CARRIES FLAGS 2 AND 4 [T-P0-100]. Logic 102 opens with
+* `if (!isset(2)) goto end` and `if (isset(4)) goto end` -- ENTERED_CLI and SAID_ACCEPTED -- so
+* whether the port is even INSIDE logic 102's body is decided by those two bits. **Recording them
+* at the write says which door the port came through.**
+                lda     VM_FLAGS
+                sta     7,x
                 inc     vm_v0_n
-vm_v0_out:      puls    cc,d,x,pc
+vm_v0_out:      puls    cc,d,x,y,pc
                 endc
 
 * ★★ get_var on a TIMER variable ticks the clock in the reference [cycle.py get_var]. The
