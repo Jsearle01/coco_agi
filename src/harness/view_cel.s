@@ -79,7 +79,30 @@ vc_w16          fdb     0               ; width, zero-extended, for the 16-bit a
 * yields a plausible width and height from the middle of the pixel data -- P4.5 recorded that
 * trap when it parsed the same header for loop and cel COUNTS; this is the same arithmetic.
 * ═══════════════════════════════════════════════════════════════════════════════════
-vc_decode_cel:
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE UNPACK IS ONE ROUTINE WITH TWO ENTRY POINTS SINCE T-P0-105.
+*
+*   vc_decode_begin  parse the cel header; leave vc_src, vc_w/h, vc_key, vc_mir and vc_remh set
+*   vc_decode_row    unpack exactly ONE row into vc_dest (which is then a WIDTH-sized buffer)
+*   vc_decode_cel    begin, clear the whole destination, then loop rows -- the ORIGINAL contract
+*
+* ★★★★★ WHY: p3b's staging buffer was 4,784 bytes at $5300 and the arena starts at $6000, so a
+* cel wider-and-taller than the margin overwrote the VIEW it was decoding FROM [P6.49]. **The
+* oracle has no shared staging buffer at all** -- `unpackViewCelData` does `new byte[w*h]` per cel
+* and keeps it with the loaded VIEW [view.cpp:357-370 at the pin] -- so the buffer was ours, and a
+* row is all the compositor ever needs at once.
+*
+* ★★★★ TWO ENTRY POINTS AND ONE UNPACK, NOT TWO UNPACKS [§2F]. The cel gate compares a whole
+* decoded bitmap and must keep doing so; p3b wants a row at a time. **Duplicating the RLE walk to
+* serve both is how the two would drift apart on exactly one opcode**, which is the argument this
+* file already makes about skip lengths.
+*
+* ★★★ vc_decode_cel's behaviour is UNCHANGED, including on the error paths: it still clears the
+* whole destination up front, so a cel that raises VC_E_TRUNC half way leaves the same zeroed tail
+* it always did. The per-row clear below then re-clears rows it has already cleared, which costs a
+* pass in the gate and keeps the two paths exactly equivalent.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+vc_decode_begin:
                 clr     vc_err
                 ldd     #0
                 std     vc_tested
@@ -173,16 +196,55 @@ vc_dc_fits:
                 std     vc_tested               ; ★ AC-5: every source pixel this cel carries
                 leax    3,x
                 stx     vc_src                  ; the compressed data starts here
+* ★★ THE PER-CEL CONSTANTS. adjust_pre/adjust_after depend only on the mirror bit, so they are
+* settled once here; vc_p is per-ROW and is set by vc_decode_row.
+                ldd     #0
+                std     vc_pre                  ; adjust_pre = 0
+                ldd     #1
+                std     vc_post                 ; adjust_after = 1
+                lda     vc_mir
+                beq     vc_db_nomir
+                ldd     #-1
+                std     vc_pre                  ; adjust_pre = -1
+                ldd     #0
+                std     vc_post                 ; adjust_after = 0
+vc_db_nomir:
+                clra
+                ldb     vc_h
+                std     vc_remh
+                rts
 
-* ═══════════════════════════════════════════════════════════════════════════════════
-* ── the unpack, statement for statement against _unpack_cel() ────────────────────
-* ★ The destination is CLEARED first. view.py allocates `bytearray(width*height)`, which is
-* zeroed, and the walk does not write every byte -- a chunk of length 0 writes nothing and a
-* row that ends early leaves the tail untouched. Without the clear, those bytes would be
-* whatever the previous cel left, and the diff would fail on cels whose own data is correct.
-* ═══════════════════════════════════════════════════════════════════════════════════
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ── vc_decode_row ── ONE row into vc_dest. The unpack, against _unpack_cel() ─────
+*
+* ★★★★★ THE ROW-SCOPE DERIVATION, WHICH IS THE ONE THING IN THIS TASK THAT HAD TO BE RE-DERIVED
+* RATHER THAN MOVED. vc_p was an offset into the WHOLE bitmap; it is now an offset into ONE row.
+*
+*   NOT MIRRORED  p starts at 0 each row; pre=0, post=+1; runs fill forward.
+*                 OLD: at the end of row r, p = (r+1)*width -- the start of row r+1.
+*                 NEW: p = 0 with vc_dest advanced a row.  **Same address.**
+*
+*   MIRRORED      p starts at WIDTH each row; pre=-1, post=0; a run of length n does `p -= n`
+*                 then fills FORWARD from p, so the walk moves right-to-left across the row.
+*                 OLD: at the end of mirrored row r the walk has reached p = r*width, and the
+*                      row advance is `p += width*2` -- two widths on, because the walk crossed
+*                      one row backwards and must land at the END of the next.
+*                 NEW: **that advance IS the reset.** p = width, with vc_dest advanced a row.
+*                      (r+2)*width relative to the old base is exactly `width` relative to the
+*                      new one.  **Same address, and adjust_pre/adjust_after keep their meaning
+*                      inside a 255-byte window that they had inside a 4,784-byte one.**
+*
+* ★★★ TRANSCRIPTION vs OURS [§2.1]: the chunk decode, the zero-byte row end, the mirrored
+* backward walk and both adjustment constants are TRANSCRIBED from view.py/_unpack_cel and are
+* unchanged. **The row SCOPE is ours** -- the oracle has no row buffer to scope to, because it
+* allocates the whole bitmap. This is a port decision, not a reading of AGI.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+vc_decode_row:
+* ★ The row is cleared before it is unpacked, for the reason the whole buffer used to be: a chunk
+* of length 0 writes nothing and a row that ends early leaves its tail untouched. **Per row now,
+* because the buffer IS a row** -- and without it those bytes would be the PREVIOUS row's.
                 ldx     vc_dest
-                ldd     vc_tested
+                ldd     vc_w16
                 tfr     d,y
 vc_dc_clr:      clr     ,x+
                 leay    -1,y
@@ -190,23 +252,12 @@ vc_dc_clr:      clr     ,x+
 
                 ldd     #0
                 std     vc_p
-                std     vc_pre                  ; adjust_pre = 0
-                ldd     #1
-                std     vc_post                 ; adjust_after = 1
                 ldd     vc_w16
                 std     vc_remw
-                clra
-                ldb     vc_h
-                std     vc_remh
-
                 lda     vc_mir
                 beq     vc_dc_go
-                ldd     #-1
-                std     vc_pre                  ; adjust_pre = -1
-                ldd     #0
-                std     vc_post                 ; adjust_after = 0
                 ldd     vc_w16
-                std     vc_p                    ; p += width
+                std     vc_p                    ; mirrored: the walk starts at the row's END
 
 vc_dc_go:
                 ldd     vc_remh
@@ -306,25 +357,62 @@ vc_dc_after:
 * instead would advance early on exactly those cels and drift for the rest of the resource.
                 lda     vc_cur
                 lbne    vc_dc_go2
-                ldd     vc_w16
-                std     vc_remw
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE ROW ENDS AND SO DOES THIS CALL. The old code reset vc_remw, decremented vc_remh and
+* carried vc_p into the next row -- adding width*2 when mirrored. **All three of those are now
+* the next call's job**, and the mirrored advance has become vc_decode_row's `p = width` reset.
+* ★★★ vc_remh is decremented HERE rather than by the caller, so "rows still to decode" has one
+* home and the pull loop cannot disagree with the decoder about how far through the cel it is.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
                 ldd     vc_remh
                 subd    #1
                 std     vc_remh
-* ★ mirrored rows advance by width*2: the walk moved BACKWARD across one row, so getting to the
-* end of the next one is two widths on.
-                lda     vc_mir
-                beq     vc_dc_go2
-                ldd     vc_w16
-                aslb
-                rola
-                addd    vc_p
-                std     vc_p
+                clr     vc_err
+                rts
 vc_dc_go2:
                 ldd     vc_remh
                 lbne    vc_dc_row
 vc_dc_done:
                 clr     vc_err
+                rts
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ── vc_decode_cel ── the ORIGINAL whole-cel contract, for the cel gate ───────────
+* ★★★★ Unchanged behaviour, expressed over the two entry points above. The gate compares a whole
+* decoded bitmap against the oracle's, so this must keep producing one -- and it must keep
+* clearing the WHOLE destination first, so a cel that raises mid-way leaves the same zeroed tail.
+* ★★ vc_dest is saved and restored: this walks it a row at a time, and a caller that set it once
+* would otherwise find it pointing at the end of the bitmap.
+vc_decode_cel:
+                jsr     vc_decode_begin
+                lda     vc_err
+                beq     vc_wc_ok
+                rts
+vc_wc_ok:
+                ldx     vc_dest
+                pshs    x
+                ldd     vc_tested
+                tfr     d,y
+vc_wc_clr:      clr     ,x+
+                leay    -1,y
+                bne     vc_wc_clr
+vc_wc_loop:
+                ldd     vc_remh
+                beq     vc_wc_done
+                jsr     vc_decode_row
+                lda     vc_err
+                bne     vc_wc_fail
+                ldd     vc_dest
+                addd    vc_w16
+                std     vc_dest
+                bra     vc_wc_loop
+vc_wc_done:
+                puls    x
+                stx     vc_dest
+                clr     vc_err
+                rts
+vc_wc_fail:     puls    x
+                stx     vc_dest
                 rts
 
 vc_cur          fcb     0               ; the compressed byte driving this iteration
@@ -344,3 +432,15 @@ vc_le16:
 * ★★ The refusal is what surfaced it: VC_E_BIG reports rather than overrunning the buffer, so
 * six wrong cels became six named errors instead of silent corruption of whatever follows.
 VC_CEL_MAX      equ     6144
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ VC_ROW_MAX IS SIZED FROM THE FORMAT, NOT FROM THE CORPUS, AND THAT IS THE WHOLE LESSON
+* OF THE DEFECT THIS REPLACES [T-P0-105].
+*
+* ★★★★★ VC_CEL_MAX above is 6,144 because the CORPUS maximum is 4,784, and 4,784 turned out to be
+* a real cel -- Kingquest3 view 64 loop 0 cel 0 -- that overran the arena by 1,456 bytes. **A
+* corpus maximum is a real input, not a safety margin** [P6.49].
+* ★★★★ A cel's WIDTH is a single byte in the resource, so **255 is the format's own ceiling** and
+* no census can move it. Measured across seven titles the widest row is 115 (Kingquest2 view 130,
+* SpaceQuest-1 view 200); this is 255 because that is what the format permits, and the 140 bytes
+* of difference are the cheapest insurance in this file.
+VC_ROW_MAX      equ     255             ; ★ a cel width is a BYTE; this cannot be exceeded

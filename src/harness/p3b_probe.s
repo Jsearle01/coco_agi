@@ -259,7 +259,19 @@ CP_PRI          equ     PRI_BASE
 * MAP_RESERVED; leaving the `equ` in place while stripping its consumers would keep the region
 * nominally claimed and the collision guard below would still fire against a buffer nothing uses.
                 ifndef  P3B_NO_CEL
-CP_CEL          equ     MAP_RESERVED    ; decoded cel staging, 4,784 B corpus max
+* ★★★★★ ONE ROW, NOT A WHOLE CEL, SINCE T-P0-105. This was 4,784 bytes -- the corpus maximum --
+* and it overlapped RES_ARENA ($6000) by 1,456, zeroing the VIEW it was decoding from [P6.49].
+* ★★★★ The oracle keeps no shared staging buffer [view.cpp:357-370], so the buffer was ours; the
+* compositor already consumed it a row at a time, so a row is all it ever needed.
+* ★★★ COMP_ROW_PULL makes cp_composite call vc_decode_row at the top of each row. It is defined
+* here and nowhere else: comp_probe composites a host-staged cel with no decoder linked.
+* ★★★★★ AND IT MOVES TO THE TOP OF REGION A. At 4,784 bytes it had to start at $5300 and ran 1,456
+* past the region's end into the arena; at 255 it fits in the last page, so **the code ceiling
+* rises from $5300 to $5F00 -- 3,072 bytes back to region A** -- and the arena's first 1,456 bytes
+* are its own again. ★★★ One page rather than 255 bytes exactly: the spare byte is free and a page
+* boundary is one less thing to get wrong.
+COMP_ROW_PULL   equ     1
+CP_CEL          equ     MAP_RESERVED_END-256    ; ★ $5F00. ONE ROW; VC_ROW_MAX is the format's max
                 endc
 
 * ★★★ PIC_DATA IS THE ARENA, NOT A POKED BUFFER -- this is AC-2's "real path" in one line.
@@ -1694,7 +1706,11 @@ pca_lp:
                 stx     vc_view
                 ldx     #CP_CEL
                 stx     vc_dest
-                jsr     vc_decode_cel
+* ★★★★★ BEGIN, NOT DECODE [T-P0-105]. The cel is no longer unpacked here; cp_composite pulls it a
+* row at a time into CP_CEL, which is now VC_ROW_MAX bytes rather than 4,784. **The overlap with
+* RES_ARENA is gone rather than relocated**, and the VIEW this decodes FROM is no longer inside
+* the buffer it decodes INTO.
+                jsr     vc_decode_begin
                 lda     vc_err
                 bne     pca_close
                 jsr     cp_composite
@@ -2084,7 +2100,7 @@ P3_REGIONB_END  equ     $FEF0           ; ★ the vector stubs, as above -- P3B_
 * reading a table is the state these exist to end [AD-78] -- and this file had no assertion
 * covering CP_CEL against anything at all.
                 ifndef  P3B_NO_CEL
-CP_CEL_END      equ     CP_CEL+4784
+CP_CEL_END      equ     CP_CEL+VC_ROW_MAX
                 ifgt    CP_CEL_END-P3_PARSER_BASE
                 error   "the decoded-cel buffer runs into the parser -- CP_CEL is 4,784 B from MAP_RESERVED"
                 endc
@@ -2105,16 +2121,15 @@ CP_CEL_END      equ     CP_CEL+4784
 * [view_cel.s:184-188] -- so an over-margin cel ZEROES 1,456 bytes of the source before the
 * unpack reads a byte of it. It is not a gradual overwrite; it is a wipe.
 *
-* ★★★ THE FIX IS A RULING, NOT A PATCH, and it is not taken here: CP_CEL must start at or below
-* $4D50 to clear the arena, which is 1,456 bytes below where it is, against **eight** bytes of
-* slack between P3_CODE_END and CP_CEL. The three candidate shapes are priced in T-P0-104's report.
-* ★★ -DP3B_ACCEPT_CEL_ARENA is the named acceptance so the arm still builds while that is pending.
-* It is named for what it ACCEPTS, it is recorded in gates.manifest as an accepted known defect
-* with its two titles, and it disables nothing else.
-                ifndef  P3B_ACCEPT_CEL_ARENA
+* ★★★★★ FIXED AT T-P0-105, AND THE ACCEPTANCE FLAG IS RETIRED WITH THE DEFECT. The buffer is one
+* ROW now -- VC_ROW_MAX, sized by the format's width ceiling rather than by a corpus maximum --
+* and it sits in region A's last page. **This assertion passes on its own terms**, with no bypass
+* in this file, in p3b_show.ps1, in p3b_arms_check.ps1 or in gates.manifest.
+* ★★★ -DP3B_ACCEPT_CEL_ARENA existed for exactly one task. **An acceptance flag that outlives the
+* defect it accepted is how a known defect becomes invisible**, so it is deleted rather than left
+* unused: an unused flag reads as a configuration somebody might still want.
                 ifgt    CP_CEL_END-RES_ARENA
-                error   "the decoded-cel buffer overlaps RES_ARENA by 1,456 bytes -- CP_CEL $5300 + 4,784 runs to $65B0 and the arena starts at $6000, where res_top places the VIEW being decoded FROM. Kingquest3 (view 64/0/0, 4,784 B) and larry1 (3 cels) exceed the 3,328 B margin; KQ1/KQ2/PQ1 do not. -DP3B_ACCEPT_CEL_ARENA to build with the defect, which is where this arm is until the shape is ruled on."
-                endc
+                error   "the decoded-cel buffer overlaps RES_ARENA -- CP_CEL + VC_ROW_MAX must end below $6000, where res_top places the VIEW being decoded FROM. This was a real defect: at 4,784 bytes the buffer ran to $65B0 and zeroed 1,456 bytes of its own source [P6.49]."
                 endc
 * ═══════════════════════════════════════════════════════════════════════════════════════════
                 else

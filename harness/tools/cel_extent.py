@@ -30,6 +30,7 @@ from volread import resource  # noqa: E402
 CP_CEL = 0x5300
 RES_ARENA = 0x6000
 MARGIN = RES_ARENA - CP_CEL             # 3,328
+WIDEST = 0                              # ★ the widest cel seen, which sizes a ROW buffer
 
 
 def cel_sizes(game):
@@ -64,7 +65,9 @@ def cel_sizes(game):
                 cel = lo + (raw[co] | (raw[co + 1] << 8))
                 if cel + 1 >= len(raw):
                     continue
-                yield nr, lp, ce, raw[cel] * raw[cel + 1]
+                # ★★★ WIDTH IS YIELDED SEPARATELY SINCE T-P0-105: a row buffer is sized by WIDTH
+                # alone, and w x h is the wrong number for that question by two orders of magnitude.
+                yield nr, lp, ce, raw[cel] * raw[cel + 1], raw[cel], raw[cel + 1]
 
 
 def main():
@@ -80,20 +83,26 @@ def main():
     for g in args.games:
         game = resource.load_from_files(g)
         biggest, who, over = 0, None, 0
-        for nr, lp, ce, size in cel_sizes(game):
+        widest, wide_who = 0, None
+        for nr, lp, ce, size, w, h in cel_sizes(game):
             if size > biggest:
                 biggest, who = size, (nr, lp, ce)
+            if w > widest:
+                widest, wide_who = w, (nr, lp, ce)
             if size > MARGIN:
                 over += 1
         name = pathlib.Path(g).name
         flag = "★★★ REACHES THE ARENA" if biggest > MARGIN else "does not reach"
-        print("  %-16s largest cel %6d B  (view %s)  cels over the margin: %-4d  %s"
-              % (name, biggest, who, over, flag))
+        print("  %-16s largest cel %6d B (view %s)  over margin: %-4d  widest row %3d B (view %s)  %s"
+              % (name, biggest, who, over, widest, wide_who, flag))
+        if widest > WIDEST:
+            globals()["WIDEST"] = widest
         if biggest > worst:
             worst, worst_who = biggest, (name, who)
     print()
     print("  worst across the set: %d bytes (%s) -- %+d against the margin"
           % (worst, worst_who, worst - MARGIN))
+    print("  ★ WIDEST ROW across the set: %d bytes -- this is what a row buffer costs" % WIDEST)
     return 0
 
 

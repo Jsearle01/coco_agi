@@ -1216,6 +1216,18 @@ _G._n = emu.add_machine_frame_notifier(function()
                 -- carries the guard's ip, that guard was never evaluated -- which is one of the two
                 -- stories P6.45 could not separate, and it is unreadable except against the list of
                 -- the expressions that WERE evaluated.
+                -- ★★★★★ DID THE COMPOSITOR ACTUALLY BLIT? [T-P0-105, after Jay saw no sprites]
+                -- CP_BLITS has existed since the compositor was wired and **nothing has ever read
+                -- it**. "sprites 4" is the STAGING count; this is the number of cels actually
+                -- composited, and the two are different questions [§2W].
+                do
+                    local b = 0x0020 + 76       -- MAP_STATUS+76, CP_BLITS [p3b_probe.s:247]
+                    w("    CP_BLITS (cels actually composited): %d%s",
+                      prog:read_u8(b) * 256 + prog:read_u8(b + 1),
+                      SYM.vc_err and string.format("   vc_err=%d  last cel %dx%d",
+                        prog:read_u8(SYM.vc_err), prog:read_u8(SYM.vc_w or 0),
+                        prog:read_u8(SYM.vc_h or 0)) or "")
+                end
                 if _G._arena_hi then
                     local p = _G._arena_hi_parts
                     w("    arena peak (park-sampled, a LOWER BOUND): %d B of %d used"
@@ -2008,6 +2020,17 @@ _G._n = emu.add_machine_frame_notifier(function()
         -- enters the wait. Written one release early for exactly the reason the feed above is.
         if AUTOCLOSE > 0 then prog:write_u8(VAR_AUTOCLOSE, AUTOCLOSE) end
 
+        -- ★★★★★ ZERO CP_BLITS BEFORE THE FIRST CYCLE. The guest never initialises it -- composite.s
+        -- only ever INCREMENTS it, and p3b's status block is not cleared at startup -- so the value
+        -- read at the end is a count plus whatever that RAM held. **Nothing had ever read this
+        -- counter, so nobody had noticed it has no producer for its starting value** [§2W: an
+        -- `inc` counter is only meaningful from a known start, which vm_state.s records once
+        -- already about VM_TESTSEEN].
+        if not _G._blits_zeroed then
+            _G._blits_zeroed = true
+            prog:write_u8(0x006C, 0)
+            prog:write_u8(0x006D, 0)
+        end
         -- ★★★★★ THE ARENA'S OCCUPANCY, WHICH NOTHING HAS EVER MEASURED [T-P0-104 §3(3)].
         -- res_top is exported and sampled, but only ever instantaneously; there is no high-water
         -- mark anywhere, so "how full does the arena actually get" has never had an answer -- the

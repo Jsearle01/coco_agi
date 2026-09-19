@@ -48,6 +48,7 @@ param(
   # deliberately bypassed (-DP3B_ACCEPT_COV_ARENA). **The assertion is not weakened; it is told, by
   # name, that this one caller means it.**
   [switch]$ResCheck,
+  [switch]$CelCheck,
   [switch]$CovFault,
   # ★★★★★ -NoCount IS T-P0-101's ABLATION. VM_OPSEEN ($6400) and VM_TESTSEEN ($6300) sit INSIDE the
   # residency arena's window ($6000-$A000), so every dispatched opcode increments a byte of whatever
@@ -172,15 +173,18 @@ if ($IfDiag) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DTEXT_MODELLED","-D
 # region A ends at $52F8 with CP_CEL at $5300 -- EIGHT bytes -- and the instrument's code needs 518.
 # Its tables are already out of the image, in MAP_COVERAGE; the code cannot be.
 if ($ResCheck) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DTEXT_MODELLED","-DRES_CHECKSUM") + $IRQ }
-# ★★★★★ THE CEL ARM'S ACCEPTED KNOWN DEFECT [T-P0-104 AC-1]. CP_CEL ($5300, 4,784 B) overlaps
-# RES_ARENA ($6000) by 1,456 bytes and that is a static error since P6.49. The overlap is REAL --
-# Kingquest3's largest decoded cel is exactly the 4,784-byte corpus maximum and larry1 has three
-# over the margin -- and the fix is a ruling, not a patch, so this keeps the arm buildable.
-# ★★★ UNCONDITIONAL AND INERT IN THE TEXT ARMS: CP_CEL is not defined under -DP3B_NO_CEL, so the
-# assertion it accepts does not exist there. Passing it once beats spelling it into one branch and
-# forgetting the next arm that needs it.
-# ★★ It changes no bytes. Every arm's hash is unchanged, which p3b_arms_check.ps1 checks.
-$FLAGS += "-DP3B_ACCEPT_CEL_ARENA"
+# ★★★★★ -CelCheck IS THE ARM T-P0-103 COULD NOT BUILD [P6.48 §6.2]. The checksum needs 518 bytes of
+# region A and the cel arm had EIGHT, because CP_CEL started at $5300. With the buffer down to one
+# row the ceiling is $5F00 and there is room -- **so the cel path can finally be watched by the
+# instrument that would have caught the defect this task just fixed.**
+# ★★★ It is the CEL configuration deliberately: -ResCheck carries -DP3B_NO_CEL and therefore never
+# decodes a cel, which is exactly the coverage hole.
+if ($CelCheck) { $FLAGS += @("-DRES_CHECKSUM") }
+# ★★★★ -DP3B_ACCEPT_CEL_ARENA WAS HERE AND IS RETIRED [T-P0-105 §4D]. It accepted CP_CEL's
+# 1,456-byte overlap with RES_ARENA for exactly one task, while the shape was Jay's ruling. The
+# buffer is one ROW now and the assertion passes on its own terms, so the flag is deleted rather
+# than left unused -- **an acceptance flag that outlives its defect is how a known defect becomes
+# invisible**, and an unused one reads as a configuration somebody might still want.
 # ★ Appended last so they compose with every arm above rather than being spelled into each one.
 if ($CovFault) { $FLAGS += @("-DP3B_COVERAGE","-DP3B_FAULT_COV_ARENA","-DP3B_ACCEPT_COV_ARENA") }
 if ($NoCount) { $FLAGS += "-DVM_NOCOUNT" }
@@ -206,6 +210,11 @@ $WANT = @("res_volbase","res_slicebase","res_curblk","vm_quit","vm_badop","vm_cy
           # [T-P0-104 §3(3)]. res_top was already read by vm_run.ps1 and not by this one, and
           # res_ccur by nothing at all -- so arena occupancy had no producer.
           "res_top","res_ccur",
+          # ★★★★★ vc_err IS PUBLISHED BECAUSE NOTHING HAS EVER READ IT IN THIS PROBE [T-P0-105].
+          # p3_composite_all skips a sprite whenever the decode sets it, silently -- and CP_BLITS
+          # measured ZERO composites across 60 cycles with four sprites staged, so every one of
+          # them was being skipped and no instrument said why.
+          "vc_err","vc_w","vc_h",
           # ★★★ vm_curlogic NAMES THE LOGIC THAT WAS INTERPRETING when a room changed [T-P0-094].
           # It exists in every build and was in vm_run.ps1's list and not this one, so p3b's room
           # trajectory could say WHEN and never WHICH.
@@ -238,7 +247,7 @@ if ($Var0Diag) { $WANT += @("vm_v0_at","vm_v0_n","vm_v0_buf") }
 if ($IfDiag) { $WANT += @("vm_if_at","vm_if_logic","vm_if_n","vm_if_buf","vm_if_code","vm_if_clen","vm_if_snap") }
 # ★★ rck_seen and rck_noted are NOT optional extras: they are what tells a green run from a run
 # where the checker never executed [§2W]. The host prints them whether or not anything went wrong.
-if ($ResCheck) { $WANT += @("rck_n","rck_bad","rck_ring","rck_seen","rck_noted","rck_skipped","rck_full",
+if ($ResCheck -or $CelCheck) { $WANT += @("rck_n","rck_bad","rck_ring","rck_seen","rck_noted","rck_skipped","rck_full",
                             "rck_type","rck_idx","rck_live","rck_base","rck_len","rck_sum") }
 if ($Linked) { $WANT += @("P3_FONT","P3_FONT_BYTES","P3_PBUF","ph_blk_vocab","ph_blk_slot5") }
 # ★★★★ THE COMMAND LINE's SYMBOLS [T-P0-092]. They exist wherever TEXT_PROMPT does, which

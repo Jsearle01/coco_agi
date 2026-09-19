@@ -130,6 +130,27 @@ cp_composite:
 co_row:
                 lda     co_remh
                 lbeq    co_done
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ -DCOMP_ROW_PULL: THE COMPOSITOR DRIVES THE DECODER, ONE ROW AT A TIME [T-P0-105].
+*
+* ★★★★★ PULL AND NOT PUSH, AND THE REASON IS IN THIS LOOP. co_src is a running pointer that only
+* ever moves FORWARD, one byte at a time, in row-major order, and **nothing re-reads a row it has
+* passed** -- co_save/co_restore walk the SCREEN, not the cel. So the cel is consumed exactly once
+* in exactly the order the decoder produces it, and the interface was already row-shaped.
+* ★★★★ PUSH would have inverted THIS routine -- the more heavily gated of the two, and the one
+* holding the transparency test, the priority test and the control-line walk. **Pull moves one
+* pointer assignment; push would have moved three decisions into the decoder.**
+* ★★★ The oracle is no guide here: it allocates the whole bitmap and composites later, which is
+* the shape being left behind. **This is a port decision, stated as one** [§2.1].
+* ★★ Guarded because comp_probe composites a cel the HOST staged, with no decoder linked at all.
+                ifdef   COMP_ROW_PULL
+                jsr     vc_decode_row
+                lda     vc_err
+                lbne    co_done                 ; ★ a mid-cel error stops the blit, as before
+                ldd     vc_dest
+                std     co_src
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
                 lda     co_basex
                 sta     co_curx
                 lda     vc_w

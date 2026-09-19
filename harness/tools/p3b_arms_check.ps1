@@ -65,11 +65,11 @@ $TEXT = @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DP3B_IRQ")
 # the -48 is the counters and nothing else.**
 # ═══════════════════════════════════════════════════════════════════════════════════════════
 $ARMS = @(
-  # ★★★★ THE CEL ARM CARRIES AN ACCEPTED KNOWN DEFECT [T-P0-104]. CP_CEL $5300 + 4,784 overlaps
-  # RES_ARENA by 1,456 bytes, which is a static error since P6.49; -DP3B_ACCEPT_CEL_ARENA is the
-  # named acceptance that keeps this arm buildable while the shape is Jay's ruling. **It changes no
-  # bytes** -- an assertion emits nothing -- which is why this row's hash is unchanged.
-  @{ n = "p3b";        f = @("-DP3B_ACCEPT_CEL_ARENA");                   sz = 13870; sha = "F875F7F6" },
+  # ★★★★ -DP3B_ACCEPT_CEL_ARENA IS RETIRED [T-P0-105]. The cel buffer is one row and the arena
+  # assertion passes on its own terms, so this row builds clean with no acceptance flag at all.
+  # RETIRED at T-P0-105: 13,870 B F875F7F6 -> 13,941 B D2C30D53 (+71). The cel decode goes a row
+  # at a time, CP_CEL moves from $5300/4,784 B to $5F00/255 B, and the arena overlap is gone.
+  @{ n = "p3b";        f = @();                                          sz = 13941; sha = "D2C30D53" },
   @{ n = "p3b_text";   f = $TEXT;                                         sz = 16210; sha = "83DD87A4" },
   @{ n = "p3b_win3";   f = $TEXT + @("-DTEXT_WIN3");                      sz = 16210; sha = "0437A07C" },
   @{ n = "p3b_notick"; f = $TEXT + @("-DTEXT_FAULT_NOTICK");              sz = 16207; sha = "C545C08F" },

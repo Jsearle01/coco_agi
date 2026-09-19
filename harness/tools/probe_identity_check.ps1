@@ -23,7 +23,11 @@ $PROBES = @(
   @{ n = "vm";   s = "src/harness/vm_probe.s";   f = @("-DHAL_GFX_MODE_SERVICE","-DHAL_SYS_FAST_CLOCK"); sz = 9667; sha = "771F147D" },
   @{ n = "pic";  s = "src/harness/pic_probe.s";  f = @("-DHAL_GFX_MODE_SERVICE");                        sz = 0;    sha = "" },
   @{ n = "res";  s = "src/harness/res_probe.s";  f = @("-DHAL_GFX_MODE_SERVICE");                        sz = 0;    sha = "" },
-  @{ n = "cel";  s = "src/harness/cel_probe.s";  f = @("-DHAL_GFX_MODE_SERVICE","-DHAL_SYS_FAST_CLOCK"); sz = 0;    sha = "" },
+  # ★★★★ PINNED AT T-P0-105, because this one MOVED and an on-disk baseline cannot notice that.
+  # RETIRED: 1,472 B -> 1,527 B 8B754B9C (+55). vc_decode_cel became a wrapper over
+  # vc_decode_begin + vc_decode_row so there is ONE unpack rather than two [§2F]. **Its behaviour
+  # is unchanged and the cel gate is what says so: 9,193/9,193 byte-identical, 1,525 mirrored.**
+  @{ n = "cel";  s = "src/harness/cel_probe.s";  f = @("-DHAL_GFX_MODE_SERVICE","-DHAL_SYS_FAST_CLOCK"); sz = 1527; sha = "8B754B9C" },
   @{ n = "comp"; s = "src/harness/comp_probe.s"; f = @();                                                sz = 0;    sha = "" }
 )
 
