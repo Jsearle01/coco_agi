@@ -13,6 +13,31 @@
 # invalidated. With the flags recorded here the audit can rebuild and COMPARE BYTES, which is
 # the question that actually matters.
 #
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ THREE THINGS THIS FILE DID NOT RECORD, LANDED AT T-P0-102 [P6.47 §4F].
+#
+# ★★★★★ 1. HASHES HERE ARE SHA-256, TRUNCATED. Every artifact hash in this file and in every
+# report is a `Get-FileHash` DEFAULT cut to 32 hex -- **which is exactly the width of a full MD5**,
+# so a re-derived comparison using MD5 is indistinguishable from a real byte change. That happened:
+# a new checker reported all seven p3b arms MOVED immediately after a source edit, which is the most
+# believable possible false red [P6.46 §7.1]. **The algorithm is part of the baseline** and was
+# recorded nowhere until this line.
+#
+# ★★★★★ 2. p3b AND vm_probe SAMPLE AT DIFFERENT INSTANTS [P6.42, carried for five tasks]. The
+# reference and `vm_probe` record state at pace ✔ feed ✔ interpret ✘ post_cycle ✘; `p3b` records at
+# all four. **No integer record shift aligns them** -- the gap is a fraction of a cycle. So a
+# per-cycle diff between a p3b dump and an oracle trace is comparing two different instants, and a
+# disagreement at one cycle's boundary is a seam artefact until shown otherwise. P6.41's five named
+# divergent bytes were exactly that.
+#
+# ★★★★★ 3. P3B_ROOM IS PART OF THE RESTART SCENARIO, NOT A CONVENIENCE. The intro restart only
+# reproduces with `P3B_ROOM=1` (`P3B_ROOM_AT=8` by default) and a fed command line. Without it the
+# run stays in room 83 and ends clean -- **three runs in T-P0-101 measured an arm that does not
+# diverge**, including the plain `-Fault` arm whose binary is byte-identical to the shipped one
+# [P6.46 §6.1]. **A scenario variable that decides whether the defect exists is part of the
+# instrument**, and it is in no row below because no row runs that scenario.
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+#
 # format:  name <TAB> source <TAB> artifact <TAB> flags (space-separated, may be empty)
 # ★ Flags are load-bearing: comp built with -DHAL_GFX_MODE_SERVICE is 1,373 bytes, not 967, and
 # is a different program from the one the compositing numbers were established against.
@@ -100,7 +125,7 @@ vm_timed	src/harness/vm_probe.s	build/vm_probe.bin	-DHAL_GFX_MODE_SERVICE -DHAL_
 # that is no longer true].
 # ★★ THE FLAGS AND THE PURPOSE ARE UNCHANGED, so this is NOT AD-96's shape: the row still builds
 # the same program under the same flags, and it carries no median in column 5 to invalidate.
-p3b	src/harness/p3b_probe.s	build/p3b_probe_pk_fresh.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED	integration probe -- PLANE_WIN_MMU comes from the SOURCE (line 65), never the command line; binary 58AD3C27 13,918 B, re-baselined T-P0-084h	purpose=timing
+p3b	src/harness/p3b_probe.s	build/p3b_probe_pk_fresh.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED	integration probe -- PLANE_WIN_MMU comes from the SOURCE (line 65), never the command line; binary F875F7F6 13,870 B, re-baselined T-P0-102 (retired: 58AD3C27 13,918 B -- the AC-5 opcode counters left the arena window, -48 B; EVERY p3b TIMING FIGURE PUBLISHED AGAINST THE RETIRED BINARY IS RETIRED WITH IT, producer moved)	purpose=timing
 # ═══════════════════════════════════════════════════════════════════════════════════════════
 # ★★★★★ p3b_text -- THE SAME SOURCE, A SECOND CONFIGURATION [ruling C, T-P0-084f].
 #
@@ -202,7 +227,7 @@ p3b	src/harness/p3b_probe.s	build/p3b_probe_pk_fresh.bin	-DHAL_GFX_MODE_SERVICE 
 # the command line at row 22 is addressable; the attribute gained push/pop [text.cpp:453,:516] and
 # a boot default of white-on-black [text.cpp:46]; and the per-room clear now blacks the text strip
 # below the 168-row picture instead of leaving four whole slices white.
-p3b_text	src/harness/p3b_probe.s	build/p3b_probe_text.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ	correctness probe: text opcodes, no cel staging, room 83, windowed vocabulary, four-slot text window, command line linked but never enabled; binary 5B19334F 16,258 B, re-baselined T-P0-093	purpose=correctness
+p3b_text	src/harness/p3b_probe.s	build/p3b_probe_text.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ	correctness probe: text opcodes, no cel staging, room 83, windowed vocabulary, four-slot text window, command line linked but never enabled; binary 83DD87A4 16,210 B, re-baselined T-P0-102 (retired: 5B19334F 16,258 B, -48 B -- the AC-5 opcode counters left the arena window)	purpose=correctness
 # ═══════════════════════════════════════════════════════════════════════════════════════════
 # ★★★★★ THE FAULT ARM, AND IT HAS NOW BEEN SEEN RED. Blocked for three tasks; §2W is satisfied.
 #     retired:  2268DAB7...  15,033 B   (built but unexercisable, P6.29c..P6.31)
@@ -229,7 +254,7 @@ p3b_text	src/harness/p3b_probe.s	build/p3b_probe_text.bin	-DHAL_GFX_MODE_SERVICE
 # ★★ T-P0-092: 5C4200DA 15,552 B RETIRED -> 454576C1 16,154 B. Re-shown RED on this binary:
 # STUCK in cycle 9 under the p3b_box trigger [L-62 -- fault-detectability does not survive a
 # rebuild, so every re-baseline re-runs the arm rather than citing it].
-p3b_notick	src/harness/p3b_probe.s	build/p3b_probe_notick.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ -DTEXT_FAULT_NOTICK	fault arm for print's wait loop -- shown RED T-P0-087+, re-shown T-P0-093; binary F7AE0FCF 16,255 B	purpose=fault
+p3b_notick	src/harness/p3b_probe.s	build/p3b_probe_notick.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ -DTEXT_FAULT_NOTICK	fault arm for print's wait loop -- shown RED T-P0-087+, re-shown T-P0-093; binary C545C08F 16,207 B, re-baselined T-P0-102 (retired: F7AE0FCF 16,255 B, -48 B); re-shown RED T-P0-102 on the p3b_box scenario -- ★ it does NOT go red on p3b_text's, which enters no box [§2W: an arm that never reaches the code cannot fail]	purpose=fault
 # ═══════════════════════════════════════════════════════════════════════════════════════════
 # ★★★★★ p3b_nomap -- THE VOCABULARY WINDOW's FAULT ARM [T-P0-091, §2W].
 # ★★★★★ IT EXISTS BECAUSE NO ROW IN THE SUITE EXERCISES THE DICTIONARY AT ALL, and that was true
@@ -249,7 +274,7 @@ p3b_notick	src/harness/p3b_probe.s	build/p3b_probe_notick.bin	-DHAL_GFX_MODE_SER
 # that zeroed par_vocab]. The discrimination is total, which is what §2W asks for.
 # ★★ NOT in run_gates.sh: a fault arm belongs beside its gate, not inside the green path.
 # ★★ T-P0-092: 0A0B7F1B 15,588 B RETIRED -> DC9260A0 16,154 B, re-shown RED (STUCK in cycle 30).
-p3b_nomap	src/harness/p3b_probe.s	build/p3b_probe_nomap.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ -DP3B_VOCAB_NOMAP	fault arm for the vocabulary window -- run with -WithInput; shown RED T-P0-091, re-shown T-P0-093; binary 9604AAAA 16,255 B	purpose=fault
+p3b_nomap	src/harness/p3b_probe.s	build/p3b_probe_nomap.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ -DP3B_VOCAB_NOMAP	fault arm for the vocabulary window -- run with -WithInput; shown RED T-P0-091, re-shown T-P0-093; binary 2B552C14 16,207 B, re-baselined T-P0-102 (retired: 9604AAAA 16,255 B, -48 B); re-shown RED T-P0-102 -- ★ its signature CHANGED from "0 words" to a stall in cycle 30, which is still the window being shut and is recorded rather than glossed	purpose=fault
 # ═══════════════════════════════════════════════════════════════════════════════════════════
 # ★★★★★ p3b_type -- THE TYPED PATH. Same binary as p3b_text; what differs is P3B_TYPE, which posts
 # characters through MAME's natural keyboard into the CoCo3 matrix [T-P0-092 §1.4].
@@ -288,7 +313,7 @@ p3b_row22	src/harness/p3b_probe.s	build/p3b_probe_text.bin	-DHAL_GFX_MODE_SERVIC
 # would have re-created the defect the clean arm just fixed** -- and it would move two variables
 # rather than one [L-73]. The row bound is what actually refuses the glyph.
 # ★★★ Shown RED T-P0-093: 0 of 1,280 bytes on row 22 against the clean arm's 55, same four keys.
-p3b_win3	src/harness/p3b_probe.s	build/p3b_probe_win3.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ -DTEXT_WIN3	fault arm for the four-slot text window -- run with P3B_INJECT; shown RED T-P0-093; binary 5400A30F 16,258 B	purpose=fault
+p3b_win3	src/harness/p3b_probe.s	build/p3b_probe_win3.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ -DTEXT_WIN3	fault arm for the four-slot text window -- run with P3B_INJECT; shown RED T-P0-093; binary 0437A07C 16,210 B, re-baselined T-P0-102 (retired: 5400A30F 16,258 B, -48 B); re-shown RED T-P0-102	purpose=fault
 # ═══════════════════════════════════════════════════════════════════════════════════════════
 # ★★★★★ p3b_parse -- SAME BINARY AS p3b_text; WHAT DIFFERS IS -WithInput, AND THAT IS THE ROW.
 # §2F: the scope and the invocation of a gate are part of its definition, and this project has now

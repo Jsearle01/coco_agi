@@ -50,6 +50,54 @@ VM_OBJROOMS     equ     MAP_VM_OBJROOMS
 * draw phase remaps slot 5 to priority. **The phases stay disjoint and no region grows.**
 * ★ 8,160 <= 8,192 with 32 bytes to spare, which is uncomfortably tight and is reported as such.
 VM_OBJ          equ     MAP_PRI_SLICE
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE TWO COVERAGE COUNTERS, AND THIS PROBE HAD NO OPINION ABOUT THEM FOR TWENTY TASKS
+* [P6.46, P6.47]. vm_state.s's defaults are $6300/$6400 -- `vm_probe`'s free space and **this
+* probe's RES_ARENA window**, which is the line directly above at :30. Every dispatched opcode
+* incremented a byte of whatever resource the arena held; Kingquest1's LOGIC 102 landed at $63F2
+* and its `goto 0908` became an execution count.
+* ★★★★ THEY ARE SLOT 7 NOW, which never moves in any phase -- the counters are written in every
+* phase, so a region that is only sometimes mapped would be a different bug.
+* ★★ Nothing in this probe or its host READS them; they are write-only here. That is not a reason
+* to leave them unplaced -- **it is why the collision was silent.**
+* ★★★★★ -DP3B_FAULT_COV_ARENA PUTS THEM BACK WHERE THEY WERE, and the assertions at the foot of
+* this file must REFUSE the build [§2W]. It is P6.46's defect exactly -- $6300/$6400, inside
+* RES_ARENA -- not an imitation of it, and it is the only way to know the new assertion is
+* load-bearing rather than decorative. **An assertion nobody has seen fail is an unexercised
+* assertion, and this whole task exists because the assertions that DID exist named the wrong
+* neighbour.** Requires -DP3B_COVERAGE, since a dead counter collides with nothing.
+                ifdef   P3B_FAULT_COV_ARENA
+VM_TESTSEEN     equ     $6300
+VM_OPSEEN       equ     $6400
+                else
+VM_TESTSEEN     equ     MAP_TESTSEEN
+VM_OPSEEN       equ     MAP_OPSEEN
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ AND THIS PROBE TURNS THEM OFF. -DVM_NOCOUNT unless -DP3B_COVERAGE asks for them back.
+* ★★★★★ THE ARGUMENT IS NOT "they are dangerous" -- it is that **this probe never reads them**.
+* VM_OPSEEN and VM_TESTSEEN exist to support the VM gate's AC-5 coverage claim, and that claim is
+* made by `vm_probe` against nine titles. `p3b`'s gates are pictures, parses, rooms and a person
+* looking at a screen. **An instrument that is written on the hottest path in the interpreter and
+* read by nothing is not an instrument here**, and for twenty tasks it was writing into game data.
+* ★★★★ IT COSTS NOTHING MEASURABLE AND IT IS NOT A WORKAROUND. The structural fix is the `ifndef`
+* in vm_state.s and the assertions below; this line is the separate observation that `p3b` was
+* carrying an instrument it had no use for. If a future task wants coverage here, -DP3B_COVERAGE
+* turns it on and the assertions decide whether the map can hold it.
+* ★★★ -DP3B_COVERAGE IS EXPECTED TO FAIL IN THE CEL CONFIGURATION AND THAT IS THE POINT [§2W].
+* That arm's flat vocabulary window runs $E3BA-$FF00 and needs 6,828 of its 7,238 bytes, so
+* MAP_COVERAGE at $FC00 does not fit -- **the build refuses and says so**, rather than the
+* dictionary and the counters sharing 512 bytes the way the arena and the counters did.
+* ★★ The inner `ifndef` is not redundant: -DVM_NOCOUNT on the command line is how every other probe
+* ablates the counters, and a bare `equ` here would make that a multiply-defined symbol -- refusing
+* a build for asking for the state this file is already in.
+                ifndef  P3B_COVERAGE
+                ifndef  VM_NOCOUNT
+VM_NOCOUNT      equ     1
+                endc
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 
 FB_BASE         equ     MAP_PHASE_WIN           ; framebuffer slice, draw phase
 PRI_BASE        equ     MAP_PRI_SLICE           ; priority slice, draw phase
@@ -1918,7 +1966,11 @@ P3_PARSER_TOTAL equ     P3_CLNBUF+42-P3_PARSER_BASE
 * assertion rather than as a declaration-order problem. P3_FONT is P3_CLNBUF+42 by its own
 * definition, so this is that value with no forward reference in it.
 P3_VOCAB        equ     P3_CLNBUF+42+P3_FONT_BYTES
-P3_VOCAB_END    equ     $FEF0
+* ★★★★ THE CEILING IS MAP_COVERAGE, NOT $FEF0, SINCE T-P0-102. The two coverage counters now sit at
+* $FC00-$FE00 in slot 7, and this is the one arm whose dictionary grows up into that space. 4,166 B
+* against Kingquest1's 3,144 -- the assert below is what makes the margin a fact rather than a hope,
+* and it is the same assert that was already here.
+P3_VOCAB_END    equ     MAP_COVERAGE
                 ifgt    3144-(P3_VOCAB_END-P3_VOCAB)
                 error   "the flat measurement arm cannot hold Kingquest1's WORDS.TOK (3,144 B)"
                 endc
@@ -2023,6 +2075,69 @@ CP_CEL_END      equ     CP_CEL+4784
 * ends of the move carry a check rather than a sentence.
                 ifgt    P3_CODE_END-MAP_RESERVED_END
                 error   "P3b code has grown past MAP_RESERVED_END ($6000) into the arena window -- region A is full"
+                endc
+                endc
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE COVERAGE COUNTERS AGAINST EVERY NEIGHBOUR THEY HAVE [P6.47, AC-3].
+*
+* ★★★★★ vm_probe.s:608-620 HAS ASSERTED THIS CLASS SINCE T-P0-032 -- VM_TESTSEEN against
+* VM_OPSEEN, VM_OPSEEN against vmtr_buf and RES_ARENA -- **and this file named neither counter
+* anywhere.** The counters were at $6300/$6400, which is `vm_probe`'s free space and this probe's
+* RES_ARENA window, and nothing in either file could notice.
+* ★★★★★ vm_state.s's own header already carries the lesson, written for THESE TWO SYMBOLS
+* colliding with the code image: *"An assertion that names one of four neighbours reports
+* conformance for the other three."* **Same symbols, same class, one probe later** -- so this
+* block names every neighbour rather than the one that happened to bite.
+* ★★★★ OVERLAP, NOT ORDERING. vm_probe's map is linear and its asserts are `a+size > b`. This
+* probe's is not: region A, region B, the arena window and the windowed vocabulary are in no fixed
+* order relative to a slot-7 address, so each check is the real two-sided test -- ranges [a,b) and
+* [c,d) overlap iff b > c AND d > a -- written as a nested pair because lwasm has `ifgt` and no
+* boolean AND.
+* ★★★ LIVE ONLY WHEN THE COUNTERS ARE. Under the default -DVM_NOCOUNT nothing writes or clears
+* them, so the address is inert and the checks would refuse a build for a hazard that does not
+* exist. **A gate that is permanently red for a legitimate reason gets switched off** [§2M.8].
+P3_COV          equ     VM_TESTSEEN
+P3_COV_END      equ     VM_OPSEEN+256
+                ifne    VM_OPSEEN-(VM_TESTSEEN+256)
+                error   "the coverage counters are not contiguous -- the checks below assume one 512 B block"
+                endc
+                ifndef  VM_NOCOUNT
+                ifgt    P3_COV_END-RES_ARENA
+                ifgt    RES_ARENA_END-P3_COV
+                error   "the coverage counters are inside RES_ARENA -- every dispatched opcode would increment a byte of the resident resource (P6.46: Kingquest1 LOGIC 102 at $63F2, its goto at offset $0010)"
+                endc
+                endc
+                ifgt    P3_COV_END-MAP_CODE
+                ifgt    P3_CODE_END-P3_COV
+                error   "the coverage counters are inside region A -- they would be incremented over this probe's own code"
+                endc
+                endc
+                ifgt    P3_COV_END-P3_VOCAB
+                ifgt    P3_VOCAB_END-P3_COV
+                error   "the coverage counters are inside the vocabulary window -- said() would read incremented dictionary bytes"
+                endc
+                endc
+                ifgt    P3_COV_END-MAP_INPUT
+                ifgt    MAP_INPUT_END-P3_COV
+                error   "the coverage counters are inside MAP_INPUT -- the substitution buffer and the counters would share bytes"
+                endc
+                endc
+                ifgt    P3_COV_END-$FF00
+                error   "the coverage counters run into the $FF00 I/O page"
+                endc
+                ifndef  P3B_NO_CEL
+                ifgt    P3_COV_END-CP_CEL
+                ifgt    CP_CEL_END-P3_COV
+                error   "the coverage counters are inside CP_CEL -- decoded cel staging would overwrite them and they would corrupt a staged cel"
+                endc
+                endc
+                else
+                ifgt    P3_COV_END-P3_FONT
+                ifgt    P3_FONT+2048-P3_COV
+                error   "the coverage counters are inside the font -- glyphs would be incremented"
+                endc
+                endc
                 endc
                 endc
 

@@ -48,6 +48,17 @@ vm_st_f:        clr     ,x+
 vm_st_o:        clr     ,x+
                 decb
                 bne     vm_st_o
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ GUARDED BY VM_NOCOUNT SINCE T-P0-102, AND THESE TWO LOOPS ARE THE BIGGER WRITE [P6.47].
+* ★★★★★ -DVM_NOCOUNT REMOVED THE `inc`s AND LEFT THESE, so the ablation that located P6.46's
+* defect was ablating half the traffic: a build with the counters "off" still **wiped 512 bytes**
+* at every VM reset, and in `p3b` those 512 bytes were inside the resource arena window. The
+* restart disappeared because the increments were what corrupted the `goto`; the wipe was still
+* there and nobody had looked for it.
+* ★★★★ **An ablation flag that removes a feature's WRITES and not its INITIALISATION does not
+* remove the feature** [L-73: name every variable a toggle moves, not only the intended one].
+* The flag's name is VM_NOCOUNT and it now means what it says.
+                ifndef  VM_NOCOUNT
                 ldx     #VM_OPSEEN
                 ldb     #0
 vm_st_c:        clr     ,x+
@@ -62,6 +73,7 @@ vm_st_c:        clr     ,x+
 vm_st_t:        clr     ,x+
                 decb
                 bne     vm_st_t
+                endc
 
 * ★ every object starts with stepTime/stepTimeCount/cycleTime/cycleTimeCount/stepSize = 1
 * [state.py ScreenObj.__init__]. Zero there would stall every cycler permanently.

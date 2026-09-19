@@ -41,20 +41,50 @@ $LW   = "C:\WIN_LWTools\lwasm.exe"
 $BASE = @("-DHAL_GFX_MODE_SERVICE","-DHAL_SYS_FAST_CLOCK","-DPLANE_WINDOWED","-DPRI_PACKED")
 $TEXT = @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DP3B_IRQ")
 
-# name, extra flags beyond $BASE, expected size, expected SHA256 prefix -- P6.40's hashes, held since.
+# name, extra flags beyond $BASE, expected size, expected SHA256 prefix.
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ RE-BASELINED AT T-P0-102, ALL SEVEN, AND EVERY ONE BY EXACTLY -48 BYTES.
+# p3b_probe.s now defines VM_NOCOUNT, so the two AC-5 opcode counters are neither incremented nor
+# cleared in any p3b arm: 2 x 14 B of dispatch-path `inc` block [vm_core.s:132,344] and 2 x 10 B
+# of reset-time clear loop [vm_cycle.s:51-64]. **The same delta on all seven is the check that the
+# change is the one intended** -- a flag that leaked into anything else would not land on 48.
+#
+# RETIRED at T-P0-102 (P6.47), superseded by the rows below:
+#   p3b        13918 B  58AD3C27   ->  13870 B  F875F7F6
+#   p3b_text   16258 B  5B19334F   ->  16210 B  83DD87A4
+#   p3b_win3   16258 B  5400A30F   ->  16210 B  0437A07C
+#   p3b_notick 16255 B  F7AE0FCF   ->  16207 B  C545C08F
+#   p3b_nomap  16255 B  9604AAAA   ->  16207 B  2B552C14
+#   p3b_fault  15382 B  16DC35EF   ->  15334 B  E0742D78
+#   p3b_flat   15367 B  E7882A33   ->  15319 B  89818F5F
+# ★★★★ THE RETIRED HASHES DESCRIBE BINARIES THAT CORRUPTED GAME DATA [P6.46]. Every timing figure
+# published against `p3b` comes from one of them, and the producer has moved -- so those figures are
+# retired with the binary, not carried forward [gates.manifest's vm_timed precedent, T-P0-084h].
+# ★★ -DP3B_COVERAGE restores the counters at their new address and reassembles p3b_text to 16,258 B
+# -- the retired size exactly, since only two immediate operands differ. **That is the check that
+# the -48 is the counters and nothing else.**
+# ═══════════════════════════════════════════════════════════════════════════════════════════
 $ARMS = @(
-  @{ n = "p3b";        f = @();                                          sz = 13918; sha = "58AD3C27" },
-  @{ n = "p3b_text";   f = $TEXT;                                         sz = 16258; sha = "5B19334F" },
-  @{ n = "p3b_win3";   f = $TEXT + @("-DTEXT_WIN3");                      sz = 16258; sha = "5400A30F" },
-  @{ n = "p3b_notick"; f = $TEXT + @("-DTEXT_FAULT_NOTICK");              sz = 16255; sha = "F7AE0FCF" },
-  @{ n = "p3b_nomap";  f = $TEXT + @("-DP3B_VOCAB_NOMAP");                sz = 16255; sha = "9604AAAA" },
-  @{ n = "p3b_fault";  f = $TEXT + @("-DTEXT_MODELLED");                  sz = 15382; sha = "16DC35EF" },
-  @{ n = "p3b_flat";   f = $TEXT + @("-DTEXT_MODELLED","-DTEXT_VOCAB_FLAT"); sz = 15367; sha = "E7882A33" }
+  @{ n = "p3b";        f = @();                                          sz = 13870; sha = "F875F7F6" },
+  @{ n = "p3b_text";   f = $TEXT;                                         sz = 16210; sha = "83DD87A4" },
+  @{ n = "p3b_win3";   f = $TEXT + @("-DTEXT_WIN3");                      sz = 16210; sha = "0437A07C" },
+  @{ n = "p3b_notick"; f = $TEXT + @("-DTEXT_FAULT_NOTICK");              sz = 16207; sha = "C545C08F" },
+  @{ n = "p3b_nomap";  f = $TEXT + @("-DP3B_VOCAB_NOMAP");                sz = 16207; sha = "2B552C14" },
+  @{ n = "p3b_fault";  f = $TEXT + @("-DTEXT_MODELLED");                  sz = 15334; sha = "E0742D78" },
+  @{ n = "p3b_flat";   f = $TEXT + @("-DTEXT_MODELLED","-DTEXT_VOCAB_FLAT"); sz = 15319; sha = "89818F5F" }
 )
 
-# ★★★ -DVM_NOCOUNT removes the two opcode counters [vm_core.s:132]. It is a REAL byte change with no
-# behavioural risk, and it shrinks `p3b`, so the row goes red on size AND on hash.
-if ($SelfTest) { $ARMS[0].f += "-DVM_NOCOUNT"; "★ SELF-TEST: p3b built with -DVM_NOCOUNT -- that row MUST read MOVED" }
+# ★★★ -DP3B_COVERAGE puts the two opcode counters back [p3b_probe.s]. It is a REAL byte change --
+# +48 B, the exact delta this task's re-baseline removed -- so the row goes red on size AND on hash.
+# ★★ It used to be -DVM_NOCOUNT, which p3b_probe.s now defines itself; passing it again is a
+# multiply-defined symbol rather than a fault. **A self-test that stops assembling is not a red**,
+# and the replacement is the better one anyway: it re-creates the configuration that was retired.
+# ★★★★ IT TARGETS p3b_text, NOT p3b, AND THE REASON IS ITSELF A RESULT. `p3b` is the cel arm, whose
+# flat vocabulary window runs $E3BA-$FF00 and needs 6,828 of its 7,238 bytes -- so -DP3B_COVERAGE
+# there does not produce a different binary, it produces the assertion at p3b_probe.s refusing the
+# build. **That is correct and it is not a self-test**: a checker whose fault arm fails to assemble
+# proves the assembler works, not that the checker compares.
+if ($SelfTest) { $ARMS[1].f += "-DP3B_COVERAGE"; "★ SELF-TEST: p3b_text built with -DP3B_COVERAGE -- that row MUST read MOVED" }
 
 $bad = 0
 foreach ($a in $ARMS) {
@@ -69,4 +99,4 @@ foreach ($a in $ARMS) {
   if (-not $ok) { $bad++ }
   "{0,-10} {1,6} B  {2}  {3}" -f $a.n, $sz, $h.Substring(0, 8), $(if ($ok) { "OK" } else { "MOVED -- expected $($a.sz) B $($a.sha)" })
 }
-if ($bad -eq 0) { "★ all 7 shipped arms byte-identical to P6.40" } else { "★ $bad ARM(S) MOVED"; exit 1 }
+if ($bad -eq 0) { "★ all 7 shipped arms byte-identical to the P6.47 baseline (SHA256)" } else { "★ $bad ARM(S) MOVED"; exit 1 }

@@ -68,7 +68,12 @@ MAP_SEEDSTACK_E equ     $0400           ; ★ 768 B = 384 entries of (x,y); peak
 MAP_HWSTACK     equ     $0800           ; S initialises here; usable $0500-$07FF
 MAP_VMSTATE     equ     $0800           ; VM state block, 2,048 B
 MAP_VM_VARS     equ     $0800           ;   256 vars
-MAP_VM_FLAGS    equ     $0900           ;   256 flags, 1 byte each (not packed -- see below)
+* ★★★ "1 byte each (not packed)" WAS WRONG AND STOOD FOR SIX TASKS [P6.41-P6.47]. Both probes store
+* the flags PACKED, 32 bytes, LSB-first -- `vm_state.s:66`'s own comment says so, `vm_getflag`
+* shifts a bit out of a byte, and the 288-byte state record `vm_diff.py` compares is 32 packed flag
+* bytes followed by 256 variables. **The region is still 256 bytes and only 32 are used**, which is
+* why nothing ever disagreed out loud.
+MAP_VM_FLAGS    equ     $0900           ;   flags, PACKED 32 B LSB-first; 256 B reserved
 MAP_VM_CTRL     equ     $0A00           ;   controller table
 MAP_VM_OBJROOMS equ     $0A20           ;   256 inventory-item room numbers
 MAP_VM_OBJ      equ     $0B20           ;   screen objects, 16 x 42 B  -> ends $0DC0
@@ -305,6 +310,37 @@ MAP_TABLES      equ     $E000
 MAP_PRI_BANDS   equ     $E000           ; ★ §2F.4: 168-byte LOOKUP, never a computation
 MAP_PALETTE     equ     $E0A8           ; ★ §2F.1: 16-byte table, loaded at init. NEVER inline
 MAP_FONT        equ     $E0B8           ; the authored 8x8 40-column font, 2,048 B (§2B)
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ 512 BYTES OF SLOT 7 ARE SPOKEN FOR BY THE PROBES, AND SAYING SO HERE IS THE FIX [P6.47].
+*
+* ★★★★★ THIS FILE'S HEADER SAYS THE HARNESS KEEPS ITS OWN ADDRESSES, AND THAT IS EXACTLY WHAT WENT
+* WRONG. The VM's two AC-5 coverage counters lived at $6300/$6400 -- chosen for `vm_probe`'s map,
+* correct there, and **inside `p3b`'s arena window**, where every dispatched opcode incremented a
+* byte of the resident resource [P6.46]. The engine's map could not object, because the engine's
+* map had never been told those 512 bytes existed.
+* ★★★★ SO THE REGION IS NAMED HERE RATHER THAN IN A PROBE. It is not an engine structure and the
+* engine does not read it -- **what is recorded is that the space is NOT FREE**, which is the one
+* fact a map exists to carry and the one fact that was missing. The precedent is directly above:
+* MAP_VM_VARS and its neighbours are the ENGINE's decision and `p3b_probe.s:41-52` points its own
+* symbols at them, rather than each probe inventing an address the map has never heard of.
+*
+* ★★★ WHY HERE AND NOT LOWER. Slot 7 never moves in any phase [the table at the head of this
+* file], and these counters are written on the interpreter's hottest path in every phase -- so the
+* region must be resident unconditionally, and slot 7 is the only one that is. Below it, $0480 has
+* 128 B, the $0B20 object region is claimed by the engine, and MAP_RESERVED is closed and at its
+* floor [T-P0-037].
+* ★★ WHAT IT DISPLACES: nothing. MAP_TABLES runs $E000-$FF00; the font ends at $E8B8 and the rest
+* was unclaimed. It neighbours 4,936 B of free table space below ($E8B8-$FC00) and 256 B above
+* ($FE00-$FF00), and `p3b`'s vector redirect stubs sit at $FEF0-$FF00 inside that.
+* ★★ TESTSEEN BELOW OPSEEN, matching `vm_probe`'s $6300/$6400 order, so the assertion between them
+* reads the same way in both maps.
+MAP_COVERAGE    equ     $FC00           ; harness AC-5 opcode coverage: 2 x 256 B
+MAP_TESTSEEN    equ     MAP_COVERAGE    ;   executions per TEST opcode
+MAP_OPSEEN      equ     MAP_COVERAGE+256 ;  executions per COMMAND opcode
+MAP_COVERAGE_END equ    MAP_COVERAGE+512
+* ★ The adjacency assertions are at the foot of this file with every other one, in map order --
+*   one home for the mechanism, not one assertion beside each constant.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 MAP_TABLES_END  equ     $FF00           ; ★ $FF00-$FFFF is the I/O page and is not ours
 
 * ── the framebuffer and priority planes, as BLOCKS not addresses ─────────────────
@@ -363,6 +399,12 @@ MAP_ARENA_BYTES equ     24576           ; ★ 3 blocks, CHOSEN FROM THE EVICTION
                 endc
                 ifgt    MAP_PHASE_WIN_E-MAP_TABLES
                 error   "phase window overruns the resident tables"
+                endc
+                ifgt    MAP_FONT+2048-MAP_COVERAGE
+                error   "the font overruns the harness coverage region"
+                endc
+                ifgt    MAP_COVERAGE_END-MAP_TABLES_END
+                error   "the harness coverage region runs into the resident tables' end"
                 endc
                 ifgt    MAP_TABLES_END-$FF00
                 error   "resident tables run into the $FF00 I/O page"

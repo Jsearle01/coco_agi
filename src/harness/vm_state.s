@@ -67,6 +67,23 @@ VM_FLAGS        equ     $4100           ; 32 bytes, packed LSB-first -- THE OTHE
 VM_CTRL         equ     $4120           ; 32 bytes, packed: controller_occurred
 VM_OBJROOMS     equ     $4140           ; 256 bytes: the OBJECT file's object -> room table
 VM_OBJ          equ     $4240           ; 255 entries x 32 bytes
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE TWO COVERAGE COUNTERS ARE IN HERE SINCE T-P0-102, AND THEY WERE OUTSIDE IT FOR
+* TWENTY TASKS [P6.46].
+* ★★★★★ EVERY OTHER SYMBOL IN THIS BLOCK IS RELOCATABLE BECAUSE A PROBE HAS ITS OWN MAP -- and
+* these two, which are written on the hottest path in the interpreter, were nailed to $6300/$6400.
+* That is `vm_probe`'s free space and it is **`p3b`'s RESOURCE ARENA WINDOW**, so in `p3b` every
+* dispatched opcode incremented a byte of the resource the arena held. Kingquest1's LOGIC 102
+* loaded at $63F2 and its `goto 0908` at offset $0010 WAS the execution count of command opcode
+* $02 -- the port never left the module and ran 2,300 bytes the reference jumps over.
+* ★★★★ A GUARD THAT COVERS MOST OF A SUBSYSTEM'S SYMBOLS READS AS COVERING THE SUBSYSTEM. Nobody
+* decided to leave them out; the block grew and they were added below it. **The tell is that the
+* defect is invisible in the file that has the bug** -- `vm_probe`'s map is fine, and nothing in
+* `vm_state.s` says which map it is being read under.
+* ★★★ VM_OBJ_END below stays outside and that is correct: it is DERIVED from VM_OBJ and follows it.
+* **A derived address relocates; a literal one does not, and that is the whole distinction.**
+VM_TESTSEEN     equ     $6300           ; 256 bytes: executions per TEST opcode
+VM_OPSEEN       equ     $6400           ; 256 bytes: executions per COMMAND opcode
                 endc
 VM_OBJ_MAX      equ     255
 VM_OBJ_END      equ     VM_OBJ+VM_OBJ_MAX*32            ; $6220 -- 255 x 32 from $4240
@@ -84,13 +101,16 @@ VM_OBJ_END      equ     VM_OBJ+VM_OBJ_MAX*32            ; $6220 -- 255 x 32 from
 * ★★ The census that replaced the guesswork behind it -- the highest ACTIVE slot per title -- is
 * -DVM_OBJCENSUS and vm_objhighp [vm_objects.s].
 
-* ★★ AC-5 COVERAGE: one byte per command opcode, incremented on dispatch. Above VM_OBJ, which
-* ends at $9220 -- NOT $9200, an arithmetic slip that cost a debugging session when a trace
-* buffer was placed there and the object table wrote through it.
-VM_OPSEEN       equ     $6400           ; 256 bytes: executions per COMMAND opcode
-* ★ The TEST opcode space is separate and needs its own table -- see vm_core.s. $2800 is free:
-* the code image ends below $2800 and VM_OPSEEN starts at $2900.
-VM_TESTSEEN     equ     $6300           ; 256 bytes: executions per TEST opcode
+* ★★ AC-5 COVERAGE: one byte per command opcode, incremented on dispatch, and one per TEST opcode
+* -- the two dispatch classes are separate opcode SPACES and need separate tables [§2H's worked
+* example; vm_core.s:330-335]. **Both are declared in the relocation block above.**
+* ★★★★★ THE COMMENT THAT USED TO BE HERE SAID *"$2800 is free: the code image ends below $2800 and
+* VM_OPSEEN starts at $2900"* WHILE THE equs READ $6400 AND $6300 [T-P0-102 §3(5)]. The addresses
+* moved out of $2800-$2AFF when the code grew into them -- **and the sentence explaining the old
+* placement survived the move**, so the file's own map contradicted its own constants. ★★★ It is
+* the sentence a reader checking "where do the counters live" would have trusted, and it would
+* have told them the counters were nowhere near the arena. **A number in a comment has no
+* producer** [memmap.inc's header, third instance].
 *
 * ★★ IT LIVES BELOW $8000, AND THE REASON RECORDED HERE WAS WRONG FOR TWO TASKS.
 *
