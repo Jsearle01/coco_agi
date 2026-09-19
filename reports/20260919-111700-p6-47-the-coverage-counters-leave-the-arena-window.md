@@ -1,5 +1,7 @@
 ## Form B Report — T-P0-102 / P6.47 — The coverage counters leave the arena window
 **Class:** integration (§4A).  wip.  Descends from `57e7385`.
+★★★★★ **25.3 PASSED — Jay, live, RGB: *"it stayed at the castle."*** The restart is gone by both
+gates. ★★ A separate pre-existing defect remains visible (§7.6).
 
 ### 0 — Receipt / status (C-35 stamp)
 t0=2026-09-19 11:17 (HEAD 57e7385, wip). Four `src/` files, two harness tools changed, one added.
@@ -190,7 +192,12 @@ AC-11 hal_sync x3 OK (coco_agi / POP / karateka, 11 files)   reg-discipline 17 i
 git diff --stat : gates.manifest 35 | p3b_arms_check 54 | memmap.inc 44 | p3b_probe.s 117
                   vm_cycle.s 12 | vm_state.s 34
 ```
-**25.2:** N/A. **25.3:** ★★★★★ **pending Jay — see §7.1.**
+**25.2:** N/A.
+**25.3: ★★★★★ PASSED — Jay, live-poke, RGB, 400 cycles, `P3B_ROOM=1`.** Jay's words: *"the sequence
+was as described. it stayed at the castle."* ★★★★ **The second copyright screen does not appear**,
+which is the observation that opened this arc [Jay, T-P0-092: *"then i get the copyright message
+again while still in the castle room"*]. ★★ Jay also reports the title-screen scroll still does not
+work — **a separate, pre-existing defect, not a regression; see §7.6.**
 
 ### 6 — Reactive deviations and route accounting
 
@@ -223,11 +230,10 @@ git diff --stat : gates.manifest 35 | p3b_arms_check 54 | memmap.inc 44 | p3b_pr
 
 ### 7 — Uncertainty flags
 
-**7.1 ★★★★★ AC-10 HAS NOT RUN.** §4A.3 says "pending Jay" is not acceptable for an integration task,
-and this is one. The byte evidence is as strong as it gets — **the corrupted instruction reads
-correctly and the module exits where the reference does** — but the observation that opened this
-arc was a person seeing a copyright screen twice, and **nobody has watched it not happen.** The
-command is `P3B_ROOM=1` + `p3b_show.ps1 -Text -WithInput -Cycles 400`.
+**7.1 ★★★★★ RESOLVED — AC-10 RAN AND PASSED.** This section said the gate had not run; Jay ran it on
+the instruction to, and confirmed *"it stayed at the castle."* ★★★★ **The byte evidence and the eye
+gate agree**, which is the state §4A exists to produce and is not the state the previous eight tasks
+were in — six of them reported byte results against a symptom nobody had watched disappear.
 
 **7.2 ★★★★★ A SECOND COLLISION OF THE SAME CLASS IS LIVE AND I HAVE NOT TOUCHED IT** (§6 says name
 it). **In the cel arm `CP_CEL` runs `$5300`–`$65B0`, which is 1,456 bytes INTO `RES_ARENA`.** The
@@ -247,7 +253,25 @@ resource bytes after a bind.** `logic_copy_diff.py` is the instrument; it is poi
 **7.5 ★★ `p3b`'s published timing figures are retired with its binary** (producer moved), recorded
 in `gates.manifest`. They were measured on a binary that corrupted game data.
 
+**7.6 ★★★★★ THE TITLE-SCREEN SCROLL STILL DOES NOT WORK, and it is NOT a regression from this task.**
+Jay reported it in the same message that first described this sequence [T-P0-092], before any of the
+counter work: *"then i get the tilte page where the scrolling text doesn't work."*
+
+★★★★★ **AND THE SAME MESSAGE CARRIES THE ONLY KNOWN-GOOD OBSERVATION OF IT, WHICH IS NOW
+UNREPRODUCIBLE:** *"then i go to the tiltle sgae again where the scroll does work."* ★★★★ **The
+scroll worked on the SECOND title pass — the one the restart caused — and there is no second pass
+any more.** So the one arm in which the scroll behaved was a RE-ENTRY into the title with state
+already initialised, which points at **first-pass initialisation rather than at the scroll code**.
+★★★ That lead exists only because the defect and its one working case were reported together, and
+it is recorded here before the second pass is forgotten.
+
+★★ **No instrument has ever looked at it.** It is a motion-bearing behaviour, so §4's rule applies:
+it needs a live run, not a still, and no byte gate in the suite covers the title screen at all.
+
 ### 8 — Follow-up candidates
+0. ★★★★★ **THE TITLE-SCREEN SCROLL** (§7.6) — **Jay's, observed live, and the next thing a person
+   sees.** Start from the re-entry clue: it worked on the second title pass and nothing else about
+   that pass was different except that the title had already run once.
 1. ★★★★★ **A bind-time resource checksum** — the answer to §7.4, and the one gate that would have
    caught this in a day instead of eight tasks. Its own task [P6.46 §8.3].
 2. ★★★★★ **`CP_CEL` against the arena** (§7.2) — assert it, then decide whether it moves. **The cel
@@ -259,7 +283,12 @@ in `gates.manifest`. They were measured on a binary that corrupted game data.
    bind*** — **PROPOSED TEXT ONLY** [§2D].
 
 ### 9 — User interaction during task
-Jay instructed "write the report" before the eye gate was run. §7.1 records the consequence.
+1. Jay instructed "write the report" before the eye gate had run; the report was written with §7.1
+   flagging AC-10 as open.
+2. ★★★★★ **Jay then instructed "run it", watched it, and confirmed the gate: *"the sequence was as
+   described. it stayed at the castle."*** §5's 25.3 and §7.1 are updated from that.
+3. ★★★★ **Jay reported, unprompted, that the title-screen scroll still does not work.** §7.6 — it
+   predates this task and is now the top follow-up.
 
 ### 10 — Candidate(s) captured this task
 - `seeds/AGI/live/2026-09-19-a-relocation-guard-that-covers-most-of-a-subsystem.md`
