@@ -424,8 +424,53 @@ co_put_visual:
                 else
                 leax    d,x
                 endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ -DVIS_DOUBLED: THE PLANE IS A PACKED DISPLAY AND A PIXEL GOES IN BOTH NIBBLES.
+*
+* ★★★★★ THE DEFECT THIS CLOSES [P6.53 §7.1]. This routine stored the raw AGI colour index into
+* what is, in `p3b`, the CoCo3 framebuffer -- mode 2, 4 bits per pixel, TWO SCREEN PIXELS PER
+* BYTE. `$0c` is a black pixel beside a coloured one, so every sprite pixel was half black. Jay,
+* on the first sprite anyone has seen: *"him and the flages look to be missing every other row of
+* pixels."*
+*
+* ★★★★★ EVERY OTHER WRITER IN THE TREE ALREADY DOUBLES, AND TWO OF THEM SAY SO:
+*     pic_core.s:113        stores scr_dbl -- ":91 identically (scr_color & 15) * 17"
+*     pic_fill.s:251        reads `anda #$0F` -- "either nibble; equal by construction"
+*     p3b_probe.s           clears with $FFFF -- "visual 15, both nibbles (the pixel doubling)"
+*     text.s txt_blit       4 bytes per 8-pixel char -- the full 320-px resolution, 2 px/byte
+* **This routine was the only one that did not**, and the invariant was stated in two files.
+*
+* ★★★★ WHY IT IS CONDITIONAL AND NOT UNCONDITIONAL. The ORACLE keeps the two representations
+* apart: `_gameScreen` is "160x168 - screen, where the actual game content is drawn to" and
+* `_displayScreen` is "320x200 or 640x400 ... which is then copied to framebuffer"
+* [graphics.h:116,119 at 9d9b9e93]. **Our oracle dumps _gameScreen** (getGameScreenForOracle), so
+* every reference this project compares against is ONE BYTE PER PIXEL, raw index -- including
+* comp_probe's. ★★★ **comp's reference is right and the packing is ours**, at the display
+* boundary, exactly where the oracle puts it. So comp_probe keeps its format and its bytes.
+* ★★★ pic's gate proves the same thing from the other side: picgate.py:34-42 UNPACKS the CoCo3
+* buffer and "nibble agreement is verified before either half is trusted" -- it models a packed
+* plane explicitly, which is why 45/45 passes while the renderer writes doubled bytes.
+*
+* ★★ c*17 IS THE DOCUMENTED FORM, not (c<<4)|c: pic_core.s:91 says scr_dbl "is identically
+* (scr_color & 15) * 17". One MUL beats four shifts and a pshs/ora pair [pic_core.s:88-92 costs
+* that sequence at ~30 cycles], and co_col is PER-PIXEL data so it cannot be hoisted the way
+* scr_dbl was.
+* ★★★ -DCOMP_FAULT_RAW_VIS restores the raw store -- today's behaviour, a known-good red [§2W].
+                ifdef   VIS_DOUBLED
+                ifndef  COMP_FAULT_RAW_VIS
+                ldb     co_col
+                lda     #17
+                mul                             ; B = c * 17 = the colour in both nibbles
+                stb     ,x
+                else
                 lda     co_col
                 sta     ,x
+                endc
+                else
+                lda     co_col
+                sta     ,x
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
                 ifndef  COMP_NOCOUNT
                 ldu     #co_written
                 jmp     co_inc32

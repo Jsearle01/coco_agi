@@ -82,7 +82,11 @@ $ARMS = @(
   #   p3b 13,950 9F232F39 | p3b_text 16,210 83DD87A4 | p3b_win3 16,210 0437A07C
   #   p3b_notick 16,207 C545C08F | p3b_nomap 16,207 2B552C14 | p3b_fault 15,334 E0742D78
   #   p3b_flat 15,319 89818F5F
-  @{ n = "p3b";        f = @();                                          sz = 14149; sha = "2C4DB737" },
+  # RETIRED at T-P0-109: 14,149 B 2C4DB737 -> 14,152 B 26763F91 (+3). co_put_visual doubles the
+  # colour into both nibbles under -DVIS_DOUBLED (`ldb co_col / lda #17 / mul / stb ,x` replacing
+  # `lda co_col / sta ,x`). **Only this arm moves**: the text arms define P3B_NO_CEL, so
+  # composite.s is not linked there, and comp_probe does not define VIS_DOUBLED.
+  @{ n = "p3b";        f = @();                                          sz = 14152; sha = "26763F91" },
   @{ n = "p3b_text";   f = $TEXT;                                         sz = 16409; sha = "D09866C3" },
   @{ n = "p3b_win3";   f = $TEXT + @("-DTEXT_WIN3");                      sz = 16409; sha = "35AB01B0" },
   @{ n = "p3b_notick"; f = $TEXT + @("-DTEXT_FAULT_NOTICK");              sz = 16406; sha = "7A9A319C" },

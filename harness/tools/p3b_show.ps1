@@ -50,6 +50,10 @@ param(
   [switch]$ResCheck,
   [switch]$CelCheck,
   [switch]$CovFault,
+  # ★★★★ -RawVis IS T-P0-109's FAULT ARM: co_put_visual stores the raw colour index instead of
+  # doubling it into both nibbles. **That is exactly the behaviour this task replaced**, so its
+  # red is a state the project has already seen on a screen rather than an invention [§2W].
+  [switch]$RawVis,
   # ★★★★★ -NoCount IS T-P0-101's ABLATION. VM_OPSEEN ($6400) and VM_TESTSEEN ($6300) sit INSIDE the
   # residency arena's window ($6000-$A000), so every dispatched opcode increments a byte of whatever
   # resource the arena has mapped there. -DVM_NOCOUNT removes both counters and nothing else, which
@@ -187,6 +191,7 @@ if ($CelCheck) { $FLAGS += @("-DRES_CHECKSUM") }
 # invisible**, and an unused one reads as a configuration somebody might still want.
 # ★ Appended last so they compose with every arm above rather than being spelled into each one.
 if ($CovFault) { $FLAGS += @("-DP3B_COVERAGE","-DP3B_FAULT_COV_ARENA","-DP3B_ACCEPT_COV_ARENA") }
+if ($RawVis)   { $FLAGS += "-DCOMP_FAULT_RAW_VIS" }
 if ($NoCount) { $FLAGS += "-DVM_NOCOUNT" }
 
 & $LW --format=raw --output=build/p3b_probe_pk_fresh.bin --map=build/p3b_probe_pk.map -I. @FLAGS src/harness/p3b_probe.s

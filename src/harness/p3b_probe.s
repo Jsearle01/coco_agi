@@ -270,6 +270,13 @@ CP_PRI          equ     PRI_BASE
 * rises from $5300 to $5F00 -- 3,072 bytes back to region A** -- and the arena's first 1,456 bytes
 * are its own again. ★★★ One page rather than 255 bytes exactly: the spare byte is free and a page
 * boundary is one less thing to get wrong.
+* ★★★★★ THE VISUAL PLANE HERE IS THE DISPLAY, SO A PIXEL GOES IN BOTH NIBBLES [T-P0-109].
+* CP_VIS is FB_BASE is MAP_PHASE_WIN -- the CoCo3 framebuffer, mode 2, two screen pixels per byte.
+* Every other writer in this probe already doubles: pic_core's scr_dbl, p3_clear_planes' $FFFF,
+* text.s's 4-bytes-per-char blit. **The compositor did not, and every sprite pixel was half black.**
+* ★★★ comp_probe does NOT define this: its plane is a scratch buffer compared one byte per pixel
+* against a reference in the oracle's _gameScreen format, and nothing displays it.
+VIS_DOUBLED     equ     1
 COMP_ROW_PULL   equ     1
 CP_CEL          equ     MAP_RESERVED_END-256    ; ★ $5F00. ONE ROW; VC_ROW_MAX is the format's max
                 endc

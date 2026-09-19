@@ -1268,19 +1268,30 @@ _G._n = emu.add_machine_frame_notifier(function()
                         for s = 0, math.min(prog:read_u8(SYM.p3_nspr), 4) - 1 do
                             local b = SYM.p3_spr + s * 6
                             local sx, sy = prog:read_u8(b), prog:read_u8(b + 1)
-                            local rows = {}
+                            -- ★★★★★ AND THE NIBBLES [T-P0-109 AC-5]. A plane byte must hold the
+                            -- colour in BOTH halves -- pic_fill.s reads "either nibble; equal by
+                            -- construction". A byte whose halves differ is a half-black pixel,
+                            -- which is what Jay saw. **Counted, not inspected.**
+                            local rows, eq, ne, sample = {}, 0, 0, nil
                             for r = math.max(0, sy - 20), math.min(167, sy) do
                                 local n = 0
                                 for c = sx, math.min(159, sx + 40) do
                                     local off = r * 160 + c
                                     prog:write_u8(0xFFA6, BV + (off >> 13))
-                                    if prog:read_u8(0xC000 + (off & 0x1FFF)) ~= 0 then n = n + 1 end
+                                    local v = prog:read_u8(0xC000 + (off & 0x1FFF))
+                                    if v ~= 0 then
+                                        n = n + 1
+                                        if (v >> 4) == (v & 0x0F) then eq = eq + 1
+                                        else ne = ne + 1; sample = sample or v end
+                                    end
                                 end
                                 rows[#rows + 1] = (n > 0) and tostring(math.min(n, 9)) or "."
                             end
                             w("      sprite %d (view %d) at x=%d y=%d, rows %d..%d: %s",
                               s, prog:read_u8(b + 3), sx, sy,
                               math.max(0, sy - 20), sy, table.concat(rows))
+                            w("        nibbles: %d equal, %d SPLIT%s", eq, ne,
+                              sample and string.format("  (e.g. $%02X -- half black)", sample) or "")
                         end
                     end
                     -- ★★★★★ tested / rejected / WRITTEN. The priority band decides what is DRAWN,
