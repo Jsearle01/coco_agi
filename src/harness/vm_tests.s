@@ -206,13 +206,23 @@ vm_fedn         fcb     0               ; inputs fed (vp_feed)
 * matches it, so sixteen slots cover one cycle's said() calls rather than being consumed by
 * cycle 1. ★★ Four bytes a row: ip (which said), result, flag 4 as it was ON ENTRY, flag 2.
 * ★ Off by default. Every shipped artifact is byte-identical with this undefined [AC-4].
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ FORTY-EIGHT ROWS AND A LOGIC COLUMN [T-P0-101 §4B]. P6.43's sixteen ran out INSIDE LOGIC 1
+* and its table stops there -- so **no instrument has ever seen a said() in logic 102**, which is
+* the module the divergence is in. A cap that ends before the region under investigation makes the
+* log a claim about the cap [L-86, and it is the same shape as the 45-picture corpus].
+* ★★★★ THE FIFTH BYTE IS vm_curlogic, and without it the table cannot be read at all here: P6.43's
+* rows were attributed to logics by their ip ORDER, which works while the run visits each logic
+* once and stops working the moment one is re-entered. **The column measures what the ordering was
+* assuming.**
+* ★★★ 48 x 5 = 240 bytes in the diagnostic arm and zero in every shipped one.
                 ifdef   VM_SAIDDIAG
-VM_SD_MAX       equ     16
+VM_SD_MAX       equ     48
 vm_sd_at        fdb     $FFFF           ; the cycle to record; the host writes it
 vm_sd_n         fcb     0
 vm_sd_f4        fcb     0               ; flag 4 as read on entry, held across par_said
 vm_sd_f2        fcb     0
-vm_sd_buf       fill    0,VM_SD_MAX*4
+vm_sd_buf       fill    0,VM_SD_MAX*5   ; ip(2), result, packed f4/f2, logic
                 endc
 
 vmtest_said:
@@ -282,7 +292,7 @@ vm_sd_record:
                 lda     vm_sd_n
                 cmpa    #VM_SD_MAX
                 bhs     vm_sd_out
-                ldb     #4
+                ldb     #5
                 mul
                 ldx     #vm_sd_buf
                 leax    d,x
@@ -300,6 +310,10 @@ vm_sd_record:
                 pshs    b
                 ora     ,s+
                 sta     3,x
+* ★★★ WHICH LOGIC. Rows from logic 0, logic 1 and logic 102 are otherwise separable only by the
+* order they arrive in, which is an assumption and not a measurement [T-P0-101].
+                lda     vm_curlogic
+                sta     4,x
                 inc     vm_sd_n
 vm_sd_out:      rts
                 endc

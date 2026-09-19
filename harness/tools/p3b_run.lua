@@ -150,6 +150,10 @@ local PHASETAP = tonumber(os.getenv("P3B_PHASETAP") or "")
 local SAIDAT = tonumber(os.getenv("P3B_SAIDAT") or "")
 -- ★★ P3B_WATCHVAR=<n> -- which variable the writer recorder watches. 0 by default.
 local WATCHVAR = tonumber(os.getenv("P3B_WATCHVAR") or "0")
+-- ★★★ P3B_IFLOGIC=<n> -- which logic the `if` recorder watches, in the P3B_SAIDAT cycle
+--    [T-P0-101]. Declared up here for the same reason PHASETAP is: a `local` below stage() is a
+--    nil GLOBAL inside it, and this file has produced that defect three times.
+local IFLOGIC = tonumber(os.getenv("P3B_IFLOGIC") or "")
 local VOCAB, VOCAB_END = nil, nil
 local function rd16_early(a) return prog:read_u8(a) * 256 + prog:read_u8(a + 1) end
 
@@ -1179,13 +1183,64 @@ _G._n = emu.add_machine_frame_notifier(function()
                 if SYM.vm_sd_n and SYM.vm_sd_buf then
                     local n = prog:read_u8(SYM.vm_sd_n)
                     w("    said() rows for vm_cycle %d : %d", SAIDAT or -1, n)
+                    -- ★★★★ FIVE BYTES A ROW SINCE T-P0-101: the fifth is vm_curlogic. P6.43's table
+                    -- attributed rows to logics by their ip ORDER, and the run re-enters logic 0
+                    -- after logic 102, so the ordering was an assumption this column replaces.
                     for i = 0, n - 1 do
-                        local b = SYM.vm_sd_buf + i * 4
+                        local b = SYM.vm_sd_buf + i * 5
                         local ip = prog:read_u8(b) * 256 + prog:read_u8(b + 1)
                         local res = prog:read_u8(b + 2)
                         local fl = prog:read_u8(b + 3)
-                        w("      said @ip $%04X  result=%d  flag4_on_entry=%d  flag2=%d",
-                          ip, res, fl & 1, (fl >> 1) & 1)
+                        w("      said logic %-3d @ip $%04X  result=%d  flag4_on_entry=%d  flag2=%d",
+                          prog:read_u8(b + 4), ip, res, fl & 1, (fl >> 1) & 1)
+                    end
+                end
+                -- ★★★★★ EVERY `if` IN ONE LOGIC, IN ONE CYCLE [T-P0-101 §4A]. Six bytes a row: the
+                -- expression's ip, flag byte 0 AS THE EXPRESSION SAW IT, the result, and where the
+                -- branch left ip.
+                -- ★★★★★ AN ABSENT ROW IS A RESULT. If the recorder is armed for logic 102 and no row
+                -- carries the guard's ip, that guard was never evaluated -- which is one of the two
+                -- stories P6.45 could not separate, and it is unreadable except against the list of
+                -- the expressions that WERE evaluated.
+                if SYM.vm_if_n and SYM.vm_if_buf then
+                    local n = prog:read_u8(SYM.vm_if_n)
+                    w("    `if` rows for logic %d in vm_cycle %d : %d",
+                      IFLOGIC or -1, SAIDAT or -1, n)
+                    -- ★★★★★ THE PORT'S OWN FIRST 64 BYTES of the logic, against which
+                    -- `python harness/tools/logic_bytes.py <game> <n>` is the file's side.
+                    if n > 0 and SYM.vm_if_snap and SYM.vm_if_code then
+                        w("      copy at $%04X, vm_codelen %d",
+                          prog:read_u8(SYM.vm_if_code) * 256 + prog:read_u8(SYM.vm_if_code + 1),
+                          prog:read_u8(SYM.vm_if_clen) * 256 + prog:read_u8(SYM.vm_if_clen + 1))
+                        for row = 0, 15 do
+                            local h = {}
+                            for k = 0, 15 do
+                                h[#h + 1] = string.format("%02X", prog:read_u8(SYM.vm_if_snap + row * 16 + k))
+                            end
+                            w("      %04X  %s", row * 16, table.concat(h, " "))
+                        end
+                    end
+                    for i = 0, n - 1 do
+                        local b = SYM.vm_if_buf + i * 12
+                        local ip = prog:read_u8(b) * 256 + prog:read_u8(b + 1)
+                        local fl = prog:read_u8(b + 2)
+                        local res = prog:read_u8(b + 3)
+                        local ipa = prog:read_u8(b + 4) * 256 + prog:read_u8(b + 5)
+                        -- ★★★★★ THE BYTES AT ip_after, FROM THE PORT'S OWN COPY of the logic.
+                        -- Compare them against logic_bytes.py's dump of the same offset: the two
+                        -- disagreeing is a resource defect, the two agreeing with a wrong jump is
+                        -- an arithmetic one, and no other instrument separates those.
+                        local raw = {}
+                        for k = 0, 5 do raw[#raw + 1] = string.format("%02X", prog:read_u8(b + 6 + k)) end
+                        -- ★★★ res 255 = the evaluator returned through exit_all and consumed no
+                        -- branch word; ip_after is meaningless there and is labelled so.
+                        local arm = (res == 255) and "exit_all"
+                                    or ((res == 1) and "TAKEN (fell into the block)"
+                                                   or "not taken (skipped the block)")
+                        w("      if @expr $%04X  flags0=$%02X  flag2=%d flag4=%d  result=%s  ip_after=$%04X  [%s]  %s",
+                          ip, fl, (fl >> 2) & 1, (fl >> 4) & 1,
+                          (res == 255) and "--" or tostring(res), ipa,
+                          table.concat(raw, " "), arm)
                     end
                 end
                 -- ★★★★★ EVERY WRITER OF VAR 0 IN THE TARGET CYCLE, WITH ITS CALLER. Four bytes a
@@ -1659,6 +1714,18 @@ _G._n = emu.add_machine_frame_notifier(function()
             if SYM.vm_v0_var then prog:write_u8(SYM.vm_v0_var, WATCHVAR) end
             _G._v0_armed = true
             w("  ★ var-%d writer recorder armed for vm_cycle %d", WATCHVAR, SAIDAT)
+        end
+        -- ★★★★★ THE `if` RECORDER [T-P0-101 §4A]. Armed on the same park and off the same cycle as
+        -- the other two, so the three tables describe ONE cycle and can be read against each other.
+        -- ★★★ The logic number is REQUIRED, not defaulted: a recorder pointed at logic 0 by accident
+        -- would fill its 24 rows and report a table about the wrong module, which reads exactly like
+        -- a table about the right one.
+        if SAIDAT and IFLOGIC and SYM.vm_if_at and not _G._if_armed then
+            prog:write_u8(SYM.vm_if_at, math.floor(SAIDAT / 256))
+            prog:write_u8(SYM.vm_if_at + 1, SAIDAT % 256)
+            if SYM.vm_if_logic then prog:write_u8(SYM.vm_if_logic, IFLOGIC) end
+            _G._if_armed = true
+            w("  ★ if-recorder armed for logic %d in vm_cycle %d", IFLOGIC, SAIDAT)
         end
 
         -- ★★★★★ SAMPLE THE WHOLE VM STATE BLOCK [T-P0-096 §4A]. Seven arms have asked which BUILD

@@ -39,6 +39,13 @@ param(
   [switch]$FlatVocab,
   [switch]$SaidDiag,
   [switch]$Var0Diag,
+  [switch]$IfDiag,
+  # ★★★★★ -NoCount IS T-P0-101's ABLATION. VM_OPSEEN ($6400) and VM_TESTSEEN ($6300) sit INSIDE the
+  # residency arena's window ($6000-$A000), so every dispatched opcode increments a byte of whatever
+  # resource the arena has mapped there. -DVM_NOCOUNT removes both counters and nothing else, which
+  # is the one-variable arm [L-73] that turns "the counters are writing into logic 102" from an
+  # address coincidence into a measurement. It composes with any arm above.
+  [switch]$NoCount,
   [switch]$NoIrq,
   [double]$Hold   = 3.0
 )
@@ -141,6 +148,19 @@ if ($SaidDiag) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DTEXT_MODELLED","
 # ★★ Same discipline as the other diagnostic arms: -DTEXT_MODELLED so it differs from P6.39's arm B
 # by one flag, and every shipped artifact is byte-identical without it.
 if ($Var0Diag) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DTEXT_MODELLED","-DVM_VAR0DIAG") + $IRQ }
+# ★★★★★ -IfDiag RECORDS EVERY `if` IN ONE LOGIC AND THE ARM IT TOOK [T-P0-101 §4A]. P6.45 read flag
+# 4 at a variable write deep inside logic 102's body and found it SET -- which is equally consistent
+# with "the guard saw it clear and the body set it" and "the guard never ran". Only an instrument
+# keyed on the INSTRUCTION separates those, because a guard that never ran leaves no row.
+# ★★★★ IT CARRIES -DVM_SAIDDIAG TOO, and that is deliberate rather than convenient: hypothesis one
+# is that logic 102's own said() chain sets flag 4, and confirming or killing it needs both tables
+# **from the same run and the same cycle**. Two runs would be two scenarios [L-82].
+# ★★ Same discipline as the other diagnostic arms: -DTEXT_MODELLED so it differs from P6.39's arm B
+# by one flag, and every shipped artifact is byte-identical without it.
+if ($IfDiag) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DTEXT_MODELLED","-DVM_IFDIAG","-DVM_SAIDDIAG") + $IRQ }
+
+# ★ Appended last so it composes with every arm above rather than being spelled into each one.
+if ($NoCount) { $FLAGS += "-DVM_NOCOUNT" }
 
 & $LW --format=raw --output=build/p3b_probe_pk_fresh.bin --map=build/p3b_probe_pk.map -I. @FLAGS src/harness/p3b_probe.s
 if ($LASTEXITCODE -ne 0) { throw "p3b assemble failed" }
@@ -184,10 +204,11 @@ $WANT = @("res_volbase","res_slicebase","res_curblk","vm_quit","vm_badop","vm_cy
 # ★ -FlatVocab is a MODELLED arm, so it belongs with $Fault in $Linked and not in $Wired: it links
 #   text.s and leaves TEXT_WIRED undefined, exactly as -Fault does.
 $Wired  = $Text -or $DecodeFault -or $NoTick -or $Diag -or $NoMap -or $Win3
-$Linked = $Wired -or $Fault -or $FlatVocab -or $SaidDiag -or $Var0Diag
+$Linked = $Wired -or $Fault -or $FlatVocab -or $SaidDiag -or $Var0Diag -or $IfDiag
 # ★★ Each diagnostic's own symbols, only where its flag defines them.
-if ($SaidDiag) { $WANT += @("vm_sd_at","vm_sd_n","vm_sd_buf") }
+if ($SaidDiag -or $IfDiag) { $WANT += @("vm_sd_at","vm_sd_n","vm_sd_buf") }
 if ($Var0Diag) { $WANT += @("vm_v0_at","vm_v0_n","vm_v0_buf") }
+if ($IfDiag) { $WANT += @("vm_if_at","vm_if_logic","vm_if_n","vm_if_buf","vm_if_code","vm_if_clen","vm_if_snap") }
 if ($Linked) { $WANT += @("P3_FONT","P3_FONT_BYTES","P3_PBUF","ph_blk_vocab","ph_blk_slot5") }
 # ★★★★ THE COMMAND LINE's SYMBOLS [T-P0-092]. They exist wherever TEXT_PROMPT does, which
 # p3b_probe.s conditions exactly as TEXT_WIRED -- so every wired text arm has them and the

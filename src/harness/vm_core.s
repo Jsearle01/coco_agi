@@ -295,6 +295,14 @@ vm_lastip       fdb     0
 * drift apart on exactly one opcode.
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 vm_test_if_code:
+* ★★★★★ THE HOOK IS HERE AND NOT AT vm_rl_if, AND THE REASON IS MEASURED [T-P0-101]. The obvious
+* placement was around the `jsr` in vm_rl_if -- one call site, ip settled on both sides. Six bytes
+* there pushed `beq vm_rl_return` (vm_core.s:116) past its 127-byte reach and the assembler refused
+* the build. **Every hook below sits after vm_rl_return, so no short branch in the dispatch loop
+* spans a guarded block** -- which is a property this file must keep, not a one-off fix.
+                ifdef   VM_IFDIAG
+                jsr     vm_if_enter
+                endc
                 clr     vm_notmode
                 clr     vm_ormode
                 lda     #1
@@ -403,6 +411,9 @@ vm_tic_and:
 * branch word is NOT consumed, because run_logic is about to unwind anyway.
 vm_tic_true:    lda     #1
                 sta     vm_result
+                ifdef   VM_IFDIAG
+                jsr     vm_if_exit
+                endc
                 rts
 
 vm_tic_or:
@@ -448,9 +459,147 @@ vm_tic_end:
                 puls    d
                 addd    vm_ip
                 std     vm_ip                   ; false: skip the block
+                ifdef   VM_IFDIAG
+                jsr     vm_if_exit
+                endc
                 rts
 vm_tic_taken:   leas    2,s                     ; true: fall into the block
+                ifdef   VM_IFDIAG
+                jsr     vm_if_exit
+                endc
                 rts
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ -DVM_IFDIAG -- EVERY `if` IN ONE LOGIC, IN ONE CYCLE: THE FLAGS IT SAW AND THE ARM IT
+* TOOK [T-P0-101 §4A].
+* ★★★★★ THE QUESTION THIS EXISTS FOR IS NOT "what is flag 4" -- it is "was the guard EVALUATED".
+* P6.45 read flag 4 at a variable WRITE two thousand bytes into logic 102 and found it set; that
+* is consistent with two opposite stories -- the guard saw it clear and something inside the body
+* set it, or the guard was never reached at all. **A recorder keyed on the flag cannot separate
+* them; one keyed on the INSTRUCTION can**, because a guard that never ran leaves no row.
+* ★★★★ IT RECORDS EVERY EXPRESSION IN THE CHOSEN LOGIC, not just the one at $000B. An absent row
+* is the whole answer in one of the two cases, and "absent" is only readable against a list of the
+* ones that were present [L-88: count what the run produces against what the instrument reads].
+* ★★★ THE ROW IS OPENED BEFORE THE EXPRESSION AND CLOSED AFTER IT, which is what makes the flags
+* column mean "as the guard saw them". A said() inside the same expression publishes flag 4 back
+* [vm_tests.s:267-271], so a single sample taken afterwards would report the value the expression
+* CAUSED and not the one it READ -- exactly the confusion P6.45 ended in.
+* ★★ PUBLISH ONLY: four guarded `jsr`s -- one at the evaluator's entry and one on each of its three
+* exits -- and CC, D and X are all restored, so the sequence the interpreter executes is identical
+* with the flag off. **AC-5's byte identity is what checks that, not this comment.**
+* ★★★ THREE EXITS, NOT ONE, and the third is the decoy: vm_tic_true returns for exit_all WITHOUT
+* consuming the branch word. Hooking only the two arms of vm_tic_end would leave those rows open
+* and the NEXT expression would close them -- a row reporting another instruction's result under
+* this one's ip. The row carries $FF until an exit writes it, so an unclosed row is visible.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+                ifdef   VM_IFDIAG
+VM_IF_MAX       equ     24
+vm_if_at        fdb     $FFFF           ; the cycle to record; the host writes it
+vm_if_logic     fcb     255             ; which logic; the host writes it
+vm_if_n         fcb     0
+vm_if_row       fdb     0               ; the row this expression opened, or 0
+* ★★★★★ THE LAST SIX BYTES ARE THE INSTRUCTION THE PORT IS ABOUT TO RUN [T-P0-101 §4C]. The first
+* run of this recorder showed the port taking the SAME arm as the reference at logic 102's second
+* guard -- ip_after $0010, which the game file says is `goto 0908` -- and then evaluating an `if` at
+* $001D, which is nine bytes past where that goto lands nothing. **Either the goto resolved wrongly
+* or the bytes the port is reading are not the bytes in the file**, and those need different fixes.
+* ★★★★ agidis.py CANNOT ANSWER IT: it decodes with the VM's own table [agidis.py's header], so it
+* reads the operand exactly as the port would. Only the raw bytes at the port's own vm_code separate
+* "our arithmetic is wrong" from "our copy is wrong" [logic_bytes.py exists for the file's side].
+vm_if_buf       fill    0,VM_IF_MAX*12  ; ip(2), flags0, result, ip_after(2), 6 bytes at ip_after
+* ★★★★★ A 64-BYTE SNAPSHOT OF THE PORT'S OWN COPY, taken once, at the first row [T-P0-101 §4D]. The
+* six-byte windows above showed three corrupt bytes at $0010 and one at $0025 with correct bytes on
+* either side -- **which says the copy is damaged and says nothing about HOW MUCH or IN WHAT
+* PATTERN**, and those are the two questions a fix has to start from.
+* ★★★★ TAKEN AT THE RECORDER, NOT AT THE END OF THE RUN. The logic lives in a banked arena window
+* and is not resident when the host reads memory afterwards; the only instant at which the bytes are
+* reachable is while the interpreter is standing on them.
+VM_IF_SNAP      equ     256
+vm_if_code      fdb     0               ; vm_code as the port had it -- WHERE the copy lives
+vm_if_clen      fdb     0               ; vm_codelen -- how long the port thinks it is
+vm_if_snap      fill    0,VM_IF_SNAP
+
+* ★★★★ vm_ip HERE IS THE EXPRESSION START, and it is the same number the reference's trace prints.
+* vm_run_logic advances ip past the $FF opcode byte BEFORE branching here [vm_core.s:106-112], so
+* an `if` whose opcode sits at $000A opens its expression at $000B. **The two instruments name the
+* same instruction without either having to be adjusted**, which is what made P6.43's side-by-side
+* table readable and is why the row records ip rather than the opcode's address.
+vm_if_enter:
+                pshs    cc,d,x
+                clr     vm_if_row               ; ★ cleared FIRST: a skipped row must close nothing
+                clr     vm_if_row+1
+                lda     vm_curlogic
+                cmpa    vm_if_logic
+                bne     vm_ife_out
+                ldd     vm_cycle
+                cmpd    vm_if_at
+                bne     vm_ife_out
+                lda     vm_if_n
+                cmpa    #VM_IF_MAX
+                bhs     vm_ife_out
+                tsta
+                bne     vm_ife_norow            ; ★ the snapshot is taken ONCE, on the first row
+                pshs    x,y
+                ldx     vm_code
+                stx     vm_if_code
+                ldd     vm_codelen
+                std     vm_if_clen
+                ldy     #vm_if_snap
+* ★★ TWO BYTES PER ITERATION so the counter stays 8-bit and VISIBLY so. `ldb #256` is a byte
+* overflow and `ldb #0` relying on decb wrapping 256 times is the kind of cleverness that reads as
+* a bug six months later. VM_IF_SNAP must stay even.
+                ldb     #VM_IF_SNAP/2
+vm_ife_cp:      lda     ,x+
+                sta     ,y+
+                lda     ,x+
+                sta     ,y+
+                decb
+                bne     vm_ife_cp
+                puls    x,y
+                lda     vm_if_n
+vm_ife_norow:
+                ldb     #12
+                mul
+                ldx     #vm_if_buf
+                leax    d,x
+                ldd     vm_ip
+                std     ,x
+* ★★★ FLAG BYTE 0 AS THE EXPRESSION SEES IT. Flag 2 is bit 2 (ENTERED_CLI) and flag 4 is bit 4
+* (SAID_ACCEPTED_INPUT) -- the two bits logic 102's opening guards read.
+                lda     VM_FLAGS
+                sta     2,x
+                lda     #$FF                    ; result: not yet known; overwritten on exit
+                sta     3,x
+                stx     vm_if_row
+                inc     vm_if_n
+vm_ife_out:     puls    cc,d,x,pc
+
+* ★★ vm_result and vm_ip are both final here: vm_tic_end has consumed the skip word and either
+* added it or stepped over it, so ip_after says which arm ran WITHOUT the host having to know the
+* encoding. A result of $FF in a row means the evaluator returned through vm_tic_true (exit_all),
+* which does not consume the branch word at all.
+vm_if_exit:
+                pshs    cc,d,x,y
+                ldx     vm_if_row
+                beq     vm_ifx_out
+                lda     vm_result
+                sta     3,x
+                ldd     vm_ip
+                std     4,x
+* ★★★ SIX BYTES FROM THE PORT'S OWN COPY, at the address the branch just chose. Y is used because X
+* holds the row; both are restored.
+                ldy     vm_code
+                leay    d,y
+                ldb     #6
+vm_ifx_cp:      lda     ,y+
+                sta     6,x
+                leax    1,x
+                decb
+                bne     vm_ifx_cp
+                clr     vm_if_row
+                clr     vm_if_row+1
+vm_ifx_out:     puls    cc,d,x,y,pc
+                endc
 
 * ── vm_skip_until -- advance ip past the next occurrence of A ─────────────────────
 *
