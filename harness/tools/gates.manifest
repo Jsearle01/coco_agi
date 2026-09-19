@@ -170,7 +170,23 @@ vm_timed	src/harness/vm_probe.s	build/vm_probe.bin	-DHAL_GFX_MODE_SERVICE -DHAL_
 # ★★★★ WITH P3B_ROOM=1 IT NOW RUNS: 60 cycles, vc_err 0, co_tested 31,824 cel pixels, and a person
 # saw a sprite animate for the first time in this project.
 #
-# ★★★★★ DEFECT 3, OPEN: PRIORITY BANDING IS NOT IMPLEMENTED. Three of the four staged sprites carry
+# ★★★★★ DEFECT 3 FIXED AT T-P0-108: the priority bands exist. vm_pri_bands is 168 bytes in the
+# code image, transcribed from createDefaultPriorityTable, and vm_update_objs derives
+# VMO_PRIORITY from the object's Y unless fFixedPriority is set -- which is what the ORACLE tests
+# [checks.cpp:110-113]; it never tests for priority 0. Measured: co_rej_pri 4,732 -> 0 and
+# co_written 8,784 -> 13,516. **Graham draws.** -DVM_NO_PRI_BANDS is the fault arm and restores
+# the measured prior behaviour. All seven arms and vm_probe +199 B.
+#
+# ★★★★★ DEFECT 4, OPEN: THE COMPOSITOR DOES NOT DOUBLE THE COLOUR NIBBLE. pic_core.s:113 stores
+# scr_dbl -- (colour & 15) * 17 -- because in p3b the visual plane IS the 4bpp display
+# framebuffer, two screen pixels per byte. composite.s's co_put_visual stores the raw index, so
+# every sprite pixel is one black pixel beside one coloured one. Jay: "him and the flages look to
+# be missing every other row of pixels". ★★★★ The `comp` gate CANNOT see it: its plane is a
+# scratch buffer compared against a reference in the same one-byte-per-pixel format, and nothing
+# displays it. Third instance this arc of two green subsystems with no gate on the join [L-121].
+#
+# (historical, for the record)
+# ★★★★★ DEFECT 3, WAS: PRIORITY BANDING IS NOT IMPLEMENTED. Three of the four staged sprites carry
 # priority 0, which in AGI means "derive it from Y". MAP_PRI_BANDS is declared at memmap.inc:310
 # -- "168-byte LOOKUP, never a computation" -- and git grep finds NO other reference in the tree.
 # p3b_probe.s:1633 stages the raw VMO_PRIORITY, so co_depth rejects those sprites almost

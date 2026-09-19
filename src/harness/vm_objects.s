@@ -38,18 +38,107 @@ vm_dir_dy       equ     VMT_DIR_DY
 * ═══════════════════════════════════════════════════════════════════════════════════
 * ── update_screen_obj_table [objects.py] ──────────────────────────────────────────
 * ═══════════════════════════════════════════════════════════════════════════════════
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE PRIORITY BANDS [T-P0-108]. 168 bytes, one per screen row, transcribed from
+* createDefaultPriorityTable [graphics.cpp:1400-1408 at 9d9b9e93]:
+*
+*     for (priority = 1; priority < 15; priority++)
+*         for (step = 0; step < 12; step++)
+*             priorityTable[yPos++] = priority < 4 ? 4 : priority;
+*
+* ★★★★ 14 priorities x 12 rows = 168, which is what memmap.inc:310 predicted and nothing had
+* built. **Rows 0-47 are all 4** because the `< 4 ? 4` clamp folds the first four bands together;
+* after that each band is twelve rows. The maximum the DEFAULT table produces is 14, never 15.
+* ★★★ AUTHORITY §2 tier 3 (ScummVM). Per §2.1 the CLAMP and the 12-row step are structural -- a
+* different table is a different game -- so this is transcription, not a ScummVM normalisation.
+* ★★ A LOOKUP, NEVER A COMPUTATION [§2F.4]: the formula needs a divide by 12 per access and this
+* needs an indexed load. The oracle indexes a table too.
+* ★★★★★ IT IS IN THE CODE IMAGE, NOT AT MAP_PRI_BANDS ($E000). That address is the ENGINE's; in
+* THIS probe $E000 is the parser [p3b_probe.s: P3_PARSER_BASE], and memmap.inc's own header says
+* the harness keeps its own addresses. 168 bytes of region A; the 3,072 recovered at T-P0-105
+* remain otherwise unclaimed.
+vm_pri_bands:
+                fcb     4,4,4,4,4,4,4,4,4,4,4,4         ; y   0- 11
+                fcb     4,4,4,4,4,4,4,4,4,4,4,4         ; y  12- 23
+                fcb     4,4,4,4,4,4,4,4,4,4,4,4         ; y  24- 35
+                fcb     4,4,4,4,4,4,4,4,4,4,4,4         ; y  36- 47
+                fcb     5,5,5,5,5,5,5,5,5,5,5,5         ; y  48- 59
+                fcb     6,6,6,6,6,6,6,6,6,6,6,6         ; y  60- 71
+                fcb     7,7,7,7,7,7,7,7,7,7,7,7         ; y  72- 83
+                fcb     8,8,8,8,8,8,8,8,8,8,8,8         ; y  84- 95
+                fcb     9,9,9,9,9,9,9,9,9,9,9,9         ; y  96-107
+                fcb     10,10,10,10,10,10,10,10,10,10,10,10     ; y 108-119
+                fcb     11,11,11,11,11,11,11,11,11,11,11,11     ; y 120-131
+                fcb     12,12,12,12,12,12,12,12,12,12,12,12     ; y 132-143
+                fcb     13,13,13,13,13,13,13,13,13,13,13,13     ; y 144-155
+                fcb     14,14,14,14,14,14,14,14,14,14,14,14     ; y 156-167
+VM_PRI_BANDS_N  equ     *-vm_pri_bands
+                ifne    VM_PRI_BANDS_N-168
+                error   "the priority band table is not 168 bytes -- one per screen row, 14 bands of 12 [graphics.cpp:1400]"
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+
 vm_update_objs:
                 clr     vm_changecnt
                 ldx     #VM_OBJ
 * ★★★★★ BOUNDED BY vm_objtop [P6.11] -- see vm_check_all_motions for the reasoning and the
 * measurement. The counter is gone with the bound, and with it the per-slot pshs/puls/decb.
 vm_uo_lp:       cmpx    vm_objtop
-                bhi     vm_uo_done              ; ★ INCLUSIVE mark: walk slots 0..mark
+* ★ LONG since T-P0-108: the priority derivation below put vm_uo_done past a short branch's reach.
+                lbhi    vm_uo_done              ; ★ INCLUSIVE mark: walk slots 0..mark
                 lda     VMO_FLAGS+1,x
                 anda    #VM_ACTIVE_L
                 cmpa    #VM_ACTIVE_L
                 lbne    vm_uo_next
                 inc     vm_changecnt
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE PRIORITY BAND, DERIVED UNLESS THE OBJECT FIXES ITS OWN [T-P0-108].
+* checks.cpp:110-113 at the pin:
+*
+*     if (!(screenObj->flags & fFixedPriority))
+*         screenObj->priority = _gfx->priorityFromY(screenObj->yPos);
+*
+* ★★★★★ THE TEST IS THE FLAG, NOT THE VALUE 0. The dispatch framed this as "priority 0 means
+* derive it", and the oracle never tests for 0 here -- `fFixedPriority` is set by set.priority and
+* set.priority.v and cleared by release.priority [op_cmd.cpp:415,424,432], all three of which this
+* VM already implements correctly. **Only the derivation was missing**, and the value 0 was merely
+* what an underived object happened to hold.
+* ★★★★ IT WRITES BACK INTO THE OBJECT'S FIELD, which is why get.priority returns the derived
+* value. §4C asked not to rewrite VMO_PRIORITY unless the oracle does; **the oracle does.**
+* ★★★★★ THE PLACEMENT IS OURS AND IS NOT THE ORACLE'S [§2.1]. The oracle derives inside
+* checkPriority(), called from updatePosition() and fixPosition() -- and **this port does not have
+* either**: vm_objects.s:401 records that checkCollision()/checkPriority() are omitted because the
+* rest of them needs the priority screen. The DERIVATION does not. It runs here, once per active
+* object per cycle, before anything stages or draws, which is the same instant relative to the
+* frame even though it is a different routine. **Stated as a port decision, not a transcription.**
+* ★★★ fFixedPriority is $0004 [vm_tables.s:71], so the test is on the LOW flag byte -- the same
+* convention fFixLoop_H uses for the high one.
+* ★★★★★ -DVM_NO_PRI_BANDS IS AC-4's FAULT ARM, AND IT IS A KNOWN-GOOD RED [§2W]: it restores
+* exactly the behaviour this task replaced, which was measured before it was changed. With the
+* derivation skipped, every object that does not fix its own priority carries whatever it held --
+* 0 for all three of Kingquest1 room 1's unfixed sprites -- and co_depth rejects them almost
+* everywhere. **Measured both ways: co_rej_pri 4,732 -> 0 and co_written 8,784 -> 13,516.**
+* ★★★ A fault arm whose red is a state the project has already seen, rather than an invention.
+                ifndef  VM_NO_PRI_BANDS
+                lda     VMO_FLAGS+1,x
+                bita    #fFixedPriority
+                bne     vm_uo_prifixed
+                pshs    x
+                clra
+                ldb     VMO_Y,x
+                cmpd    #VM_PRI_BANDS_N
+                blo     vm_uo_priok
+* ★★ A y past the last row would index past the table. The oracle asserts; this clamps to the
+* bottom band, because a probe that halts on a stray coordinate is worse than one that draws it.
+                ldd     #VM_PRI_BANDS_N-1
+vm_uo_priok:
+                ldx     #vm_pri_bands
+                lda     d,x
+                puls    x
+                sta     VMO_PRIORITY,x
+vm_uo_prifixed:
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★ AC-7's census, on the ACTIVE branch -- so it records slots that were genuinely active, not
 * slots something merely touched. Guarded: the gate build is unchanged.
                 ifdef   VM_OBJCENSUS

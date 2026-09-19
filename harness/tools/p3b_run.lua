@@ -1257,10 +1257,42 @@ _G._n = emu.add_machine_frame_notifier(function()
                               prog:read_u8(b + 3), prog:read_u8(b + 4), prog:read_u8(b + 5))
                         end
                     end
-                    if SYM.co_tested then
-                        local t = 0
-                        for k = 0, 3 do t = t * 256 + prog:read_u8(SYM.co_tested + k) end
-                        w("      co_tested (cel pixels examined by the compositor): %d", t)
+                    -- ★★★★★ WHICH SCREEN ROWS ACTUALLY GOT PIXELS [T-P0-108, after Jay reported
+                    -- "missing every other row of pixels" on both sprites]. A per-row count over
+                    -- the staged sprites' bounding boxes turns an impression into a pattern: if
+                    -- the compositor's row advance were doubled, the populated rows alternate.
+                    -- ★★★ Reads the visible plane through the window, one slice at a time, which
+                    -- is the same idiom the box-rect check uses below.
+                    if SYM.p3_spr and SYM.p3_nspr then
+                        local BV = 40                       -- P3_BLK_VISIBLE
+                        for s = 0, math.min(prog:read_u8(SYM.p3_nspr), 4) - 1 do
+                            local b = SYM.p3_spr + s * 6
+                            local sx, sy = prog:read_u8(b), prog:read_u8(b + 1)
+                            local rows = {}
+                            for r = math.max(0, sy - 20), math.min(167, sy) do
+                                local n = 0
+                                for c = sx, math.min(159, sx + 40) do
+                                    local off = r * 160 + c
+                                    prog:write_u8(0xFFA6, BV + (off >> 13))
+                                    if prog:read_u8(0xC000 + (off & 0x1FFF)) ~= 0 then n = n + 1 end
+                                end
+                                rows[#rows + 1] = (n > 0) and tostring(math.min(n, 9)) or "."
+                            end
+                            w("      sprite %d (view %d) at x=%d y=%d, rows %d..%d: %s",
+                              s, prog:read_u8(b + 3), sx, sy,
+                              math.max(0, sy - 20), sy, table.concat(rows))
+                        end
+                    end
+                    -- ★★★★★ tested / rejected / WRITTEN. The priority band decides what is DRAWN,
+                    -- not what is examined -- co_tested was the wrong counter to quote at
+                    -- T-P0-107 and would have been the wrong one to claim a fix with here.
+                    for _, c in ipairs({ { "tested ", SYM.co_tested }, { "rej_key", SYM.co_rejkey },
+                                         { "rej_pri", SYM.co_rejpri }, { "WRITTEN", SYM.co_written } }) do
+                        if c[2] then
+                            local t = 0
+                            for k = 0, 3 do t = t * 256 + prog:read_u8(c[2] + k) end
+                            w("      co_%s : %d", c[1], t)
+                        end
                     end
                 end
                 if _G._arena_hi then

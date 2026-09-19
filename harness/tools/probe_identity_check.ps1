@@ -20,7 +20,10 @@ $LW = "C:\WIN_LWTools\lwasm.exe"
 
 # name, source, flags, expected size, expected SHA256 prefix
 $PROBES = @(
-  @{ n = "vm";   s = "src/harness/vm_probe.s";   f = @("-DHAL_GFX_MODE_SERVICE","-DHAL_SYS_FAST_CLOCK"); sz = 9667; sha = "771F147D" },
+  # RETIRED at T-P0-108: 9,667 B 771F147D -> 9,866 B B51A6760 (+199). The priority band table and
+  # its derivation live in vm_objects.s, so every probe that links the VM carries them.
+  # ★★★ The vm gate is what says the behaviour is unchanged: 9/9, 0 divergent cycles of 600 each.
+  @{ n = "vm";   s = "src/harness/vm_probe.s";   f = @("-DHAL_GFX_MODE_SERVICE","-DHAL_SYS_FAST_CLOCK"); sz = 9866; sha = "B51A6760" },
   @{ n = "pic";  s = "src/harness/pic_probe.s";  f = @("-DHAL_GFX_MODE_SERVICE");                        sz = 0;    sha = "" },
   @{ n = "res";  s = "src/harness/res_probe.s";  f = @("-DHAL_GFX_MODE_SERVICE");                        sz = 0;    sha = "" },
   # ★★★★ PINNED AT T-P0-105, because this one MOVED and an on-disk baseline cannot notice that.

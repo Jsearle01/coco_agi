@@ -76,13 +76,19 @@ $ARMS = @(
   # windowed plane flat: co_rowvis/co_rowpri become OFFSETS and the four access sites go through
   # plane_vis/plane_pri. **Same size by coincidence** -- co_rowset loses two `addd #BASE` and the
   # access sites gain a byte each -- which is why this row is pinned by HASH and not by length.
-  @{ n = "p3b";        f = @();                                          sz = 13950; sha = "9F232F39" },
-  @{ n = "p3b_text";   f = $TEXT;                                         sz = 16210; sha = "83DD87A4" },
-  @{ n = "p3b_win3";   f = $TEXT + @("-DTEXT_WIN3");                      sz = 16210; sha = "0437A07C" },
-  @{ n = "p3b_notick"; f = $TEXT + @("-DTEXT_FAULT_NOTICK");              sz = 16207; sha = "C545C08F" },
-  @{ n = "p3b_nomap";  f = $TEXT + @("-DP3B_VOCAB_NOMAP");                sz = 16207; sha = "2B552C14" },
-  @{ n = "p3b_fault";  f = $TEXT + @("-DTEXT_MODELLED");                  sz = 15334; sha = "E0742D78" },
-  @{ n = "p3b_flat";   f = $TEXT + @("-DTEXT_MODELLED","-DTEXT_VOCAB_FLAT"); sz = 15319; sha = "89818F5F" }
+  # RETIRED at T-P0-108: ALL SEVEN +199 bytes -- the 168-byte priority band table plus the
+  # derivation in vm_update_objs. **The same delta on all seven** is the check that the change is
+  # the one intended; anything else would not land on 199 everywhere.
+  #   p3b 13,950 9F232F39 | p3b_text 16,210 83DD87A4 | p3b_win3 16,210 0437A07C
+  #   p3b_notick 16,207 C545C08F | p3b_nomap 16,207 2B552C14 | p3b_fault 15,334 E0742D78
+  #   p3b_flat 15,319 89818F5F
+  @{ n = "p3b";        f = @();                                          sz = 14149; sha = "2C4DB737" },
+  @{ n = "p3b_text";   f = $TEXT;                                         sz = 16409; sha = "D09866C3" },
+  @{ n = "p3b_win3";   f = $TEXT + @("-DTEXT_WIN3");                      sz = 16409; sha = "35AB01B0" },
+  @{ n = "p3b_notick"; f = $TEXT + @("-DTEXT_FAULT_NOTICK");              sz = 16406; sha = "7A9A319C" },
+  @{ n = "p3b_nomap";  f = $TEXT + @("-DP3B_VOCAB_NOMAP");                sz = 16406; sha = "379A9421" },
+  @{ n = "p3b_fault";  f = $TEXT + @("-DTEXT_MODELLED");                  sz = 15533; sha = "FA9C8531" },
+  @{ n = "p3b_flat";   f = $TEXT + @("-DTEXT_MODELLED","-DTEXT_VOCAB_FLAT"); sz = 15518; sha = "E3E95063" }
 )
 
 # ★★★ -DP3B_COVERAGE puts the two opcode counters back [p3b_probe.s]. It is a REAL byte change --

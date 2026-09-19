@@ -256,7 +256,7 @@ if ($IfDiag) { $WANT += @("vm_if_at","vm_if_logic","vm_if_n","vm_if_buf","vm_if_
 # it broke p3b_text, p3b_box, p3b_parse and p3b_row22 in one go -- the exact trap this file already
 # warns about three times, for MAP_FONT, for P3_TXDIAG and for tx_wt_*.
 if (-not $Linked) { $WANT += @("vc_err","vc_w","vc_h","vc_src","vc_srcend","vc_view","co_tested",
-                               "p3_spr","p3_nspr") }
+                               "p3_spr","p3_nspr","co_written","co_rejkey","co_rejpri") }
 # ═══════════════════════════════════════════════════════════════════════════════════════════
 if ($ResCheck -or $CelCheck) { $WANT += @("rck_n","rck_bad","rck_ring","rck_seen","rck_noted","rck_skipped","rck_full",
                             "rck_type","rck_idx","rck_live","rck_base","rck_len","rck_sum") }

@@ -307,6 +307,13 @@ MAP_FB_SLICE    equ     MAP_PHASE_WIN   ;   draw phase: one 8 KB framebuffer sli
 
 * ── slot 7: resident tables ──────────────────────────────────────────────────────
 MAP_TABLES      equ     $E000
+* ★★★★★ 168 IS CONFIRMED BY THE ORACLE, AND THE TABLE IS IMPLEMENTED SINCE T-P0-108 -- though not
+* at THIS address. createDefaultPriorityTable [graphics.cpp:1400-1408 at 9d9b9e93] fills 14 bands
+* of 12 rows with `priority < 4 ? 4 : priority`, so 168 entries and rows 0-47 all 4. **This
+* comment predicted a lookup nobody built, for the life of the file**, and what the VM reads is
+* `vm_pri_bands` in vm_objects.s -- in the code image, because in `p3b` $E000 is the parser and
+* this file's own header says the harness keeps its own addresses. ★★ The ENGINE's table belongs
+* here when the engine exists; the harness's is evidence for the size, not an instance of it.
 MAP_PRI_BANDS   equ     $E000           ; ★ §2F.4: 168-byte LOOKUP, never a computation
 MAP_PALETTE     equ     $E0A8           ; ★ §2F.1: 16-byte table, loaded at init. NEVER inline
 MAP_FONT        equ     $E0B8           ; the authored 8x8 40-column font, 2,048 B (§2B)
