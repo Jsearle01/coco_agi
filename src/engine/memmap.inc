@@ -436,11 +436,26 @@ MAP_ARENA_BYTES equ     24576           ; ★ 3 blocks, CHOSEN FROM THE EVICTION
 * wrong picture rather than a crash.
 *
 * ★★★ THE ASSERTION IS THE DELIVERABLE, NOT THE ARITHMETIC. A build that addresses a plane
-* FLAT must have a plane that fits its window, or it does not assemble. A build that defines
-* PLANE_WINDOWED reaches every byte through plane_vis / plane_pri, which mask the offset to
-* PLANE_SLICE_MSK -- so being inside the window is STRUCTURAL there, guaranteed by the mask
-* rather than checked by a sum. **That is why this asserts on the flat case only: the windowed
-* case cannot violate it.**
+* FLAT must have a plane that fits its window, or it does not assemble.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ AND THE EXEMPTION BELOW USED TO CLAIM MORE THAN IT COULD CHECK. It said: "a build that
+* defines PLANE_WINDOWED reaches every byte through plane_vis / plane_pri, which mask the offset
+* -- so being inside the window is STRUCTURAL there, and the windowed case cannot violate it."
+*
+* ★★★★★ THAT WAS TRUE OF THE RENDERER AND FALSE OF THE COMPOSITOR, FOR THE WHOLE LIFE OF THE FILE
+* [T-P0-107]. composite.s's co_rowset formed `CP_VIS + y*160` as a flat ADDRESS. In a windowed
+* probe CP_VIS is an 8,192-byte window: **row 100 landed at $FE80, beside the vector stubs, and
+* row 167 wrapped to $2860 -- inside the probe's own code**, which is the wrap this very block
+* computes two paragraphs up. The first cel it ever composited stalled the machine.
+*
+* ★★★★★ AN EXEMPTION IS AN ASSERTION ABOUT CODE THAT IS NOT IN THE EXPRESSION. This one quantified
+* over every subsystem that touches a plane, and nothing rechecked it when a second one arrived --
+* so it decayed exactly like a comment while looking like a guard.
+* ★★★★ WHAT REPLACES THE CLAIM IS A SYMBOL, NOT BETTER PROSE. composite.s defines COMP_PLANE_SAFE
+* under PLANE_WINDOWED and p3b_probe.s refuses to assemble without it. **The exemption below is now
+* narrowed to what it can actually support: the windowed case is exempt from THIS sum because its
+* accesses are masked -- and each subsystem must assert that it masks them.**
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★ Precedent AD-78: an overlap claim checked by a human reading a table is the state these
 * assertions exist to end -- four probes each had a coherent table and two of them overlapped.
                 ifndef  PLANE_WINDOWED

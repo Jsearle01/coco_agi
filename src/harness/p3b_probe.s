@@ -2147,6 +2147,22 @@ CP_CEL_END      equ     CP_CEL+VC_ROW_MAX
                 error   "the decoded-cel buffer overlaps RES_ARENA -- CP_CEL + VC_ROW_MAX must end below $6000, where res_top places the VIEW being decoded FROM. This was a real defect: at 4,784 bytes the buffer ran to $65B0 and zeroed 1,456 bytes of its own source [P6.49]."
                 endc
 * ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE COMPOSITOR MUST BE WINDOWED-SAFE IF THE PLANES ARE WINDOWED [T-P0-107 §4C].
+* ★★★★★ memmap.inc's plane-overflow assertion exempts -DPLANE_WINDOWED because "that build reaches
+* every byte through plane_vis/plane_pri, which mask the offset". **composite.s did not, for the
+* whole life of the file**, and the exemption covered it silently: row 100 of the visual plane
+* landed at $FE80 and row 167 wrapped to $2860, inside this probe's own code [P6.51 §7.1].
+* ★★★★ AN EXEMPTION IS AN ASSERTION ABOUT CODE THAT IS NOT IN THE EXPRESSION. It quantified over
+* every subsystem that touches a plane and nothing rechecked it when a second one arrived. This
+* line is the recheck, and it is a symbol rather than a sentence.
+* ★★★ -DCOMP_FAULT_FLAT_PLANE suppresses COMP_PLANE_SAFE so this can be seen RED.
+                ifdef   PLANE_WINDOWED
+                ifndef  COMP_PLANE_SAFE
+                error   "composite.s is linked with PLANE_WINDOWED but is not windowed-safe -- co_rowset would form CP_VIS + y*160 as a flat ADDRESS, and CP_VIS is an 8,192-byte window: row 100 lands at $FE80 beside the vector stubs and row 167 wraps to $2860, inside this probe's code. memmap.inc's AC-2 exemption assumes every windowed access goes through plane_vis/plane_pri; this asserts it for the compositor."
+                endc
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ═══════════════════════════════════════════════════════════════════════════════════════════
                 else
 * ★★ The substitution buffer against MAP_INPUT, asserted HERE because TXT_PBUF_MAX comes from
 * text.s and lwasm needs pass-1 constants. §2V.2: "a 6809 array does not grow -- state the maximum."

@@ -66,8 +66,22 @@ PRI_STRIDE      equ     PRI_W           ; 160 -- one byte per pixel, the gate's 
                 endc
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 
-co_rowvis       fdb     0               ; -> visual row base for curY
-co_rowpri       fdb     0               ; -> priority row base for curY
+* ★★★★★ UNDER -DPLANE_WINDOWED THESE TWO ARE FLAT OFFSETS, NOT ADDRESSES [T-P0-107].
+co_rowvis       fdb     0               ; -> visual row base for curY   (offset if windowed)
+co_rowpri       fdb     0               ; -> priority row base for curY (offset if windowed)
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ COMP_PLANE_SAFE -- THE SYMBOL A PROBE ASSERTS ON, AND IT EXISTS BECAUSE THE LAST GUARD
+* OF THIS KIND WAS A SENTENCE IN A COMMENT [T-P0-107 §4C].
+* memmap.inc exempts the windowed configuration from its plane-overflow assertion on the grounds
+* that "PLANE_WINDOWED reaches every byte through plane_vis/plane_pri, which mask the offset".
+* **That was prose, it quantified over every subsystem, and it was false for this one for the
+* whole life of the file.** A symbol a probe can assert on is the version that cannot decay.
+* ★★★ -DCOMP_FAULT_FLAT_PLANE suppresses it, so the assertion can be shown RED [§2W].
+                ifdef   PLANE_WINDOWED
+                ifndef  COMP_FAULT_FLAT_PLANE
+COMP_PLANE_SAFE equ     1
+                endc
+                endc
 co_src          fdb     0               ; -> next cel pixel
 co_remh         fcb     0
 co_remw         fcb     0
@@ -179,13 +193,22 @@ co_pix:
 
 co_opaque:
 * screenPriority = priority[row + curX]
+* ★★ SITE 1 of 4. The `ifndef` around the ldx and the `ifdef` around the leax keep the FLAT build's
+* instruction order byte-for-byte; the windowed build forms a flat offset and maps it instead.
+                ifndef  PLANE_WINDOWED
                 ldx     co_rowpri
+                endc
                 clra
                 ldb     co_curx
                 ifdef   PRI_PACKED
 * ★ byte = row + (x >> 1); EVEN x -> high nibble, ODD x -> low. See the convention block.
                 lsrb                            ; A is 0, so D = x >> 1
+                ifdef   PLANE_WINDOWED
+                addd    co_rowpri
+                jsr     plane_pri               ; X = address, slice mapped
+                else
                 leax    d,x
+                endc
                 lda     ,x
                 ldb     co_curx
                 bitb    #1
@@ -198,7 +221,12 @@ co_opaque:
 co_op_lo:       anda    #$0F
 co_op_got:
                 else
+                ifdef   PLANE_WINDOWED
+                addd    co_rowpri
+                jsr     plane_pri
+                else
                 leax    d,x
+                endc
                 lda     ,x                      ; A = screenPriority
                 endc
                 cmpa    #CO_CTRL_MAX
@@ -233,14 +261,22 @@ co_depth:
                 bhi     co_reject_pri           ; screenPriority > viewPriority: behind
                 endc
                 jsr     co_put_visual
+* ★★ SITE 2 of 4 -- the priority WRITE.
+                ifndef  PLANE_WINDOWED
                 ldx     co_rowpri
+                endc
                 clra
                 ldb     co_curx
                 ifdef   PRI_PACKED
 * ★★ THE READ-MODIFY-WRITE. Packing makes a plane store into a load, a mask, an or and a store
 * -- this is the write half of the packing cost, and AC-7 measures it rather than assuming it.
                 lsrb
+                ifdef   PLANE_WINDOWED
+                addd    co_rowpri
+                jsr     plane_pri
+                else
                 leax    d,x
+                endc
 * ★★ Same ordering trap as put_pixel: load first, THEN test parity on B, or the `bne` reads the
 * flags `lda ,x` just set.
                 lda     ,x
@@ -270,7 +306,12 @@ co_st_lo:       anda    #$F0                    ; odd x: keep the EVEN pixel, re
                 endc
 co_st_put:      sta     ,x
                 else
+                ifdef   PLANE_WINDOWED
+                addd    co_rowpri
+                jsr     plane_pri
+                else
                 leax    d,x
+                endc
                 lda     co_prio
 * ═══════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ co_pri_fault — AC-3's INJECTED FAULT, AND IT PERTURBS THE VALUE, NOT THE DECISION.
@@ -371,10 +412,18 @@ co_zc_lp:       clr     ,x+
 
 * ── co_put_visual ── visual[row + curX] = colour, and count it ───────────────────
 co_put_visual:
+* ★★ SITE 3 of 4 -- the visual WRITE, and the one that reached $FE80 and $2860.
+                ifndef  PLANE_WINDOWED
                 ldx     co_rowvis
+                endc
                 clra
                 ldb     co_curx
+                ifdef   PLANE_WINDOWED
+                addd    co_rowvis
+                jsr     plane_vis               ; X = address, slice mapped
+                else
                 leax    d,x
+                endc
                 lda     co_col
                 sta     ,x
                 ifndef  COMP_NOCOUNT
@@ -416,7 +465,23 @@ co_rowset:
                 rola                            ; D = y * 128
                 addd    ,s++                    ; D = y * 160
                 std     co_tmp
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ UNDER -DPLANE_WINDOWED co_rowvis/co_rowpri ARE FLAT OFFSETS, NOT ADDRESSES [T-P0-107].
+* ★★★★★ THE DEFECT THIS CLOSES. `addd #CP_VIS` makes a flat ADDRESS, and in a windowed probe
+* CP_VIS is an 8,192-byte WINDOW: row 100 lands at $FE80 beside the vector stubs and row 167 wraps
+* to $2860, inside the code region. **Both were observed** -- pixel data at the IRQ vector $FEF7
+* and the stall's PCs inside the interpreter's own overwritten dispatch [P6.51 §7.1].
+* ★★★★ memmap.inc predicted the wrap to the byte and exempted the windowed case because
+* "PLANE_WINDOWED reaches every byte through plane_vis/plane_pri, which mask the offset."
+* **This file never did.** The exemption covered two subsystems and held for one.
+* ★★★ THE OFFSET ARITHMETIC IS UNCHANGED -- co_rownext's +PRI_W/+PRI_STRIDE advance an offset
+* exactly as they advanced an address -- so only the four ACCESS sites change, and each one is an
+* `addd co_rowXXX` + `jsr plane_XXX` where it was a `leax d,x`.
+* ★★ The flat build's instruction ORDER is preserved at every site, not merely its behaviour:
+* comp_probe.bin must not move [§1.3], and reordering two instructions would move it.
+                ifndef  PLANE_WINDOWED
                 addd    #CP_VIS
+                endc
                 std     co_rowvis
                 ldd     co_tmp
 * ★ y*160 >> 1 = y*80, the packed row base. One shift rather than a second multiply chain.
@@ -424,7 +489,9 @@ co_rowset:
                 lsra
                 rorb
                 endc
+                ifndef  PLANE_WINDOWED
                 addd    #CP_PRI
+                endc
                 std     co_rowpri
                 rts
 
@@ -445,13 +512,23 @@ co_rowset:
 co_checkctrl:
                 ldd     co_cury
                 std     co_ctrly
+* ★★ SITE 4 of 4 -- the control-line column walk. ★★★ co_ctrloff is an ADDRESS in the flat build
+* and a FLAT OFFSET in the windowed one; the `leax PRI_STRIDE,x` that advances it a row is
+* unchanged either way, which is the same property that made co_rownext need no edit.
+                ifndef  PLANE_WINDOWED
                 ldx     co_rowpri
+                endc
                 clra
                 ldb     co_curx
                 ifdef   PRI_PACKED
                 lsrb                            ; A is 0, so D = x >> 1
                 endc
+                ifdef   PLANE_WINDOWED
+                addd    co_rowpri
+                tfr     d,x                     ; ★ the OFFSET; mapped at each read below
+                else
                 leax    d,x
+                endc
                 stx     co_ctrloff
 co_cc_lp:
                 ldd     co_ctrly
@@ -470,7 +547,12 @@ co_cc_lp:
                 lda     #1                      ; off the bottom: nothing but control -- draw
                 rts
 co_cc_read:
+                ifdef   PLANE_WINDOWED
+                ldd     co_ctrloff
+                jsr     plane_pri
+                else
                 ldx     co_ctrloff
+                endc
                 lda     ,x
 * ★ x does not change down a column, so the nibble selector is FIXED for the whole walk -- but
 * it is re-tested per step rather than hoisted, because the walk is 2.7% of composite cost

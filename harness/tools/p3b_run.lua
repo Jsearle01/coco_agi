@@ -1235,6 +1235,28 @@ _G._n = emu.add_machine_frame_notifier(function()
                           rd(SYM.vc_view), rd(SYM.vc_src), rd(SYM.vc_srcend),
                           rd(SYM.vc_srcend) == 0 and "   ★★★ NEVER SET -- every cel truncates on its first byte" or "")
                     end
+                    -- ★★★★★ DID ANYTHING LAND OUTSIDE THE PLANE? [T-P0-107 AC-4]. The flat
+                    -- compositor put row 100 at $FE80 and row 167 at $2860; the vector stubs and
+                    -- the code region are the two places that proved it. **Checked, not assumed.**
+                    do
+                        local v = {}
+                        for k = 0, 4 do v[#v + 1] = string.format("%02X", prog:read_u8(0xFEF7 + k)) end
+                        w("      $FEF7 (the IRQ stub the flat walk reached at row 100): %s",
+                          table.concat(v, " "))
+                    end
+                    -- ★★★★★ WHICH SPRITES ARE STAGED, so "2 of 4 composite" becomes named views
+                    -- [T-P0-107, after Jay saw the flags animate and no ego]. p3_spr is 6 bytes a
+                    -- row: x, y, prio, view, loop, cel.
+                    if SYM.p3_spr and SYM.p3_nspr then
+                        local n = prog:read_u8(SYM.p3_nspr)
+                        w("      staged sprites: %d", n)
+                        for s = 0, math.min(n, 8) - 1 do
+                            local b = SYM.p3_spr + s * 6
+                            w("        [%d] x=%-3d y=%-3d prio=%-2d view=%-3d loop=%d cel=%d",
+                              s, prog:read_u8(b), prog:read_u8(b + 1), prog:read_u8(b + 2),
+                              prog:read_u8(b + 3), prog:read_u8(b + 4), prog:read_u8(b + 5))
+                        end
+                    end
                     if SYM.co_tested then
                         local t = 0
                         for k = 0, 3 do t = t * 256 + prog:read_u8(SYM.co_tested + k) end

@@ -158,9 +158,28 @@ vm_timed	src/harness/vm_probe.s	build/vm_probe.bin	-DHAL_GFX_MODE_SERVICE -DHAL_
 #      every byte through plane_vis/plane_pri, which mask" -- **composite.s does not.**
 #
 # ★★★★★ THIS ROW IS GREEN AND THE SPRITE PATH IS BROKEN, AT THE SAME TIME. The row runs without
-# P3B_ROOM, stays in room 83 and stages ZERO sprites, so it never reaches the defect. **Running it
-# with P3B_ROOM=1 stalls in cycle 10.** That is the blind spot `cel` and `comp` do not cover: they
-# gate the two subsystems and nothing gates the join [L-121].
+# P3B_ROOM, stays in room 83 and stages ZERO sprites, so it never reaches the defect. That is the
+# blind spot `cel` and `comp` do not cover: they gate the two subsystems and nothing gates the
+# join [L-121].
+#
+# ★★★★★ DEFECT 2 FIXED AT T-P0-107: composite.s is windowed-safe. co_rowvis/co_rowpri are OFFSETS
+# under PLANE_WINDOWED and the four access sites go through plane_vis/plane_pri. p3b_probe.s now
+# refuses to assemble unless composite.s defines COMP_PLANE_SAFE (-DCOMP_FAULT_FLAT_PLANE shows it
+# red), and memmap.inc's AC-2 exemption no longer claims that PLANE_WINDOWED implies plane_vis.
+# RETIRED: p3b 13,950 36B1A1C3 -> 13,950 9F232F39 (same size, different bytes; pinned by HASH).
+# ★★★★ WITH P3B_ROOM=1 IT NOW RUNS: 60 cycles, vc_err 0, co_tested 31,824 cel pixels, and a person
+# saw a sprite animate for the first time in this project.
+#
+# ★★★★★ DEFECT 3, OPEN: PRIORITY BANDING IS NOT IMPLEMENTED. Three of the four staged sprites carry
+# priority 0, which in AGI means "derive it from Y". MAP_PRI_BANDS is declared at memmap.inc:310
+# -- "168-byte LOOKUP, never a computation" -- and git grep finds NO other reference in the tree.
+# p3b_probe.s:1633 stages the raw VMO_PRIORITY, so co_depth rejects those sprites almost
+# everywhere: CP_BLITS is 104 of a possible 208, and **the ego does not draw**. Jay: "i still don't
+# see graham but it looks like the flags above the castle are animating".
+#
+# ★★★ AND THE WINDOWED COMPOSITE IS GATED BY ALMOST NOTHING [T-P0-107 §4E]. `comp` is FLAT and
+# cannot exercise it. A real gate needs the plane read back through the window, a scenario both
+# sides can name, and defect 3 fixed first.
 # ═══════════════════════════════════════════════════════════════════════════════════════════
 p3b	src/harness/p3b_probe.s	build/p3b_probe_pk_fresh.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED	integration probe -- PLANE_WIN_MMU comes from the SOURCE (line 65), never the command line; binary F875F7F6 13,870 B, re-baselined T-P0-102 (retired: 58AD3C27 13,918 B -- the AC-5 opcode counters left the arena window, -48 B; EVERY p3b TIMING FIGURE PUBLISHED AGAINST THE RETIRED BINARY IS RETIRED WITH IT, producer moved)	purpose=timing
 # ═══════════════════════════════════════════════════════════════════════════════════════════
