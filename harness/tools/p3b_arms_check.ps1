@@ -65,7 +65,11 @@ $TEXT = @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DP3B_IRQ")
 # the -48 is the counters and nothing else.**
 # ═══════════════════════════════════════════════════════════════════════════════════════════
 $ARMS = @(
-  @{ n = "p3b";        f = @();                                          sz = 13870; sha = "F875F7F6" },
+  # ★★★★ THE CEL ARM CARRIES AN ACCEPTED KNOWN DEFECT [T-P0-104]. CP_CEL $5300 + 4,784 overlaps
+  # RES_ARENA by 1,456 bytes, which is a static error since P6.49; -DP3B_ACCEPT_CEL_ARENA is the
+  # named acceptance that keeps this arm buildable while the shape is Jay's ruling. **It changes no
+  # bytes** -- an assertion emits nothing -- which is why this row's hash is unchanged.
+  @{ n = "p3b";        f = @("-DP3B_ACCEPT_CEL_ARENA");                   sz = 13870; sha = "F875F7F6" },
   @{ n = "p3b_text";   f = $TEXT;                                         sz = 16210; sha = "83DD87A4" },
   @{ n = "p3b_win3";   f = $TEXT + @("-DTEXT_WIN3");                      sz = 16210; sha = "0437A07C" },
   @{ n = "p3b_notick"; f = $TEXT + @("-DTEXT_FAULT_NOTICK");              sz = 16207; sha = "C545C08F" },

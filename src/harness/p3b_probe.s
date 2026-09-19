@@ -2088,6 +2088,35 @@ CP_CEL_END      equ     CP_CEL+4784
                 ifgt    CP_CEL_END-P3_PARSER_BASE
                 error   "the decoded-cel buffer runs into the parser -- CP_CEL is 4,784 B from MAP_RESERVED"
                 endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ AND AGAINST THE ARENA, WHICH IS THE ONE THAT IS RED TODAY [T-P0-104, AC-1].
+*
+* ★★★★★ CP_CEL is $5300 and RES_ARENA is $6000, so the buffer has **3,328 bytes** before it runs
+* into the arena and its declared extent is **4,784** -- an overlap of **1,456 bytes**. That was
+* recorded as a hazard for several tasks with the standing explanation that real cels are far
+* smaller than the corpus maximum. ★★★★★ **cel_extent.py measured it and the explanation is false
+* for two titles: Kingquest3's largest decoded cel is 4,784 bytes -- it IS the corpus maximum,
+* view 64 loop 0 cel 0 -- and larry1 has three cels over the margin.** Kingquest1, Kingquest2 and
+* PoliceQuest1 have none, which is why every cel run in this project has been clean [L-86].
+*
+* ★★★★★ THE VICTIM IS THE VIEW BEING DECODED FROM. res_top starts at RES_ARENA, so the first
+* transient lands at $6000 exactly; p3_composite_all fetches the VIEW there and vc_decode_cel
+* decodes FROM it INTO CP_CEL. ★★★★ **And the decode CLEARS its whole destination first**
+* [view_cel.s:184-188] -- so an over-margin cel ZEROES 1,456 bytes of the source before the
+* unpack reads a byte of it. It is not a gradual overwrite; it is a wipe.
+*
+* ★★★ THE FIX IS A RULING, NOT A PATCH, and it is not taken here: CP_CEL must start at or below
+* $4D50 to clear the arena, which is 1,456 bytes below where it is, against **eight** bytes of
+* slack between P3_CODE_END and CP_CEL. The three candidate shapes are priced in T-P0-104's report.
+* ★★ -DP3B_ACCEPT_CEL_ARENA is the named acceptance so the arm still builds while that is pending.
+* It is named for what it ACCEPTS, it is recorded in gates.manifest as an accepted known defect
+* with its two titles, and it disables nothing else.
+                ifndef  P3B_ACCEPT_CEL_ARENA
+                ifgt    CP_CEL_END-RES_ARENA
+                error   "the decoded-cel buffer overlaps RES_ARENA by 1,456 bytes -- CP_CEL $5300 + 4,784 runs to $65B0 and the arena starts at $6000, where res_top places the VIEW being decoded FROM. Kingquest3 (view 64/0/0, 4,784 B) and larry1 (3 cels) exceed the 3,328 B margin; KQ1/KQ2/PQ1 do not. -DP3B_ACCEPT_CEL_ARENA to build with the defect, which is where this arm is until the shape is ruled on."
+                endc
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
                 else
 * ★★ The substitution buffer against MAP_INPUT, asserted HERE because TXT_PBUF_MAX comes from
 * text.s and lwasm needs pass-1 constants. §2V.2: "a 6809 array does not grow -- state the maximum."

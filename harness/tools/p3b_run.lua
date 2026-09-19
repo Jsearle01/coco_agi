@@ -1216,6 +1216,13 @@ _G._n = emu.add_machine_frame_notifier(function()
                 -- carries the guard's ip, that guard was never evaluated -- which is one of the two
                 -- stories P6.45 could not separate, and it is unreadable except against the list of
                 -- the expressions that WERE evaluated.
+                if _G._arena_hi then
+                    local p = _G._arena_hi_parts
+                    w("    arena peak (park-sampled, a LOWER BOUND): %d B of %d used"
+                      .. "  -- stack %d + cache %d, at cycle %d;  %d B free",
+                      _G._arena_hi, 0xA000 - 0x6000, p[1], p[2], p[3],
+                      (0xA000 - 0x6000) - _G._arena_hi)
+                end
                 -- ★★★★★ THE RESOURCE CHECKSUM [T-P0-103]. rck_seen is printed FIRST and always:
                 -- "0 mismatches" from a checker that performed 0 verifications is not a result,
                 -- and this project has had that exact shape five times [§2W].
@@ -2001,6 +2008,27 @@ _G._n = emu.add_machine_frame_notifier(function()
         -- enters the wait. Written one release early for exactly the reason the feed above is.
         if AUTOCLOSE > 0 then prog:write_u8(VAR_AUTOCLOSE, AUTOCLOSE) end
 
+        -- ★★★★★ THE ARENA'S OCCUPANCY, WHICH NOTHING HAS EVER MEASURED [T-P0-104 §3(3)].
+        -- res_top is exported and sampled, but only ever instantaneously; there is no high-water
+        -- mark anywhere, so "how full does the arena actually get" has never had an answer -- the
+        -- same shape as the stack reservation that turned out to hold 1,660 bytes of slack.
+        -- ★★★★ BOTH ALLOCATORS, because they grow toward each other: the transient stack UP from
+        -- RES_ARENA and the LOGIC cache DOWN from RES_ARENA_END. Occupancy is the sum, and either
+        -- one alone understates it.
+        -- ★★★ PARK-SAMPLED, SO IT IS A LOWER BOUND AND IS REPORTED AS ONE. The peak is mid-cycle,
+        -- while a VIEW is open on top of the cached logics inside p3_composite_all; this sees the
+        -- cycle boundary, where that frame has already been popped.
+        if SYM.res_top and SYM.res_ccur then
+            local top  = prog:read_u8(SYM.res_top) * 256 + prog:read_u8(SYM.res_top + 1)
+            local ccur = prog:read_u8(SYM.res_ccur) * 256 + prog:read_u8(SYM.res_ccur + 1)
+            local stack = top - 0x6000
+            local cache = 0xA000 - ccur
+            local used = stack + cache
+            if used > (_G._arena_hi or -1) then
+                _G._arena_hi = used
+                _G._arena_hi_parts = { stack, cache, n }
+            end
+        end
         -- ★★★★★ DUMP AT DETECTION, NOT AT READOUT [T-P0-103]. The first version dumped the bytes
         -- when the report was written, and by then the arena had been reused: res_copy_diff.py
         -- diffed whatever now occupied that address and reported 3,549 of 3,817 bytes differing,

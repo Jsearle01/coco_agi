@@ -125,7 +125,24 @@ vm_timed	src/harness/vm_probe.s	build/vm_probe.bin	-DHAL_GFX_MODE_SERVICE -DHAL_
 # that is no longer true].
 # ★★ THE FLAGS AND THE PURPOSE ARE UNCHANGED, so this is NOT AD-96's shape: the row still builds
 # the same program under the same flags, and it carries no median in column 5 to invalidate.
-p3b	src/harness/p3b_probe.s	build/p3b_probe_pk_fresh.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED	integration probe -- PLANE_WIN_MMU comes from the SOURCE (line 65), never the command line; binary F875F7F6 13,870 B, re-baselined T-P0-102 (retired: 58AD3C27 13,918 B -- the AC-5 opcode counters left the arena window, -48 B; EVERY p3b TIMING FIGURE PUBLISHED AGAINST THE RETIRED BINARY IS RETIRED WITH IT, producer moved)	purpose=timing
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ THE p3b ROW CARRIES AN ACCEPTED KNOWN DEFECT [T-P0-104]. -DP3B_ACCEPT_CEL_ARENA.
+# **CP_CEL ($5300, 4,784 B) overlaps RES_ARENA ($6000) by 1,456 bytes.** It is a static error since
+# P6.49 and this flag is the named acceptance that keeps the arm buildable while the shape is Jay's
+# ruling. It changes no bytes -- an assertion emits nothing -- so the hash below is unchanged.
+#
+# ★★★★★ THE DEFECT IS LIVE IN TWO TITLES AND DORMANT IN THREE [cel_extent.py, P6.48]:
+#   Kingquest3  largest decoded cel 4,784 B (view 64 loop 0 cel 0) -- 1 cel over the 3,328 margin
+#   larry1      largest 4,592 B -- 3 cels over
+#   Kingquest1 1,242 | Kingquest2 1,650 | PoliceQuest1 2,496 -- none over
+# ★★★★ EVERY GATE RUN USES Kingquest1, which is why this has never fired [L-86]. **A green p3b run
+# is evidence about a title where the cel is a quarter of the margin.**
+# ★★★★★ AND THE VICTIM IS THE VIEW ITSELF: res_top starts at RES_ARENA, so the first transient sits
+# at $6000; p3_composite_all decodes FROM it INTO CP_CEL, and vc_decode_cel CLEARS its whole
+# destination first [view_cel.s:184-188] -- so an over-margin cel ZEROES 1,456 bytes of its own
+# source before reading it.
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+p3b	src/harness/p3b_probe.s	build/p3b_probe_pk_fresh.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_ACCEPT_CEL_ARENA	integration probe -- PLANE_WIN_MMU comes from the SOURCE (line 65), never the command line; binary F875F7F6 13,870 B, re-baselined T-P0-102 (retired: 58AD3C27 13,918 B -- the AC-5 opcode counters left the arena window, -48 B; EVERY p3b TIMING FIGURE PUBLISHED AGAINST THE RETIRED BINARY IS RETIRED WITH IT, producer moved)	purpose=timing
 # ═══════════════════════════════════════════════════════════════════════════════════════════
 # ★★★★★ p3b_text -- THE SAME SOURCE, A SECOND CONFIGURATION [ruling C, T-P0-084f].
 #
