@@ -343,3 +343,34 @@ p3b_parse	src/harness/p3b_probe.s	build/p3b_probe_text.bin	-DHAL_GFX_MODE_SERVIC
 # The claim was never tested when it was written -- recorded rather than quietly deleted, because
 # an untested reason for excluding a gate is how a gate stays excluded [§2W].
 p3b_box	src/harness/p3b_probe.s	build/p3b_probe_text.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DP3B_IRQ	blocking message window: SpaceQuest-2 room 101 via P3B_ROOM/P3B_SETVAR/P3B_VAR21; gates what p3b_text cannot	purpose=correctness
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ p3b_rescheck -- DO THE RESIDENT RESOURCE BYTES STILL MATCH WHAT WAS LOADED? [T-P0-103]
+# Run with P3B_ROOM=1 and -WithInput: `p3b_show.ps1 -ResCheck -Headless -WithInput -Cycles 400`.
+# Clean run: 12 baselined, 1,586 verified, 0 mismatches, 1 sweep skip.
+#
+# ★★★★★ WHAT IT COVERS. Every LOGIC, at every bind: baselined on a fresh fetch at vm_run.s's
+# `vbl_nodec` (after res_decode -- the seam the res gate is aligned to) and verified on every
+# later bind from the cache. Every VIEW in p3_composite_all, baselined at open and verified before
+# res_close -- the window in which the cel decode writes CP_CEL. Plus an end-of-run sweep (MODE 4).
+#
+# ★★★★★ WHAT IT CANNOT SEE, and each of these is a real hole rather than a caveat:
+#   1. A corruption between res_fetch's copy and the baseline. It is baselined AS the truth.
+#   2. PICTURE and SOUND. No call site notes them, so they are not watched at all.
+#   3. THE CEL ARM. `p3b` cannot host it: region A ends at $52F8 with CP_CEL at $5300 -- EIGHT
+#      free bytes against the instrument's 518. **So the one arm where CP_CEL overlaps the arena
+#      is the one arm the instrument cannot run in**, and §4D's answer there is offline
+#      (cel_extent.py) rather than measured in the guest.
+#   4. The message section of a LOGIC, in res_copy_diff.py's byte report: the guest holds it
+#      decoded and the file does not, and only the STRINGS are encrypted, so the comparison is
+#      narrowed to `u16 length + bytecode` and SAYS SO. The checksum itself covers the whole
+#      resource -- it is the byte-level explanation that is narrowed, not the detection.
+#
+# ★★★★ FAULT ARM: -ResCheck -CovFault (-DP3B_COVERAGE -DP3B_FAULT_COV_ARENA -DP3B_ACCEPT_COV_ARENA).
+# Shown RED T-P0-103: 8 mismatches, LOGIC 102 at $63F0, checksum advancing by a constant $B40F per
+# cycle; res_copy_diff.py then names 8 offsets with gaps [1,1,9,9,1,16,31] -- **byte-for-byte the
+# sequence P6.46 found by hand**, shifted +2 because this dumps the resource and P6.46 snapshotted
+# the bytecode. ★★★ That is the check that it detects the thing it was built for.
+# ★★ rck_seen is printed on every run: a green from a checker that performed zero verifications is
+# not a green, and the host says ZERO VERIFICATIONS in as many words when it happens.
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+p3b_rescheck	src/harness/p3b_probe.s	build/p3b_probe_pk_fresh.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DTEXT_MODELLED -DRES_CHECKSUM -DP3B_IRQ	resource bytes gated after the bind; needs P3B_ROOM=1 and -WithInput; 15,852 B (+518 over p3b_fault); tables live in MAP_COVERAGE, not the code image	purpose=correctness

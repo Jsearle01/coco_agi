@@ -40,6 +40,15 @@ param(
   [switch]$SaidDiag,
   [switch]$Var0Diag,
   [switch]$IfDiag,
+  # ★★★★★ -ResCheck IS T-P0-103's INSTRUMENT: do the resident resource bytes still match what was
+  # loaded? Baseline at the LOGIC bind (after the decode, the seam the res gate is aligned to),
+  # verify on every later bind, on a VIEW before it is released, and in an end-of-run sweep.
+  # ★★★ -CovFault is its fault arm and needs three flags together: the counters back in the arena
+  # (-DP3B_FAULT_COV_ARENA), the counters actually built (-DP3B_COVERAGE), and the P6.47 assertion
+  # deliberately bypassed (-DP3B_ACCEPT_COV_ARENA). **The assertion is not weakened; it is told, by
+  # name, that this one caller means it.**
+  [switch]$ResCheck,
+  [switch]$CovFault,
   # ★★★★★ -NoCount IS T-P0-101's ABLATION. VM_OPSEEN ($6400) and VM_TESTSEEN ($6300) sit INSIDE the
   # residency arena's window ($6000-$A000), so every dispatched opcode increments a byte of whatever
   # resource the arena has mapped there. -DVM_NOCOUNT removes both counters and nothing else, which
@@ -159,7 +168,12 @@ if ($Var0Diag) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DTEXT_MODELLED","
 # by one flag, and every shipped artifact is byte-identical without it.
 if ($IfDiag) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DTEXT_MODELLED","-DVM_IFDIAG","-DVM_SAIDDIAG") + $IRQ }
 
-# ★ Appended last so it composes with every arm above rather than being spelled into each one.
+# ★★★★ -ResCheck is a TEXT-configuration arm and cannot be a cel one [T-P0-103 §4D]. The cel arm's
+# region A ends at $52F8 with CP_CEL at $5300 -- EIGHT bytes -- and the instrument's code needs 518.
+# Its tables are already out of the image, in MAP_COVERAGE; the code cannot be.
+if ($ResCheck) { $FLAGS += @("-DP3B_NO_CEL","-DHAL_KEYBOARD","-DTEXT_MODELLED","-DRES_CHECKSUM") + $IRQ }
+# ★ Appended last so they compose with every arm above rather than being spelled into each one.
+if ($CovFault) { $FLAGS += @("-DP3B_COVERAGE","-DP3B_FAULT_COV_ARENA","-DP3B_ACCEPT_COV_ARENA") }
 if ($NoCount) { $FLAGS += "-DVM_NOCOUNT" }
 
 & $LW --format=raw --output=build/p3b_probe_pk_fresh.bin --map=build/p3b_probe_pk.map -I. @FLAGS src/harness/p3b_probe.s
@@ -204,11 +218,15 @@ $WANT = @("res_volbase","res_slicebase","res_curblk","vm_quit","vm_badop","vm_cy
 # ★ -FlatVocab is a MODELLED arm, so it belongs with $Fault in $Linked and not in $Wired: it links
 #   text.s and leaves TEXT_WIRED undefined, exactly as -Fault does.
 $Wired  = $Text -or $DecodeFault -or $NoTick -or $Diag -or $NoMap -or $Win3
-$Linked = $Wired -or $Fault -or $FlatVocab -or $SaidDiag -or $Var0Diag -or $IfDiag
+$Linked = $Wired -or $Fault -or $FlatVocab -or $SaidDiag -or $Var0Diag -or $IfDiag -or $ResCheck
 # ★★ Each diagnostic's own symbols, only where its flag defines them.
 if ($SaidDiag -or $IfDiag) { $WANT += @("vm_sd_at","vm_sd_n","vm_sd_buf") }
 if ($Var0Diag) { $WANT += @("vm_v0_at","vm_v0_n","vm_v0_buf") }
 if ($IfDiag) { $WANT += @("vm_if_at","vm_if_logic","vm_if_n","vm_if_buf","vm_if_code","vm_if_clen","vm_if_snap") }
+# ★★ rck_seen and rck_noted are NOT optional extras: they are what tells a green run from a run
+# where the checker never executed [§2W]. The host prints them whether or not anything went wrong.
+if ($ResCheck) { $WANT += @("rck_n","rck_bad","rck_ring","rck_seen","rck_noted","rck_skipped","rck_full",
+                            "rck_type","rck_idx","rck_live","rck_base","rck_len","rck_sum") }
 if ($Linked) { $WANT += @("P3_FONT","P3_FONT_BYTES","P3_PBUF","ph_blk_vocab","ph_blk_slot5") }
 # ★★★★ THE COMMAND LINE's SYMBOLS [T-P0-092]. They exist wherever TEXT_PROMPT does, which
 # p3b_probe.s conditions exactly as TEXT_WIRED -- so every wired text arm has them and the

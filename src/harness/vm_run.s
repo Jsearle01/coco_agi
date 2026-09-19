@@ -54,6 +54,11 @@ vm_vtmp2        fdb     0
 vm_bind_logic:
                 ldb     #RES_LOGIC
                 exg     a,b                     ; A = type, B = index
+* ★★ -DRES_CHECKSUM needs the index AFTER res_open, which clobbers B. Stashed here, guarded, so a
+* build without the flag is byte-identical [T-P0-103].
+                ifdef   RES_CHECKSUM
+                stb     rck_cur
+                endc
                 jsr     res_open
                 lda     res_err
                 lbne    vm_res_fail
@@ -80,14 +85,40 @@ vm_bind_logic:
 *
 * ★★ C set = res_open served this from its cache, so the bytes were decoded by the fetch that first
 * brought them in. C clear = fresh fetch, decode now. `lda res_err` above does not touch C.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ -DRES_CHECKSUM SPLITS THIS BRANCH RATHER THAN FOLLOWING IT [T-P0-103]. The two arms mean
+* different things to the checksum -- a fresh fetch BASELINES, a cache hit VERIFIES -- and by
+* `vbl_nodec` the carry that told them apart has been destroyed by `jsr res_decode`. **So the
+* hooks go on the arms, not at the join**, and the whole split is guarded so a build without the
+* flag emits exactly the two instructions it always did.
                 ifndef  RES_FAULT_DECODE_HIT
+                ifdef   RES_CHECKSUM
+                bcs     vbl_hit
+                endc
+                ifndef  RES_CHECKSUM
                 bcs     vbl_nodec
+                endc
                 endc
 * ★★★★★ AC-4's FAULT ARM, MOVED WITH THE DECODE. -DRES_FAULT_DECODE_HIT drops the `bcs`, so the
 * decode runs on EVERY bind including cached ones -- the same defect as the old decode-on-hit arm,
 * at the new site. L-66 measured 3.01 binds per cycle, so it re-encrypts almost immediately.
 * ★★ A fault arm that cannot fire is not a fault arm; this one is run in both directions [§2W].
                 jsr     res_decode
+                ifdef   RES_CHECKSUM
+* ★★★ THE BASELINE, at the only instant where a LOGIC's bytes are final on both paths.
+                lda     #RES_LOGIC
+                ldb     rck_cur
+                jsr     res_ck_note
+                bra     vbl_nodec
+vbl_hit:
+* ★★★ A LATER BIND OF A RESIDENT LOGIC. Nothing was fetched and nothing was decoded, so these
+* bytes must be the ones baselined -- and for twenty tasks, for one logic, they were not.
+                lda     #RCK_AT_BIND
+                sta     rck_site
+                lda     #RES_LOGIC
+                ldb     rck_cur
+                jsr     res_ck_verify
+                endc
 vbl_nodec:
 * ═══════════════════════════════════════════════════════════════════════════════════════════
                 ldx     res_base

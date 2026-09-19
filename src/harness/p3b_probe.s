@@ -643,6 +643,11 @@ p3_vt_done:     std     P3_VOCAB_BAD
                 ifdef   HAL_KEYBOARD
                 jsr     HAL_input_init
                 endc
+* ★★ res_check's tables live in MAP_COVERAGE, which is not part of the poked image and therefore
+* holds cold-boot RAM until this runs [T-P0-103].
+                ifdef   RES_CHECKSUM
+                jsr     res_ck_init
+                endc
                 ifdef   P3B_NO_CEL
                 ldx     #P3_PBUF
                 stx     txt_pbuf
@@ -806,7 +811,21 @@ p3_wait:        lda     P3_GO
                 lda     P3_MODE
                 cmpa    #1
                 beq     p3_do_cycle
+* ★★★ MODE 4 = SWEEP [T-P0-103]. The probe is host-driven and has no end of its own -- the host
+* simply stops parking it -- so the end-of-run sweep is a MODE the host asks for on the last park,
+* not something the guest can decide to do. ★★ Mode 1 was the only mode; 4 is chosen rather than 2
+* so a stale byte from an older host cannot select it by accident.
+                ifdef   RES_CHECKSUM
+                cmpa    #4
+                beq     p3_do_sweep
+                endc
                 bra     p3_loop
+
+                ifdef   RES_CHECKSUM
+p3_do_sweep:    jsr     res_ck_sweep
+                clr     P3_MODE
+                bra     p3_loop
+                endc
 
 * ── one interpreter cycle: VM, then render if the room changed, then composite ───
 * ★★★ THE ORDER IS THE PHASE DISCIPLINE AND EVERY LINE OF IT IS LOAD-BEARING:
@@ -1660,6 +1679,17 @@ pca_lp:
                 jsr     res_open
                 lda     res_err
                 bne     pca_skip
+* ★★★★★ THE VIEW IS BASELINED HERE AND VERIFIED BEFORE IT IS RELEASED [T-P0-103]. A VIEW is a
+* TRANSIENT -- opened, decoded from, composited, closed, all inside this iteration -- so there is
+* no later bind to catch a corruption at. **The window that matters is the one between these two
+* calls**, because `vc_decode_cel` writes to CP_CEL, which in this configuration starts at $5300
+* and runs 4,784 bytes -- 1,456 of them INSIDE the arena this VIEW was just fetched into
+* [P6.47 §7.2]. ★★ No decode applies to a VIEW, so the bytes are final the moment res_open returns.
+                ifdef   RES_CHECKSUM
+                lda     #RES_VIEW
+                ldb     p3_view
+                jsr     res_ck_note
+                endc
                 ldx     res_base
                 stx     vc_view
                 ldx     #CP_CEL
@@ -1668,7 +1698,18 @@ pca_lp:
                 lda     vc_err
                 bne     pca_close
                 jsr     cp_composite
-pca_close:      jsr     res_close
+pca_close:
+                ifdef   RES_CHECKSUM
+                lda     #RCK_AT_CLOSE
+                sta     rck_site
+                lda     #RES_VIEW
+                ldb     p3_view
+                jsr     res_ck_verify
+                lda     #RES_VIEW
+                ldb     p3_view
+                jsr     res_ck_release
+                endc
+                jsr     res_close
 pca_skip:       puls    y
                 inc     p3_si
                 lda     p3_si
@@ -1743,6 +1784,10 @@ P3_TABLES_END   equ     *
                 include "src/harness/vm_objects.s"
                 include "src/harness/vm_cycle.s"
                 include "src/harness/res_core.s"
+* ★★ res_check.s is ENTIRELY inside `ifdef RES_CHECKSUM`, so this include costs nothing in a build
+* without the flag -- which is what makes AC-5's byte identity a property of the source rather than
+* a thing to be careful about. It follows res_core because it reads res_caddr and res_cache_find.
+                include "src/harness/res_check.s"
 * ★ pic_core.s includes pic_draw.s and pic_fill.s itself -- those two includes sat inside the
 * extracted range, so the renderer arrives as one unit. Listing them again here is a
 * multiply-defined error, which is the assembler enforcing §2F rather than a nuisance.
@@ -2103,9 +2148,18 @@ P3_COV_END      equ     VM_OPSEEN+256
                 error   "the coverage counters are not contiguous -- the checks below assume one 512 B block"
                 endc
                 ifndef  VM_NOCOUNT
+* ★★★★★ -DP3B_ACCEPT_COV_ARENA IS THE DELIBERATE BYPASS, AND IT EXISTS FOR ONE CALLER [T-P0-103].
+* This assertion is the one that refuses P6.46's defect -- and **the resource-checksum instrument's
+* fault arm has to BUILD that defect to prove it can detect it.** Without a bypass the two §2W
+* obligations contradict each other: the assertion may not be weakened, and the checksum may not be
+* believed until it has been seen red on a real corruption.
+* ★★★ It is named for what it accepts, it is required in addition to -DP3B_FAULT_COV_ARENA, and it
+* is in no gate row. The probe already uses this shape for the draw-phase overrun.
+                ifndef  P3B_ACCEPT_COV_ARENA
                 ifgt    P3_COV_END-RES_ARENA
                 ifgt    RES_ARENA_END-P3_COV
-                error   "the coverage counters are inside RES_ARENA -- every dispatched opcode would increment a byte of the resident resource (P6.46: Kingquest1 LOGIC 102 at $63F2, its goto at offset $0010)"
+                error   "the coverage counters are inside RES_ARENA -- every dispatched opcode would increment a byte of the resident resource (P6.46: Kingquest1 LOGIC 102 at $63F2, its goto at offset $0010). -DP3B_ACCEPT_COV_ARENA to build it anyway, which only the checksum's fault arm should do."
+                endc
                 endc
                 endc
                 ifgt    P3_COV_END-MAP_CODE

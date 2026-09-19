@@ -1042,6 +1042,20 @@ _G._n = emu.add_machine_frame_notifier(function()
             end
         end
         if n >= NCYC then
+            -- ★★★★★ THE SWEEP, ONE PARK, BEFORE ANYTHING IS READ [T-P0-103 §4B]. The probe is
+            -- host-driven and has no end of its own, so the end-of-run sweep is a MODE the host
+            -- asks for rather than something the guest can decide to do. Mode 4 runs
+            -- res_ck_sweep and clears itself; this fires once and then never again.
+            -- ★★★ It must happen BEFORE the readout below, or the report shows the counters as
+            -- they were before the sweep ran -- which is AD-131's adjudicator reading a previous
+            -- run's outputs, one frame apart instead of one run apart.
+            if SYM.rck_seen and not _G._swept then
+                _G._swept = true
+                prog:write_u8(MODE, 4)
+                prog:write_u8(GO, 1)
+                w("  ★ res-checksum sweep requested (mode 4)")
+                return
+            end
             -- ★★★ THE HOLD IS TESTED FIRST so the summary and the plane dump happen exactly
             -- once. Placing it after them re-ran the whole report on every frame of the hold --
             -- 900 copies of "final room 22" for a 15-second look at the screen.
@@ -1202,6 +1216,58 @@ _G._n = emu.add_machine_frame_notifier(function()
                 -- carries the guard's ip, that guard was never evaluated -- which is one of the two
                 -- stories P6.45 could not separate, and it is unreadable except against the list of
                 -- the expressions that WERE evaluated.
+                -- ★★★★★ THE RESOURCE CHECKSUM [T-P0-103]. rck_seen is printed FIRST and always:
+                -- "0 mismatches" from a checker that performed 0 verifications is not a result,
+                -- and this project has had that exact shape five times [§2W].
+                if SYM.rck_seen and SYM.rck_bad then
+                    local seen = prog:read_u8(SYM.rck_seen) * 256 + prog:read_u8(SYM.rck_seen + 1)
+                    local noted = prog:read_u8(SYM.rck_noted) * 256 + prog:read_u8(SYM.rck_noted + 1)
+                    local bad = prog:read_u8(SYM.rck_bad)
+                    w("    res-checksum: %d baselined, %d verified, %d mismatch(es), "
+                      .. "%d sweep skip(s)%s",
+                      noted, seen, bad, prog:read_u8(SYM.rck_skipped),
+                      prog:read_u8(SYM.rck_full) ~= 0 and "  ★★★ TABLE FULL -- coverage reduced" or "")
+                    if seen == 0 then
+                        w("      ★★★ ZERO VERIFICATIONS -- this run proves NOTHING about resource bytes")
+                    end
+                    -- ★★★★★ THE TABLE ITSELF, ALWAYS. A mismatch row is a claim ABOUT an entry,
+                    -- and the first run of this instrument produced rows naming a 35,727-byte
+                    -- LOGIC at an address inside the code region -- impossible on their face.
+                    -- **Printing the table is what separates "the resource changed" from "the
+                    -- bookkeeping is wrong"**, and without it the only way to tell them apart is
+                    -- to read the assembly and guess [§2W.3].
+                    -- ★★ RAW, NOT FORMATTED. A `for` loop building a seven-column line from seven
+                    -- reads is one nil away from throwing INSIDE the frame callback, which this
+                    -- file has been killed by three times and which presents as the output simply
+                    -- stopping. Four hex rows cannot throw and say the same thing.
+                    for _, r in ipairs({ { "type", SYM.rck_type }, { "idx ", SYM.rck_idx },
+                                         { "live", SYM.rck_live }, { "base", SYM.rck_base },
+                                         { "len ", SYM.rck_len },  { "sum ", SYM.rck_sum },
+                                         { "rng0", SYM.rck_ring }, { "rng1", SYM.rck_ring + 16 },
+                                         { "scal", SYM.rck_n } }) do
+                        local h = {}
+                        for k = 0, 15 do h[#h + 1] = string.format("%02X", prog:read_u8(r[2] + k)) end
+                        w("      raw %s $%04X: %s", r[1], r[2], table.concat(h, " "))
+                    end
+                    local SITE = { [1] = "later bind", [2] = "before release", [3] = "sweep" }
+                    for i = 0, bad - 1 do
+                        local b = SYM.rck_ring + i * 14
+                        local rtype = prog:read_u8(b)
+                        local ridx  = prog:read_u8(b + 1)
+                        local base  = prog:read_u8(b + 2) * 256 + prog:read_u8(b + 3)
+                        local len   = prog:read_u8(b + 4) * 256 + prog:read_u8(b + 5)
+                        local exp   = prog:read_u8(b + 6) * 256 + prog:read_u8(b + 7)
+                        local act   = prog:read_u8(b + 8) * 256 + prog:read_u8(b + 9)
+                        local site  = prog:read_u8(b + 10)
+                        local cyc   = prog:read_u8(b + 11) * 256 + prog:read_u8(b + 12)
+                        w("      ★★★ type %d index %-3d at $%04X len %-5d  expected $%04X got $%04X"
+                          .. "  (%s, cycle %d)",
+                          rtype, ridx, base, len, exp, act, SITE[site] or "?", cyc)
+                        -- ★★ The BYTES are dumped in the park loop, at detection, not here: by the
+                        -- time this report runs the arena has been reused and the address holds
+                        -- something else entirely. See the park callback.
+                    end
+                end
                 if SYM.vm_if_n and SYM.vm_if_buf then
                     local n = prog:read_u8(SYM.vm_if_n)
                     w("    `if` rows for logic %d in vm_cycle %d : %d",
@@ -1935,6 +2001,36 @@ _G._n = emu.add_machine_frame_notifier(function()
         -- enters the wait. Written one release early for exactly the reason the feed above is.
         if AUTOCLOSE > 0 then prog:write_u8(VAR_AUTOCLOSE, AUTOCLOSE) end
 
+        -- ★★★★★ DUMP AT DETECTION, NOT AT READOUT [T-P0-103]. The first version dumped the bytes
+        -- when the report was written, and by then the arena had been reused: res_copy_diff.py
+        -- diffed whatever now occupied that address and reported 3,549 of 3,817 bytes differing,
+        -- which is a confident answer about the wrong memory. **A transient's bytes are only
+        -- readable while it is resident**, so the host polls the ring every park and dumps the
+        -- moment a row appears.
+        if SYM.rck_bad then
+            local nb = prog:read_u8(SYM.rck_bad)
+            local had = _G._rck_rows or 0
+            if nb > had then
+                for i = had, nb - 1 do
+                    local b = SYM.rck_ring + i * 14
+                    local rtype, ridx = prog:read_u8(b), prog:read_u8(b + 1)
+                    local base = prog:read_u8(b + 2) * 256 + prog:read_u8(b + 3)
+                    local len  = prog:read_u8(b + 4) * 256 + prog:read_u8(b + 5)
+                    if len > 0 then
+                        local path = string.format("%s/rescheck_%d_%d.bin", OUT, rtype, ridx)
+                        local fh = io.open(path, "wb")
+                        if fh then
+                            local t = {}
+                            for k = 0, len - 1 do t[#t + 1] = string.char(prog:read_u8(base + k)) end
+                            fh:write(table.concat(t))
+                            fh:close()
+                            w("  ★ res-checksum row %d dumped at detection -> %s", i, path)
+                        end
+                    end
+                end
+                _G._rck_rows = nb
+            end
+        end
         n = n + 1
         prog:write_u8(MODE, 1)
         prog:write_u8(GO, 1)
