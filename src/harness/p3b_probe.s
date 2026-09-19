@@ -1704,6 +1704,21 @@ pca_lp:
                 endc
                 ldx     res_base
                 stx     vc_view
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ vc_srcend, AND THIS PROBE HAS NEVER SET IT [T-P0-106]. It is the ONLY bound VC_E_TRUNC
+* tests -- `cmpx vc_srcend / blo` [view_cel.s:268] -- and the decoder does not derive it: the
+* CALLER supplies it, because only the caller knows how long the resource is.
+* ★★★★★ cel_probe.s:153-154 does exactly this (`CP_VIEW + CP_VIEWLEN`). p3b did not, so vc_srcend
+* held its image value of ZERO and **every cel truncated on its first byte, for the life of this
+* probe.** Measured: vc_view $6000, vc_src $615A, vc_srcend $0000, vc_err 4, co_tested 0.
+* ★★★★ SO `sprites 4` WAS A STAGING COUNT AND NOTHING WAS EVER DRAWN. The two byte gates decode
+* from a HOST-staged VIEW and set the bound; this path decodes from an ARENA-RESIDENT one and did
+* not. **The join is what nobody watched** [L-121, and P6.28d's shape exactly].
+* ★★★ res_open has always published res_len. Nothing in this decode path used it.
+                ldd     res_base
+                addd    res_len
+                std     vc_srcend
+* ═══════════════════════════════════════════════════════════════════════════════════════════
                 ldx     #CP_CEL
                 stx     vc_dest
 * ★★★★★ BEGIN, NOT DECODE [T-P0-105]. The cel is no longer unpacked here; cp_composite pulls it a

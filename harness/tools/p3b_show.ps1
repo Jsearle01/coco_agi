@@ -214,7 +214,6 @@ $WANT = @("res_volbase","res_slicebase","res_curblk","vm_quit","vm_badop","vm_cy
           # p3_composite_all skips a sprite whenever the decode sets it, silently -- and CP_BLITS
           # measured ZERO composites across 60 cycles with four sprites staged, so every one of
           # them was being skipped and no instrument said why.
-          "vc_err","vc_w","vc_h",
           # ★★★ vm_curlogic NAMES THE LOGIC THAT WAS INTERPRETING when a room changed [T-P0-094].
           # It exists in every build and was in vm_run.ps1's list and not this one, so p3b's room
           # trajectory could say WHEN and never WHICH.
@@ -247,6 +246,17 @@ if ($Var0Diag) { $WANT += @("vm_v0_at","vm_v0_n","vm_v0_buf") }
 if ($IfDiag) { $WANT += @("vm_if_at","vm_if_logic","vm_if_n","vm_if_buf","vm_if_code","vm_if_clen","vm_if_snap") }
 # ★★ rck_seen and rck_noted are NOT optional extras: they are what tells a green run from a run
 # where the checker never executed [§2W]. The host prints them whether or not anything went wrong.
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ THE CEL PATH'S SYMBOLS, AND ONLY WHERE THE CEL PATH IS LINKED [T-P0-106].
+# vc_srcend is the bound VC_E_TRUNC tests [view_cel.s:268]; vc_view/vc_src are the pointer it
+# refused; co_tested is how many cel pixels the compositor actually examined. **Published because
+# p3b had never set vc_srcend and every cel truncated on its first byte.**
+# ★★★★★ -DP3B_NO_CEL STRIPS view_cel.s AND composite.s, so these do not exist in any text arm, and
+# **vm_symbols.py fails the whole run on a missing name.** I put them on the shared line first and
+# it broke p3b_text, p3b_box, p3b_parse and p3b_row22 in one go -- the exact trap this file already
+# warns about three times, for MAP_FONT, for P3_TXDIAG and for tx_wt_*.
+if (-not $Linked) { $WANT += @("vc_err","vc_w","vc_h","vc_src","vc_srcend","vc_view","co_tested") }
+# ═══════════════════════════════════════════════════════════════════════════════════════════
 if ($ResCheck -or $CelCheck) { $WANT += @("rck_n","rck_bad","rck_ring","rck_seen","rck_noted","rck_skipped","rck_full",
                             "rck_type","rck_idx","rck_live","rck_base","rck_len","rck_sum") }
 if ($Linked) { $WANT += @("P3_FONT","P3_FONT_BYTES","P3_PBUF","ph_blk_vocab","ph_blk_slot5") }

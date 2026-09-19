@@ -142,6 +142,25 @@ vm_timed	src/harness/vm_probe.s	build/vm_probe.bin	-DHAL_GFX_MODE_SERVICE -DHAL_
 # compositor for its whole life. Jay's eye gate found it: "i didn't see anything i'd call a sprite".
 # ★★★ The `cel` gate decodes 9,193 cels correctly from a HOST-STAGED view; p3b decodes from an
 # ARENA-RESIDENT one. That difference is the next task's.
+#
+# ★★★★★ ANSWERED AT T-P0-106, AND THERE WERE TWO DEFECTS BEHIND IT.
+#   1. FIXED. **vc_srcend was never set by this probe.** It is the only bound VC_E_TRUNC tests
+#      [view_cel.s:268] and the CALLER supplies it -- cel_probe.s:154 does, from
+#      CP_VIEW + CP_VIEWLEN. p3b did not, so it held its image value of ZERO and every cel was
+#      refused at its first byte. Measured: vc_src $615A against vc_srcend $0000, co_tested 0.
+#      res_open has always published res_len; nothing in the decode path used it.
+#   2. ★★★★★ NOT FIXED, AND IT IS WHY THIS ROW STILL DRAWS NO SPRITE. **composite.s addresses the
+#      visual plane FLAT while p3b's is WINDOWED.** co_rowset does `addd #CP_VIS`, CP_VIS is
+#      FB_BASE = $C000 (an 8 KB window), so row 100 lands at $FE80 -- the vector stubs -- and row
+#      167 wraps to $2860, the code region. Both observed: pixel bytes at the IRQ vector $FEF7,
+#      and the stall's hot PCs in vm_rl_args. **The first real composite crashes the machine.**
+#      memmap.inc predicted this and exempts the windowed case because "PLANE_WINDOWED reaches
+#      every byte through plane_vis/plane_pri, which mask" -- **composite.s does not.**
+#
+# ★★★★★ THIS ROW IS GREEN AND THE SPRITE PATH IS BROKEN, AT THE SAME TIME. The row runs without
+# P3B_ROOM, stays in room 83 and stages ZERO sprites, so it never reaches the defect. **Running it
+# with P3B_ROOM=1 stalls in cycle 10.** That is the blind spot `cel` and `comp` do not cover: they
+# gate the two subsystems and nothing gates the join [L-121].
 # ═══════════════════════════════════════════════════════════════════════════════════════════
 p3b	src/harness/p3b_probe.s	build/p3b_probe_pk_fresh.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED	integration probe -- PLANE_WIN_MMU comes from the SOURCE (line 65), never the command line; binary F875F7F6 13,870 B, re-baselined T-P0-102 (retired: 58AD3C27 13,918 B -- the AC-5 opcode counters left the arena window, -48 B; EVERY p3b TIMING FIGURE PUBLISHED AGAINST THE RETIRED BINARY IS RETIRED WITH IT, producer moved)	purpose=timing
 # ═══════════════════════════════════════════════════════════════════════════════════════════

@@ -1227,6 +1227,19 @@ _G._n = emu.add_machine_frame_notifier(function()
                       SYM.vc_err and string.format("   vc_err=%d  last cel %dx%d",
                         prog:read_u8(SYM.vc_err), prog:read_u8(SYM.vc_w or 0),
                         prog:read_u8(SYM.vc_h or 0)) or "")
+                    -- ★★★★★ THE TRUNCATION BOUND AND THE POINTER IT REFUSED [T-P0-106 §4A].
+                    -- vc_src < vc_srcend is the only test VC_E_TRUNC makes [view_cel.s:268].
+                    if SYM.vc_srcend then
+                        local function rd(s) return prog:read_u8(s) * 256 + prog:read_u8(s + 1) end
+                        w("      vc_view=$%04X  vc_src=$%04X  vc_srcend=$%04X%s",
+                          rd(SYM.vc_view), rd(SYM.vc_src), rd(SYM.vc_srcend),
+                          rd(SYM.vc_srcend) == 0 and "   ★★★ NEVER SET -- every cel truncates on its first byte" or "")
+                    end
+                    if SYM.co_tested then
+                        local t = 0
+                        for k = 0, 3 do t = t * 256 + prog:read_u8(SYM.co_tested + k) end
+                        w("      co_tested (cel pixels examined by the compositor): %d", t)
+                    end
                 end
                 if _G._arena_hi then
                     local p = _G._arena_hi_parts

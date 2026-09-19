@@ -69,7 +69,10 @@ $ARMS = @(
   # assertion passes on its own terms, so this row builds clean with no acceptance flag at all.
   # RETIRED at T-P0-105: 13,870 B F875F7F6 -> 13,941 B D2C30D53 (+71). The cel decode goes a row
   # at a time, CP_CEL moves from $5300/4,784 B to $5F00/255 B, and the arena overlap is gone.
-  @{ n = "p3b";        f = @();                                          sz = 13941; sha = "D2C30D53" },
+  # RETIRED at T-P0-106: 13,941 B D2C30D53 -> 13,950 B 36B1A1C3 (+9). p3_composite_all now sets
+  # vc_srcend from res_base + res_len -- the bound VC_E_TRUNC tests, which this probe had NEVER
+  # set, so every cel truncated on its first byte for the life of the probe.
+  @{ n = "p3b";        f = @();                                          sz = 13950; sha = "36B1A1C3" },
   @{ n = "p3b_text";   f = $TEXT;                                         sz = 16210; sha = "83DD87A4" },
   @{ n = "p3b_win3";   f = $TEXT + @("-DTEXT_WIN3");                      sz = 16210; sha = "0437A07C" },
   @{ n = "p3b_notick"; f = $TEXT + @("-DTEXT_FAULT_NOTICK");              sz = 16207; sha = "C545C08F" },
