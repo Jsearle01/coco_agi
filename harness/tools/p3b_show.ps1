@@ -83,6 +83,12 @@ param(
   # KNOWN-GOOD RED -- it is every build before this task, and Jay reported it at the side-by-side:
   # "the text area is white again. we had it changed to black as it should be."
   [switch]$PresentAll,
+  # ★★★★★ -Combined IS T-P0-120's THIRD SHAPE: the text engine AND the cel/composite path in one
+  # binary, which no build has ever had. text.s is `org`ed into slot 7's hole above the font
+  # ($EBBA), because region A cannot hold both halves -- P6.64 measured that at 513 B over.
+  # ★★★ It is not a fault arm and not a variant of -Text: P3B_NO_CEL keeps its own meaning and the
+  # six text arms stay byte-identical. This adds a shape rather than changing one.
+  [switch]$Combined,
   [switch]$NoIrq,
   [double]$Hold   = 3.0
 )
@@ -220,6 +226,9 @@ if ($NoRestore) { $FLAGS += "-DP3B_FAULT_NORESTORE" }
 if ($AlwaysRestore) { $FLAGS += "-DP3B_FAULT_ALWAYSRESTORE" }
 if ($NoJoin) { $FLAGS += "-DP3B_FAULT_NOJOIN" }
 if ($PresentAll) { $FLAGS += "-DP3B_FAULT_PRESENT_ALL" }
+# ★★★ -Combined needs P3B_IRQ as the text arms do: the text engine's print path blocks on a key,
+# and the vector stubs at $FEF0 are what P3_REGIONB_END reserves for.
+if ($Combined) { $FLAGS += @("-DP3B_COMBINED") + $IRQ }
 # ★★★★★ THE CEL ARM GETS THE KEYBOARD TOO [T-P0-115]. Tested on the absence of -DP3B_NO_CEL rather
 # than on a list of the twelve text switches, because that list is the thing this file has already
 # been bitten by five times -- "a list repeated five times is a list that will be edited four
@@ -276,7 +285,17 @@ $WANT = @("res_volbase","res_slicebase","res_curblk","vm_quit","vm_badop","vm_cy
 #   $Wired   the nine opcodes are wired, so tx_wt_* and the prompt symbols exist
 # ★ -FlatVocab is a MODELLED arm, so it belongs with $Fault in $Linked and not in $Wired: it links
 #   text.s and leaves TEXT_WIRED undefined, exactly as -Fault does.
-$Wired  = $Text -or $DecodeFault -or $NoTick -or $Diag -or $NoMap -or $Win3
+# ★★★★★ -Combined IS A WIRED TEXT BUILD AND MUST BE IN THIS PREDICATE [T-P0-120]. The source
+# defines TEXT_WIRED under P3B_TEXT_LINK (= P3B_NO_CEL or P3B_COMBINED) with TEXT_MODELLED
+# undefined -- so the combined arm has every symbol a wired text arm has, INCLUDING P3_FONT.
+# ★★★★★ LEAVING IT OUT COST THIS TASK ITS EYE GATE. The host stages the font only when it
+# extracted P3_FONT/P3_FONT_BYTES, those are on the $Linked line, $Linked derives from $Wired,
+# and -Combined was in neither -- so no font was staged and txt_blit fetched glyphs from cold RAM.
+# Jay: "the text is garbled."
+# ★★★★ **This is the same defect as P6.64 §3.5 and the rule is the one written beside the split
+# symbols above: the want-line's condition must be the SAME condition as the symbol's
+# definition.** It was written in this file, in this task, and then not applied one screen below.
+$Wired  = $Text -or $DecodeFault -or $NoTick -or $Diag -or $NoMap -or $Win3 -or $Combined
 $Linked = $Wired -or $Fault -or $FlatVocab -or $SaidDiag -or $Var0Diag -or $IfDiag -or $ResCheck
 # ★★ Each diagnostic's own symbols, only where its flag defines them.
 if ($SaidDiag -or $IfDiag) { $WANT += @("vm_sd_at","vm_sd_n","vm_sd_buf") }
@@ -293,7 +312,17 @@ if ($IfDiag) { $WANT += @("vm_if_at","vm_if_logic","vm_if_n","vm_if_buf","vm_if_
 # **vm_symbols.py fails the whole run on a missing name.** I put them on the shared line first and
 # it broke p3b_text, p3b_box, p3b_parse and p3b_row22 in one go -- the exact trap this file already
 # warns about three times, for MAP_FONT, for P3_TXDIAG and for tx_wt_*.
-if (-not $Linked) { $WANT += @("vc_err","vc_w","vc_h","vc_src","vc_srcend","vc_view","co_tested",
+# ★★★★★ GATED ON THE CEL LINK, NOT ON `-not $Linked` [T-P0-120]. Those were the same predicate only
+# while text and cels were mutually exclusive. The combined arm has BOTH, so `-not $Linked` is now
+# false for an arm that owns every symbol on this line.
+# ★★★★★ AND THIS IS THE THIRD INSTANCE OF ONE PATTERN IN ONE TASK. The rule is written twice above
+# -- the want-line's condition must be the SAME condition as the symbol's definition -- and it was
+# still broken here, and in the font line below, after being written. **Found by grepping for the
+# pattern rather than for the instance**, which is the only thing that caught it.
+# ★★★ The source condition is `ifdef P3B_CEL_LINK`, which is "this arm did not ask for
+# -DP3B_NO_CEL". Spelled from $FLAGS so it cannot drift from the flag that actually selects it.
+$CelLink = ($FLAGS -notcontains "-DP3B_NO_CEL")
+if ($CelLink) { $WANT += @("vc_err","vc_w","vc_h","vc_src","vc_srcend","vc_view","co_tested",
                                "p3_spr","p3_nspr","co_written","co_rejkey","co_rejpri",
 # ★★★★ T-P0-113: the restore's two observables. CEL ARM ONLY, on this line and not the shared
 # one, for the reason the comment above gives -- vm_symbols.py fails the whole run on a missing
@@ -331,6 +360,16 @@ if ($Linked) { $WANT += @("txt_bgx","txt_bgy","txt_bgw","txt_bgh","txb_yoff","tx
 # 626 bytes low. The guest still reported "160 of 160 cycles"; only the completion line was
 # missing. **A host that describes the image wrongly produces a run that looks almost right.**
 $WANT += @("P3_CODE_SPLIT","P3_TABLES_BASE","P3_TABLES_END")
+# ★★★★★ T-P0-120's THREE CANNOT GO ON THE SHARED LINE, AND THE REASON REFINES P6.64'S LESSON.
+# They exist only under -DP3B_COMBINED, and vm_symbols.py FAILS THE WHOLE RUN on a name it cannot
+# find -- so asking for them in the cel and text arms would break both, which is the trap this
+# file has warned about five times.
+# ★★★★★ P6.64's BUG WAS NOT "a per-configuration line". It was a per-configuration line whose
+# CONDITION DIFFERED FROM THE ONE THAT CREATES THE SYMBOLS: the relocation became universal while
+# the want-line still said `$Linked`. **The rule is that the want-line's condition must be the
+# SAME condition as the symbol's definition**, not merely a related one -- and here it is exactly
+# $Combined, the flag that emits the `org`.
+if ($Combined) { $WANT += @("P3_TEXT_SPLIT","P3_TEXTB_BASE","P3_TEXTB_END") }
 if ($Diag) { $WANT += @("P3_TXDIAG","tx_diag_n1","tx_diag_n2") }
 # * tx_wt_* exist in every wired build; the stall dump reads them to separate the three shapes a
 #   hang inside the wait loop can have.

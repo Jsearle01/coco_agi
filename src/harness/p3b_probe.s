@@ -2503,7 +2503,40 @@ P3_TABLES_END   equ     *
 * ★★★ The text engine and the nine command handlers [T-P0-084d §5B]. Only in the stripped
 * configuration: MAP_RESERVED is where text.s lives, and CP_CEL is what used to be there.
                 ifdef   P3B_TEXT_LINK
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ IN THE COMBINED ARM THE TEXT ENGINE LIVES IN SLOT 7 [T-P0-120, Jay's ruling on P6.65].
+* Region A cannot hold both halves -- P6.64 measured the combined build 513 B past
+* MAP_RESERVED_END -- and slot 7 is the only other place code can live: memmap.inc's phase table
+* marks it "resident tables ... unchanged" in BOTH phases, so it is never remapped. ★★★ The
+* parser is already `org`ed there and runs 954 bytes, so this is not a new technique; the text
+* engine simply joins the other text machinery.
+*
+* ★★★★★ THE SPACE IS FREE IN THIS ARM AND IS NOT FREE GENERALLY, AND P6.65 -- MINE -- SAID
+* OTHERWISE. That report scanned three arms' symbol tables for anything declared inside
+* $EBBA-$FC00, found nothing, and called the hole unclaimed. **A region owned by ONE symbol with
+* a large extent shows zero symbols inside it**: the cel arm's flat vocabulary is P3_VOCAB at
+* $E3BA running to $FF00, and p3b_flat's is $EBBA-$FC00 exactly -- the same 4,166 bytes, named
+* as such at the P3_VOCAB block below. ★★★★ **The combined arm is safe because its vocabulary is
+* WINDOWED at $A000**, which the assertion below requires rather than assumes.
+*
+* ★★ THE BASE IS A LITERAL WITH AN ASSERTION, not an expression, for the reason the P3_VOCAB
+* block states: P3_CLNBUF is declared 160 lines BELOW this, so `P3_CLNBUF+42+P3_FONT_BYTES` here
+* is a forward reference and any `ifgt` on it fails pass 1 with "Conditions must be constant",
+* which reads as a broken assertion rather than a declaration-order problem.
+                ifdef   P3B_COMBINED
+P3_TEXTB_BASE   equ     $EBBA           ; immediately after the font; asserted below
+P3_TEXT_SPLIT   equ     *
+                org     P3_TEXTB_BASE
                 include "src/engine/text.s"
+P3_TEXTB_END    equ     *
+                org     P3_TEXT_SPLIT
+* ★★★★ THE CEILING IS MAP_COVERAGE, the same ceiling the flat vocabulary is bounded by.
+                ifgt    P3_TEXTB_END-MAP_COVERAGE
+                error   "the text engine overruns slot 7's hole -- it runs from P3_TEXTB_BASE past MAP_COVERAGE ($FC00), where the coverage counters live. Shrink it, or take a ruling on region B's layout"
+                endc
+                else
+                include "src/engine/text.s"
+                endc
 * ★★ TEXT_WIRED says the engine is LINKED AND CALLED. -DTEXT_MODELLED links it and declines to
 * call it, which is AC-2's fault arm; the cel configuration does not link it at all.
                 ifndef  TEXT_MODELLED
@@ -2726,6 +2759,37 @@ P3_BLK_VOCAB    equ     6
 * ★★★ P3_BLK_SLOT5 IS OUTSIDE THE FLAT/WINDOWED SPLIT: phase_text_out needs it in both, because the
 * four-slot text window borrows slot 5 whether or not a dictionary ever does.
 P3_BLK_SLOT5    equ     $3D
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE TWO CROSS-CHECKS THE SLOT-7 RELOCATION NEEDS, AND THEY CAN ONLY BE MADE HERE --
+* P3_CLNBUF and P3_VOCAB are declared in this block and the relocation is 240 lines above it
+* [T-P0-120]. The `org` there uses a LITERAL base for the forward-reference reason the P3_VOCAB
+* comment gives; these are what make the literal safe.
+                ifdef   P3B_COMBINED
+* ★★★★ 1. THE BASE REALLY IS IMMEDIATELY AFTER THE FONT. If the parser, its buffers or the font
+* ever change size, $EBBA stops being that address and the text engine would either overlap the
+* font or leave a gap -- silently, because an `org` never complains.
+                ifne    P3_TEXTB_BASE-(P3_CLNBUF+42+P3_FONT_BYTES)
+                error   "P3_TEXTB_BASE is no longer immediately after the font -- the parser, its buffers or P3_FONT_BYTES have changed size, so the literal in the relocation block is stale. Re-read P3_CLNBUF+42+P3_FONT_BYTES and update it"
+                endc
+* ★★★★★ 2. THE VOCABULARY MUST BE WINDOWED, and this is the assertion P6.65 needed and did not
+* have. That report scanned for symbols DECLARED inside $EBBA-$FC00, found none in three arms,
+* and concluded the space was free. **It is the flat vocabulary's window**: the cel arm puts
+* P3_VOCAB at $E3BA running to $FF00 and p3b_flat puts it at $EBBA-$FC00 -- the same 4,166 bytes
+* the block above names. A region owned by ONE symbol with a large extent shows nothing inside it.
+* ★★★ The combined arm is safe only because its vocabulary is in slot 5 at $A000. Asserted, so a
+* future -DTEXT_VOCAB_FLAT on a combined build fails loudly instead of overwriting the engine.
+* ★★★★★ AN OVERLAP TEST, AND THE FIRST VERSION WAS NOT ONE. It read
+* `ifgt MAP_ARENA_WIN_E-P3_VOCAB` -- "the vocabulary is below $A000" -- which is FALSE for the
+* flat window, because the flat vocabulary is at $EBBA, ABOVE $A000, not below it. ★★★★★ **The
+* assertion passed a build where P3_VOCAB and P3_TEXTB_BASE were the SAME ADDRESS**, and it was
+* found only because §2W says show it red and it refused to go red. Two ranges overlap iff each
+* starts before the other ends, and that needs both halves.
+                ifgt    P3_VOCAB_END-P3_TEXTB_BASE
+                ifgt    P3_TEXTB_END-P3_VOCAB
+                error   "a COMBINED build's vocabulary window OVERLAPS the relocated text engine -- the flat dictionary occupies slot 7's hole ($EBBA upward), which is exactly where the engine was moved. The combined arm requires the WINDOWED vocabulary at $A000"
+                endc
+                endc
+                endc
                 else
 * ── the flat window the cel configuration keeps, unchanged ───────────────────────
 * ★★★ THE INPUT BUFFERS ARE FOLLOWED BY THE DICTIONARY HERE, so the whole parser subsystem is one

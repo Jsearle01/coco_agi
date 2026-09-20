@@ -116,7 +116,14 @@ $ARMS = @(
   @{ n = "p3b_notick"; f = $TEXT + @("-DTEXT_FAULT_NOTICK");              sz = 16426; sha = "A3FC78DD" },
   @{ n = "p3b_nomap";  f = $TEXT + @("-DP3B_VOCAB_NOMAP");                sz = 16426; sha = "9DAFE0E3" },
   @{ n = "p3b_fault";  f = $TEXT + @("-DTEXT_MODELLED");                  sz = 15553; sha = "99DDA1AF" },
-  @{ n = "p3b_flat";   f = $TEXT + @("-DTEXT_MODELLED","-DTEXT_VOCAB_FLAT"); sz = 15538; sha = "32C658EB" }
+  @{ n = "p3b_flat";   f = $TEXT + @("-DTEXT_MODELLED","-DTEXT_VOCAB_FLAT"); sz = 15538; sha = "32C658EB" },
+  # ★★★★★ THE EIGHTH ARM, NEW AT T-P0-120: text AND cels in one binary, which no build had before.
+  # src/engine/text.s is `org`ed into slot 7's hole at $EBBA -- region A cannot hold both halves
+  # (P6.64 measured 513 B over) and slot 7 is never remapped in either phase.
+  # ★★★ It is NOT a variant of the text arms: P3B_NO_CEL keeps its own meaning and all seven arms
+  # above are byte-identical. This adds a shape rather than changing one.
+  # ★★ -DP3B_IRQ comes with it, as it does for every wired text build.
+  @{ n = "p3b_comb";   f = @("-DHAL_KEYBOARD","-DP3B_COMBINED","-DP3B_IRQ"); sz = 18393; sha = "89837FCA" }
 )
 
 # ★★★ -DP3B_COVERAGE puts the two opcode counters back [p3b_probe.s]. It is a REAL byte change --

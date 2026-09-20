@@ -703,7 +703,23 @@ _G._n = emu.add_machine_frame_notifier(function()
             segs[#segs+1] = { LOAD,               SYM.P3_CODE_SPLIT - LOAD,             "code" }
             segs[#segs+1] = { SYM.P3_TABLES_BASE, SYM.P3_TABLES_END - SYM.P3_TABLES_BASE,
                               "vm_tables (relocated)" }
-            segs[#segs+1] = { SYM.P3_CODE_SPLIT,  SYM.P3_CODE_END - SYM.P3_CODE_SPLIT,  "code" }
+            -- ★★★★★ AND A FIFTH RUN WHEN THE TEXT ENGINE IS IN SLOT 7 [T-P0-120]. The combined
+            -- arm `org`s src/engine/text.s to $EBBA, in the hole above the font, because region A
+            -- cannot hold both halves. That splits the code a SECOND time, so the run list is
+            -- code | vm_tables | code | text.s | code | parser.
+            -- ★★★★ KEYED ON PRESENCE, exactly as the vm_tables split above is, so the cel and
+            -- text arms -- which do not relocate the engine -- produce the run list they always
+            -- did. ★★★ P6.64 §3.5 is why every one of these symbols is on the SHARED want-line
+            -- and not a per-configuration one: absent, this silently collapses to a shorter list
+            -- and the guest runs anyway, with the engine poked into the middle of the code.
+            if SYM.P3_TEXT_SPLIT and SYM.P3_TEXTB_BASE and SYM.P3_TEXTB_END then
+                segs[#segs+1] = { SYM.P3_CODE_SPLIT, SYM.P3_TEXT_SPLIT - SYM.P3_CODE_SPLIT, "code" }
+                segs[#segs+1] = { SYM.P3_TEXTB_BASE, SYM.P3_TEXTB_END - SYM.P3_TEXTB_BASE,
+                                  "text.s (relocated, slot 7)" }
+                segs[#segs+1] = { SYM.P3_TEXT_SPLIT, SYM.P3_CODE_END - SYM.P3_TEXT_SPLIT, "code" }
+            else
+                segs[#segs+1] = { SYM.P3_CODE_SPLIT, SYM.P3_CODE_END - SYM.P3_CODE_SPLIT, "code" }
+            end
         else
             segs[#segs+1] = { LOAD, (SYM.P3_CODE_END or (LOAD + #blob)) - LOAD, "code" }
         end
