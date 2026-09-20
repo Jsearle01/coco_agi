@@ -948,6 +948,15 @@ p3_do_cycle:
 * the calls rather than inside them so a stage's cost includes its own call overhead, which is
 * what a budget consumer cares about.
 * ★ p3_run_vm emits 1/2 (pace) and 3/4 (interpret) itself; the outer stages continue from 5.
+* ★★★★★ THE KEY IS READ BEFORE THE CYCLE, AND THE ORDER IS THE ORACLE'S [T-P0-115]. ScummVM polls
+* input in mainCycle and handleController writes VAR_EGO_DIRECTION; interpretCycle THEN copies
+* that variable into the ego's direction [cycle.cpp:256-259, mirrored at vm_cycle.s:212-219].
+* Reading the key after p3_run_vm would land the direction one whole cycle late.
+                ifndef  P3B_NO_CEL
+                ifdef   HAL_KEYBOARD
+                jsr     p3_poll_dir
+                endc
+                endc
                 jsr     p3_run_vm
                 lda     #5
                 sta     P3_PHASE
@@ -1203,6 +1212,77 @@ ppk_have:
                 inc     P3_NKEY
                 jmp     txt_pkey
 ppk_out:        rts
+                endc
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ p3_poll_dir -- A KEY BECOMES A DIRECTION. THE JOIN, AND IT IS ALL THAT WAS MISSING.
+*
+* ★★★★★ EIGHT TASKS WERE BLOCKED BEHIND THIS AND NONE OF THEM NEEDED NEW MACHINERY. The key
+* decoder is gated 10/10 [P6.24]; loop-selection-from-direction is ported from the pinned oracle
+* and lives in vm_objects.s:151-183 with both of the oracle's tables; update_position moves the
+* ego; vm_cycle.s:212-219 already copies VAR_EGO_DIRECTION into VMO_DIR under player control.
+* **Every subsystem was green and nothing called between them** -- P6.28d's shape, fourth time
+* this arc.
+*
+* ★★★★ THE ORACLE, AND EVERY LINE BELOW IS ONE OF ITS LINES [keyboard.cpp:537-611, §2 tier 3]:
+*     UP=1  UP_RIGHT=2  RIGHT=3  DOWN_RIGHT=4  DOWN=5  DOWN_LEFT=6  LEFT=7  UP_LEFT=8
+*     if (screenObjEgo->direction == newDirection) setVar(VM_VAR_EGO_DIRECTION, 0);
+*     else                                        setVar(VM_VAR_EGO_DIRECTION, newDirection);
+* ★★★★★ PRESSING THE CURRENT DIRECTION AGAIN STOPS THE EGO. That is not a simplification of the
+* oracle, it IS the oracle, and it is also how the player stops walking without a key-up event --
+* which matters here because HAL_key_scan reports matrix STATE and has no key-up at all.
+*
+* ★★★ FOUR DIRECTIONS, NOT EIGHT, AND THE REASON IS THE SCANNER not a scope decision.
+* hal_globals.s:252-256 states it: HAL_key_scan "reports ONE KEY, NOT A SET ... A caller that
+* needs simultaneous keys -- a game reading two arrows for a diagonal -- needs the mask". The
+* diagonals are reachable only by changing a PROJECT_LOCAL HAL routine's contract, which is a
+* separate task; the oracle's 2/4/6/8 are left unimplemented and named here rather than faked.
+*
+* ★★ NOTHING PRESSED LEAVES THE DIRECTION ALONE. The ego keeps walking until a key says
+* otherwise, which is the oracle's behaviour under kMotionNormal and is why a stop needs the
+* same-key rule above.
+                ifndef  P3B_NO_CEL
+                ifdef   HAL_KEYBOARD
+p3_newdir       fcb     0               ; the direction the last accepted key produced
+p3_ndirs        fcb     0               ; direction keys accepted, for the host
+p3_poll_dir:
+                ifdef   P3B_FAULT_NOJOIN
+                rts                     ; ★ AC-7's arm: the join removed, which is "i can't move him"
+                endc
+                jsr     HAL_key_scan
+                tsta
+                beq     ppd_out
+                ldb     #1
+                cmpa    #HAL_KEY_UP
+                beq     ppd_have
+                ldb     #3
+                cmpa    #HAL_KEY_RIGHT
+                beq     ppd_have
+                ldb     #5
+                cmpa    #HAL_KEY_DOWN
+                beq     ppd_have
+                ldb     #7
+                cmpa    #HAL_KEY_LEFT
+                beq     ppd_have
+                rts                     ; a key, but not a direction key -- not ours
+ppd_have:
+                stb     p3_newdir
+* ---- the same-direction-stops rule, read off the ego's CURRENT direction ----------
+* ★★★ vm_obj DESTROYS B [vm_cycle.s:201], which is why p3_newdir is stored BEFORE this call and
+* re-read after. That clobber cost T-P0-0xx a task when `stb VMO_DIR,x` stored the object index.
+                clra
+                jsr     vm_obj                  ; X -> ego; B is now scrap
+                lda     VMO_DIR,x
+                cmpa    p3_newdir
+                bne     ppd_set
+                clr     p3_newdir               ; pressing the current direction = stop
+ppd_set:
+                lda     #VAR_EGO_DIRECTION
+                ldb     p3_newdir
+                jsr     vm_setvar
+                inc     p3_ndirs
+ppd_out:        rts
+                endc
                 endc
 
 * ── p3_room_check — fetch and render the room's PICTURE when the room changes ────
@@ -2277,8 +2357,15 @@ P3_TABLES_END   equ     *
                 include "src/hal/coco3-dsk/irq_vbl.s"
                 include "src/hal/coco3-dsk/gfx.s"
 * ★★★★★ input.s ARRIVES WITH THE KEYBOARD AND NOT BEFORE [T-P0-092]. hal_globals.s defines
-* HAL_key_scan under -DHAL_KEYBOARD; **HAL_input_init lives in input.s and this probe never
-* included it**, so the PIA precondition HAL_key_scan documents has never been asserted here.
+* HAL_key_scan under -DHAL_KEYBOARD; HAL_input_init lives in input.s, and this include is what
+* makes it reachable.
+* ★★★★ THE SENTENCE THAT WAS HERE IS CORRECTED, NOT DELETED [T-P0-115]. It read "**this probe
+* never included it**, so the PIA precondition HAL_key_scan documents has never been asserted
+* here" -- true when it was written and **false since T-P0-092**, which added the
+* `jsr HAL_input_init` at the init site above. The stale claim survived three tasks and was
+* quoted forward into T-P0-115's dispatch as an open precondition to satisfy; it was already
+* satisfied. ★★★ Same shape as the stale binary figure in gates.manifest [P6.60 §3.6]: a fact
+* recorded in prose beside code that later changed, with nothing to make the prose fail.
 * ★★★ SHARED and included READ-ONLY, exactly as input_probe.s includes it and for the same one
 * routine [§2M: the mechanism is reused, nothing in it is changed].
 * ★★ Guarded, so every build that does not ask for the keyboard is byte-identical.

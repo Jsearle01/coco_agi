@@ -93,7 +93,11 @@ $ARMS = @(
   # ★★★★ RE-BASELINED T-P0-114: 14666 -> 14785 (+119 B) for the changed/unchanged comparison and
   # the three identity bytes the rectangle record now carries. Six text arms unchanged again --
   # everything added sits inside `ifndef P3B_NO_CEL`, and that is verified below, not assumed.
-  @{ n = "p3b";        f = @();                                          sz = 14785; sha = "B3E4AD4C" },
+  # ★★★★★ RE-BASELINED T-P0-114 AND AGAIN T-P0-115: 14785 -> 15246 (+461), and THE FLAG SET MOVED
+  # -- the cel arm now takes -DHAL_KEYBOARD, which pulls in input.s (~318 B) plus the key-to-
+  # direction join. ★★★ Selecting existing HAL code is not a HAL change [T-P0-085c §6]; the six
+  # text arms already took this flag and are byte-identical below, which is the proof.
+  @{ n = "p3b";        f = @("-DHAL_KEYBOARD");                          sz = 15246; sha = "A2724197" },
   @{ n = "p3b_text";   f = $TEXT;                                         sz = 16409; sha = "D09866C3" },
   @{ n = "p3b_win3";   f = $TEXT + @("-DTEXT_WIN3");                      sz = 16409; sha = "35AB01B0" },
   @{ n = "p3b_notick"; f = $TEXT + @("-DTEXT_FAULT_NOTICK");              sz = 16406; sha = "7A9A319C" },

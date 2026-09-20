@@ -1099,6 +1099,20 @@ _G._n = emu.add_machine_frame_notifier(function()
                   SYM.p3_prevn and string.format("  (%d rect(s) live at exit)",
                                                  prog:read_u8(SYM.p3_prevn)) or "")
             end
+            -- ★★★★★ THE EGO'S LOOP, AS A NUMBER [T-P0-115 §4C(2)]. "He faces the other way" is an
+            -- eye-gate answer; this is the same fact as a loop index, and the oracle's own tables
+            -- predict it exactly: loopTable4[3] = 0 (RIGHT) and loopTable4[7] = 1 (LEFT), and
+            -- loopTable2 agrees on both [view.cpp:719-725]. ★★★ p3_spr is 6 bytes a row --
+            -- x, y, prio, view, loop, cel -- and slot 0 is the ego.
+            if SYM.p3_spr and SYM.p3_nspr and prog:read_u8(SYM.p3_nspr) > 0 then
+                local b = SYM.p3_spr
+                w("    ego: x=%d y=%d view=%d LOOP=%d cel=%d%s",
+                  prog:read_u8(b), prog:read_u8(b + 1), prog:read_u8(b + 3),
+                  prog:read_u8(b + 4), prog:read_u8(b + 5),
+                  SYM.p3_ndirs and string.format("   dir-keys accepted %d, last dir %d",
+                                                 prog:read_u8(SYM.p3_ndirs),
+                                                 SYM.p3_newdir and prog:read_u8(SYM.p3_newdir) or -1) or "")
+            end
             -- ★★★★ AC-5: the per-cycle breakdown, from the phase tap.
             local order = {"pace(wait)", "interpret", "sprites", "roomcheck", "composite"}
             local tot = 0

@@ -74,6 +74,10 @@ param(
   # clean arm is also AC-2's census, because the two builds differ in one variable and the gap in
   # p3_restbytes IS the bytes not touched for unchanged sprites.
   [switch]$AlwaysRestore,
+  # ★★★★ -NoJoin IS T-P0-115's FAULT ARM: p3_poll_dir returns immediately, so a key is scanned by
+  # nothing and VAR_EGO_DIRECTION is never written. ★★★ A KNOWN-GOOD RED -- it is every build
+  # before this task, and Jay has already reported it: "he doesn't move and i can't move him".
+  [switch]$NoJoin,
   [switch]$NoIrq,
   [double]$Hold   = 3.0
 )
@@ -209,6 +213,13 @@ if ($RawVis)   { $FLAGS += "-DCOMP_FAULT_RAW_VIS" }
 if ($NoCount) { $FLAGS += "-DVM_NOCOUNT" }
 if ($NoRestore) { $FLAGS += "-DP3B_FAULT_NORESTORE" }
 if ($AlwaysRestore) { $FLAGS += "-DP3B_FAULT_ALWAYSRESTORE" }
+if ($NoJoin) { $FLAGS += "-DP3B_FAULT_NOJOIN" }
+# ★★★★★ THE CEL ARM GETS THE KEYBOARD TOO [T-P0-115]. Tested on the absence of -DP3B_NO_CEL rather
+# than on a list of the twelve text switches, because that list is the thing this file has already
+# been bitten by five times -- "a list repeated five times is a list that will be edited four
+# times". The text arms add -DHAL_KEYBOARD themselves above; passing it twice is what this guard
+# avoids. ★★ Selecting existing HAL code is not a HAL change [T-P0-085c §6].
+if ($FLAGS -notcontains "-DP3B_NO_CEL") { $FLAGS += "-DHAL_KEYBOARD" }
 
 & $LW --format=raw --output=build/p3b_probe_pk_fresh.bin --map=build/p3b_probe_pk.map -I. @FLAGS src/harness/p3b_probe.s
 if ($LASTEXITCODE -ne 0) { throw "p3b assemble failed" }
@@ -283,7 +294,10 @@ if (-not $Linked) { $WANT += @("vc_err","vc_w","vc_h","vc_src","vc_srcend","vc_v
 # name, and p3_restbytes/p3_prevn live inside `ifndef P3B_NO_CEL`. Putting them on the shared
 # line would break p3b_text, p3b_box, p3b_parse and p3b_row22 in one go, which is the trap this
 # file has now warned about four times.
-                               "p3_restbytes","p3_prevn") }
+                               "p3_restbytes","p3_prevn",
+# ★★ T-P0-115's two: also cel-arm only, and also inside `ifdef HAL_KEYBOARD` -- but the cel arm
+# is the only arm that gets both, so this line is still the right home for them.
+                               "p3_ndirs","p3_newdir") }
 # ═══════════════════════════════════════════════════════════════════════════════════════════
 if ($ResCheck -or $CelCheck) { $WANT += @("rck_n","rck_bad","rck_ring","rck_seen","rck_noted","rck_skipped","rck_full",
                             "rck_type","rck_idx","rck_live","rck_base","rck_len","rck_sum") }
@@ -407,7 +421,7 @@ if ($Headless) {
   # ★★★★ `restore \d+ bytes` ADDED T-P0-114, and this comment is the reason the line above warns
   # about allowlists: the restore figure was owed by two tasks, was being computed correctly by
   # the guest the whole time, and was invisible because no pattern here named it.
-  Select-String -Path $log -Pattern 'OK prompt|program \d+ bytes|vocabulary |window discrimination|par_vocab written|COMMAND TYPED|parse at cycle|TYPING |TYPED LINE|prompt: enabled|row 22|NO KEYS REACHED|NEVER REACHED|STUCK|cycles in|final room|restore \d+ bytes|P3_PBUF' |
+  Select-String -Path $log -Pattern 'OK prompt|program \d+ bytes|vocabulary |window discrimination|par_vocab written|COMMAND TYPED|parse at cycle|TYPING |TYPED LINE|prompt: enabled|row 22|NO KEYS REACHED|NEVER REACHED|STUCK|cycles in|final room|restore \d+ bytes|ego: x=|P3_PBUF' |
     ForEach-Object { $_.Line }
   if ($stuck) { "★★★ p3b FAILED -- the watchdog fired"; exit 1 }
   if ($nowords) { "★★★ p3b FAILED -- a fed command matched no dictionary words"; exit 1 }
