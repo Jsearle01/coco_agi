@@ -134,14 +134,49 @@ PIC_H           equ     168
 * AD-96 is the standing lesson about quoting a figure whose producer moved. **The cel build has no
 * font and no font pressure, so it keeps the engine's seed stack and its own byte identity.**
 STACK_BASE      equ     MAP_SEEDSTACK
-                ifdef   P3B_NO_CEL
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ UNCONDITIONAL SINCE T-P0-118, AND THE PRICE IS NOT WHAT P6.63 SAID IT WAS. That report
+* -- mine -- called relocating vm_tables "626 B for a two-line conditional, the mechanism six arms
+* already use". ★★★★★ **It is not free: the space the tables move INTO is the space freed by
+* shrinking this seed stack from 384 entries to 128.** The two are one change and always were;
+* the text arms took both together at T-P0-091 and the paragraph above says so in as many words
+* -- *"the cel build has no font and no font pressure, so it keeps the engine's seed stack"*.
+* ★★★★ SO THE TRADE, STATED: 626 bytes of region A in exchange for a fill seed stack of 128
+* entries instead of 384. **The peak measured across the 45 gated pictures is 37** [above], so 128
+* is a 3.5x margin -- ★★★ but that is a CORPUS measurement and not a bound [L-86], and the margin
+* the cel arm gives up is real.
+* ★★★ THE FAILURE IS LOUD, WHICH IS WHY IT IS TAKEABLE: pic_fill's ff_push compares against
+* STACK_TOP-2 and HALTS. A picture that needs more fails visibly with an attributable cause rather
+* than wrapping the stack into code.
+* ★★ AND THE GATE DOES NOT COVER IT: the renderer's 45/45 runs on pic_probe.s, which declares its
+* own STACK_TOP. **Nothing gates p3b's seed stack depth**; the evidence is that its rooms render.
+                ifdef   P3B_STACK_FULL
+STACK_TOP       equ     MAP_SEEDSTACK_E         ; ★ the engine's 384 entries -- the pre-T-P0-118
+                else                            ;   cel-arm shape, kept as a fault/comparison arm
 STACK_TOP       equ     MAP_SEEDSTACK+256       ; 128 entries; engine reserves 384
+                endc
 * ★★★ $0200-$0480 is what that frees. $0480-$0500 is left as margin below the hardware stack,
 * whose own low-water is measured at S=$07C6 -- 710 bytes clear of its $0500 floor.
 P3_TABLES_BASE  equ     MAP_SEEDSTACK+256
 P3_TABLES_LIMIT equ     $0480
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ WHAT IS LINKED, SAID DIRECTLY [T-P0-118]. Sixteen sites in this file tested `P3B_NO_CEL`
+* to mean three different things -- "the text engine is linked", "the compositing path is linked",
+* and "this is the stripped configuration" -- and those were the same question only for as long as
+* the two were MUTUALLY EXCLUSIVE. ★★★★★ **They stopped being exclusive when CP_CEL left
+* MAP_RESERVED**, so the flag can no longer answer all three.
+* ★★★ Each site now names the thing it actually depends on. `P3B_NO_CEL` keeps its meaning --
+* the stripped, text-only configuration whose six gate rows must keep working -- and
+* `-DP3B_COMBINED` is the third shape: cels AND text in one binary.
+                ifndef  P3B_NO_CEL
+P3B_CEL_LINK    equ     1               ; view_cel.s + composite.s are linked
+                endc
+                ifdef   P3B_NO_CEL
+P3B_TEXT_LINK   equ     1               ; src/engine/text.s is linked
                 else
-STACK_TOP       equ     MAP_SEEDSTACK_E         ; the engine's 384 entries, unchanged
+                ifdef   P3B_COMBINED
+P3B_TEXT_LINK   equ     1
+                endc
                 endc
 HW_STACK        equ     MAP_HWSTACK
 
@@ -258,7 +293,7 @@ CP_PRI          equ     PRI_BASE
 * ★★★★★ NOT DEFINED UNDER -DP3B_NO_CEL, AND THAT IS THE POINT OF THE FLAG. CP_CEL is what occupies
 * MAP_RESERVED; leaving the `equ` in place while stripping its consumers would keep the region
 * nominally claimed and the collision guard below would still fire against a buffer nothing uses.
-                ifndef  P3B_NO_CEL
+                ifdef   P3B_CEL_LINK
 * ★★★★★ ONE ROW, NOT A WHOLE CEL, SINCE T-P0-105. This was 4,784 bytes -- the corpus maximum --
 * and it overlapped RES_ARENA ($6000) by 1,456, zeroing the VIEW it was decoding from [P6.49].
 * ★★★★ The oracle keeps no shared staging buffer [view.cpp:357-370], so the buffer was ours; the
@@ -278,7 +313,36 @@ CP_PRI          equ     PRI_BASE
 * against a reference in the oracle's _gameScreen format, and nothing displays it.
 VIS_DOUBLED     equ     1
 COMP_ROW_PULL   equ     1
-CP_CEL          equ     MAP_RESERVED_END-256    ; ★ $5F00. ONE ROW; VC_ROW_MAX is the format's max
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ CP_CEL LEAVES REGION A [T-P0-118, Jay's ruling on P6.63's 221-byte shortfall]. It was
+* MAP_RESERVED_END-256 = $5F00, the top page of the reservation; it is now MAP_INPUT's tail.
+* ★★★★★ THAT RETURNS 256 BYTES TO REGION A, which is what closes the gap: P6.63 measured the
+* combined build 221 B over after vm_tables relocated, and 256 - 221 = 35 B to spare.
+*
+* ★★★★★ AD-191'S CLOSURE DOES NOT APPLY, AND THE SCOPE MATTERS. That ruling killed moving a
+* **4,784-byte** staging buffer SIXTEEN BYTES UP, because the buffer overlapped MAP_ARENA_WIN by
+* 1,456 bytes and every write moved closer to the arena the decode was READING FROM. ★★★★ This is
+* a **256-byte row buffer** and the move is DOWNWARD, out of the reservation entirely -- the
+* opposite direction, a different buffer, and a different hazard. **Do not re-apply the closed
+* ruling to this move; read its scope.**
+*
+* ★★★★ MAP_INPUT IS SAFER THAN $5F00, not merely available. $1C00 is in SLOT 0, which nothing
+* remaps -- the property P3_PBUF was put there for and which vm_text_ops.s's hazard 1 depends on.
+* $5F00 sat directly below MAP_ARENA_WIN at $6000, which is live during the decode. ★★★ A row
+* buffer resident in every phase has no adjacency to the arena at all.
+*
+* ★★ THE TAIL, AND ITS ARITHMETIC MEASURED NOT ASSUMED: MAP_INPUT is $1C00-$2000 = 1,024 B.
+* P3_PBUF takes TXT_PBUF_MAX (576 max) from the base; P3_TXDIAG and P3_RBTRACE both sit at +576
+* and are 96 B at most. 576 + 96 = 672, so the tail begins at MAP_INPUT+672 = $1EA0 and runs
+* 352 bytes to $2000. CP_CEL needs 256, leaving 96.
+CP_CEL          equ     MAP_INPUT+672           ; ★ $1EA0. ONE ROW; VC_ROW_MAX is the format's max
+CP_CEL_BYTES    equ     256
+                ifgt    CP_CEL+CP_CEL_BYTES-MAP_INPUT_END
+                error   "CP_CEL overruns MAP_INPUT -- the decoded-cel row no longer fits in the tail left by P3_PBUF and the diagnostic records; re-measure MAP_INPUT's occupancy before moving it again"
+                endc
+                ifgt    MAP_INPUT+672-CP_CEL
+                error   "CP_CEL starts inside P3_PBUF or the diagnostic records -- it must begin at or after MAP_INPUT+672"
+                endc
                 endc
 
 * ★★★ PIC_DATA IS THE ARENA, NOT A POKED BUFFER -- this is AC-2's "real path" in one line.
@@ -296,7 +360,7 @@ PIC_DATA        equ     MAP_ARENA_WIN
 * window safe [vm_text_ops.s, hazard 1].
 * ★ The size assertion is at the FOOT of this file, not here: TXT_PBUF_MAX is defined by text.s,
 * which is included below, and lwasm needs a condition to be constant on pass 1.
-                ifdef   P3B_NO_CEL
+                ifdef   P3B_TEXT_LINK
 P3_PBUF         equ     MAP_INPUT
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ THE tx_msgptr DIFFERENTIAL RECORD [T-P0-087 §4A]. ONE routine, TWO callers: display
@@ -456,7 +520,7 @@ p3b_entry:
 * ★★ Installed here rather than in text.s because the block model is this probe's, not the
 * engine's; txt_restore is a vector for that reason.
 * ★ Guarded: the cel configuration does not link text.s, so txt_restore does not exist there.
-                ifdef   P3B_NO_CEL
+                ifdef   P3B_TEXT_LINK
                 ldd     #p3_restore_box
                 std     txt_restore
                 endc
@@ -710,7 +774,7 @@ p3_vt_done:     std     P3_VOCAB_BAD
                 ifdef   RES_CHECKSUM
                 jsr     res_ck_init
                 endc
-                ifdef   P3B_NO_CEL
+                ifdef   P3B_TEXT_LINK
                 ldx     #P3_PBUF
                 stx     txt_pbuf
                 ldx     #P3_FONT
@@ -952,7 +1016,7 @@ p3_do_cycle:
 * input in mainCycle and handleController writes VAR_EGO_DIRECTION; interpretCycle THEN copies
 * that variable into the ego's direction [cycle.cpp:256-259, mirrored at vm_cycle.s:212-219].
 * Reading the key after p3_run_vm would land the direction one whole cycle late.
-                ifndef  P3B_NO_CEL
+                ifdef   P3B_CEL_LINK
                 ifdef   HAL_KEYBOARD
                 jsr     p3_poll_dir
                 endc
@@ -976,7 +1040,7 @@ p3_do_cycle:
 * which is the one ordering in this change that cannot be got wrong and is therefore stated at
 * the call site as well as at the routine.
 * ★★ Guarded: the routine exists only in the cel arm, and the text arms' binaries must not move.
-                ifndef  P3B_NO_CEL
+                ifdef   P3B_CEL_LINK
                 ifndef  P3B_FAULT_NORESTORE
                 jsr     p3_restore_prev
                 endc
@@ -1241,7 +1305,7 @@ ppk_out:        rts
 * ★★ NOTHING PRESSED LEAVES THE DIRECTION ALONE. The ego keeps walking until a key says
 * otherwise, which is the oracle's behaviour under kMotionNormal and is why a stop needs the
 * same-key rule above.
-                ifndef  P3B_NO_CEL
+                ifdef   P3B_CEL_LINK
                 ifdef   HAL_KEYBOARD
 p3_newdir       fcb     0               ; the direction the last accepted key produced
 p3_ndirs        fcb     0               ; direction keys accepted, for the host
@@ -1332,7 +1396,7 @@ p3_room_check:
 * here until the next room change that data is the only record of what is underneath a sprite,
 * and every sprite that draws destroys some of it. This is the copy that gives the restore a
 * source. ★★ Once per room, against the same ~2.8 s render -- the same trade p3_present makes.
-                ifndef  P3B_NO_CEL
+                ifdef   P3B_CEL_LINK
                 jsr     p3_pri_shadow
                 endc
                 jsr     res_close
@@ -1551,7 +1615,7 @@ p3_blk_vis      fcb     P3_BLK_VISIBLE  ; the harness display reads this; it nev
 * testing and certain to happen. Split into two mapped copies.
 * ★★ Reads the DRAWN rectangle: txt_bgy is game-screen and the box is drawn at txt_bgy + txb_yoff,
 * so the restore uses the same sum [§2F -- txb_yoff is computed once, in tx_drawbox].
-                ifdef   P3B_NO_CEL
+                ifdef   P3B_TEXT_LINK
 * ★ 160 x 168, one byte per pixel. Declared here rather than forward-referencing P3B_PRI_BYTES,
 *   which is defined 550 lines below this and only for the budget asserts.
 P3RB_PLANE      equ     26880
@@ -1563,6 +1627,18 @@ P3RB_PLANE      equ     26880
 * used. Free here: P3_TXDIAG only exists under -DTX_MSGDIAG and this build has it off.
 P3_RBTRACE      equ     MAP_INPUT+576   ; row, within(2), n -- one 4-byte record per iteration
 P3_RBTRACE_MAX  equ     24
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ P3_TXDIAG AND P3_RBTRACE ARE THE SAME ADDRESS, AND NOTHING SAID SO [T-P0-118 §4B].
+* Both are MAP_INPUT+576. Each is behind its own diagnostic flag and the two have never been
+* enabled together, so the overlap has been harmless and invisible for two tasks.
+* ★★★★ **A combined arm makes both reachable in one binary for the first time**, and P6.46 cost
+* eight tasks because two symbols shared a region with nothing asserting it. ★★★ Asserted rather
+* than silently renumbered: whoever needs both at once should see why they cannot have them,
+* and pick a new home deliberately.
+* ★★ Shown RED from the command line with `-DTX_MSGDIAG` on a text arm.
+                ifdef   TX_MSGDIAG
+                error   "P3_TXDIAG and P3_RBTRACE are both MAP_INPUT+576 and -DTX_MSGDIAG has enabled the first while the restore-box trace owns the second. They cannot share the address; give one of them its own home in MAP_INPUT's tail -- note CP_CEL now takes MAP_INPUT+672..+928, so the free space is $1F60-$2000"
+                endc
 p3rb_tn         fcb     0               ; records written
 p3rb_row        fdb     0
 p3rb_rend       fdb     0
@@ -1854,7 +1930,7 @@ pss_done:
 * the remap, and writes an array. With nothing consuming that array it is a few wasted cycles --
 * and keeping it means the phase discipline the cycle body documents is the same in both
 * configurations, which is worth more than the cycles.
-                ifndef  P3B_NO_CEL
+                ifdef   P3B_CEL_LINK
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ SAVE-UNDER BY SHADOW, NOT BY BUFFER [T-P0-112, Jay's ruling on P6.57's shapes 2+3].
 *
@@ -2353,7 +2429,15 @@ phase_draw_enter:
 * ★★★ THE CODE RUN IS SPLIT BY THIS, and the host must know: the raw image is now
 * code-before | tables | code-after | parser, four runs where there were two. p3b_run.lua pokes
 * them from these symbols rather than from literals [the same rule that put P3_INBUF in the map].
-                ifdef   P3B_NO_CEL
+* ★★★★★ UNCONDITIONAL SINCE T-P0-118, AND IT WAS THE ONE FREE MOVE P6.63 FOUND. This relocation
+* ran only under `ifdef P3B_NO_CEL`; the cel arm took the `else` and kept 626 bytes of dispatch
+* tables inside region A, where space was the binding constraint. ★★★★ **Six arms had been doing
+* this for tasks and the arm that needed the room was the one not doing it.**
+* ★★★ The host needs no change: p3b_run.lua keys on the PRESENCE of P3_CODE_SPLIT /
+* P3_TABLES_BASE / P3_TABLES_END and produces four runs when they exist, two when they do not
+* [p3b_run.lua:702-709]. It now always sees them.
+* ★★ The slack is nearly full -- P3_TABLES_END against P3_TABLES_LIMIT is 14 bytes at the last
+* measurement -- so this move is available ONCE and is not a source of further headroom.
 P3_CODE_SPLIT   equ     *
                 org     P3_TABLES_BASE
                 include "src/harness/vm_tables.s"
@@ -2362,9 +2446,6 @@ P3_TABLES_END   equ     *
                 error   "vm_tables.s overruns the seed stack's slack and is heading for the hardware stack -- shrink it or raise P3_TABLES_LIMIT after re-measuring the stacks"
                 endc
                 org     P3_CODE_SPLIT
-                else
-                include "src/harness/vm_tables.s"
-                endc
                 include "src/harness/vm_state.s"
                 include "src/harness/vm_core.s"
                 include "src/harness/vm_cmds.s"
@@ -2387,7 +2468,7 @@ P3_TABLES_END   equ     *
                 include "src/harness/plane_win.s"
                 endc
                 include "src/harness/pic_core.s"
-                ifndef  P3B_NO_CEL
+                ifdef   P3B_CEL_LINK
                 include "src/harness/view_cel.s"
                 include "src/harness/composite.s"
                 endc
@@ -2421,7 +2502,7 @@ P3_TABLES_END   equ     *
 * measurement". This is the check, and it fires at assembly time.
 * ★★★ The text engine and the nine command handlers [T-P0-084d §5B]. Only in the stripped
 * configuration: MAP_RESERVED is where text.s lives, and CP_CEL is what used to be there.
-                ifdef   P3B_NO_CEL
+                ifdef   P3B_TEXT_LINK
                 include "src/engine/text.s"
 * ★★ TEXT_WIRED says the engine is LINKED AND CALLED. -DTEXT_MODELLED links it and declines to
 * call it, which is AC-2's fault arm; the cel configuration does not link it at all.
@@ -2464,16 +2545,33 @@ P3_CODE_END     equ     *
 * ★★★★ THE GUARD IS CONDITIONAL ON THE BUFFER EXISTING. Under -DP3B_NO_CEL there is no CP_CEL, so
 * MAP_RESERVED is free for code exactly as P6.28 §5A measured for text_vm_probe.s -- the span
 * assertion above is then the only bound, and it is the right one.
-                ifndef  P3B_NO_CEL
-                ifgt    P3_CODE_END-CP_CEL
-                error   "P3b code has grown into the decoded-cel buffer at CP_CEL ($5300, 4,784 B) -- the span reaches MAP_RESERVED_END but CP_CEL is already there; move CP_CEL or shrink the code, do not let them overlap"
-                endc
-                else
-* ★★★★★ AND THE ASSERTION RULING A ASKS FOR, IN THE OTHER DIRECTION: if the compositing path is
-* ever re-linked while the text engine occupies MAP_RESERVED, the build must fail rather than
-* silently re-occupy the region. `ifdef CP_CEL` under P3B_NO_CEL means someone defined it anyway.
-                ifdef   CP_CEL
-                error   "CP_CEL is defined in a -DP3B_NO_CEL build -- the compositing path has been re-linked into a configuration whose MAP_RESERVED holds the text engine. Drop -DP3B_NO_CEL or drop the cel path; they cannot share $5300."
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ RETIRED AT T-P0-118, AND THE OLD TEXT IS KEPT BECAUSE THE REASON IT EXISTED IS THE
+* REASON IT CAN GO. Both assertions below this comment used to read:
+*
+*     ifndef P3B_NO_CEL / ifgt P3_CODE_END-CP_CEL
+*       error "P3b code has grown into the decoded-cel buffer at CP_CEL ($5300, 4,784 B) ..."
+*     else / ifdef CP_CEL
+*       error "CP_CEL is defined in a -DP3B_NO_CEL build ... they cannot share $5300."
+*
+* ★★★★★ THAT `else` BRANCH WAS THE MUTUAL EXCLUSION -- it is what made text and cels unable to
+* share a binary, and it was correct for as long as CP_CEL lived in MAP_RESERVED. **CP_CEL is now
+* MAP_INPUT+672**, so the two no longer contend for $5300 and the exclusion has no subject.
+* ★★★ Its error text had also gone stale: it still said "$5300, 4,784 B" after T-P0-105 made
+* CP_CEL 256 bytes at $5F00. **Fourth stale comment found in four tasks** [P6.61 §3.5, P6.62 §3.6,
+* P6.63 §3.5]. Kept here verbatim rather than deleted, so the next reader can see what the rule
+* was and why it stopped applying.
+*
+* ★★★★ WHAT REPLACES IT: the code's real ceiling, which is now MAP_RESERVED_END itself, because
+* nothing else occupies region A above the code. Unconditional -- it is the same bound in every
+* configuration now, which is the point of the move.
+* ★★ UNDER THE SAME ESCAPE AS THE SPAN ASSERTION ABOVE, and for the reason its comment gives: a
+* guard that errors prevents the .map from being written, so the size -- the first thing anyone
+* needs when it fires -- becomes unreadable. `-DP3B_ACCEPT_OVERRUN` lets the build complete so the
+* overrun can be MEASURED. It still fails by default.
+                ifndef  P3B_ACCEPT_OVERRUN
+                ifgt    P3_CODE_END-MAP_RESERVED_END
+                error   "P3b code has grown past MAP_RESERVED_END ($6000) into MAP_ARENA_WIN -- region A is full. CP_CEL already left for MAP_INPUT and vm_tables is already relocated, so the next move is a real one: shrink the code, or take a ruling on the map"
                 endc
                 endc
                 endc
@@ -2590,7 +2688,7 @@ P3_PARSER_TOTAL equ     P3_CLNBUF+42-P3_PARSER_BASE
 * a figure whose producer moved. The cel build has no font pressure and keeps the flat window it
 * has always had, byte-identical at 58AD3C27.
 * ═══════════════════════════════════════════════════════════════════════════════════════════
-                ifdef   P3B_NO_CEL
+                ifdef   P3B_TEXT_LINK
                 ifdef   TEXT_VOCAB_FLAT
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ THE FLAT MEASUREMENT ARM's DICTIONARY, AND ITS ADDRESS IS A COMPROMISE THAT IS STATED
@@ -2668,7 +2766,7 @@ P3_VOCAB_END    equ     $FF00           ; ★ $FF00-$FFFF is the I/O page and is
 * ★★★ THE BYTE FLOW, SO IT IS NOT LEFT TO THE READER: the font LEAVES region A ($5800-$6000) and
 * ARRIVES in region B at $E3BA. Region A's ceiling becomes MAP_RESERVED_END with nothing under
 * it, and region B holds parser + buffers + font with 2,870 bytes still free.
-                ifdef   P3B_NO_CEL
+                ifdef   P3B_TEXT_LINK
 P3_FONT         equ     P3_CLNBUF+42
 P3_REGIONB_END  equ     $FEF0           ; ★ the vector stubs, as above -- P3B_IRQ is always on here
                 ifgt    P3_FONT+2048-P3_REGIONB_END
@@ -2679,7 +2777,7 @@ P3_REGIONB_END  equ     $FEF0           ; ★ the vector stubs, as above -- P3B_
 * MAP_RESERVED; the parser must start above where it ends. An overlap claim checked by a human
 * reading a table is the state these exist to end [AD-78] -- and this file had no assertion
 * covering CP_CEL against anything at all.
-                ifndef  P3B_NO_CEL
+                ifdef   P3B_CEL_LINK
 CP_CEL_END      equ     CP_CEL+VC_ROW_MAX
                 ifgt    CP_CEL_END-P3_PARSER_BASE
                 error   "the decoded-cel buffer runs into the parser -- CP_CEL is 4,784 B from MAP_RESERVED"
@@ -2820,7 +2918,7 @@ P3_COV_END      equ     VM_OPSEEN+256
                 ifgt    P3_COV_END-$FF00
                 error   "the coverage counters run into the $FF00 I/O page"
                 endc
-                ifndef  P3B_NO_CEL
+                ifdef   P3B_CEL_LINK
                 ifgt    P3_COV_END-CP_CEL
                 ifgt    CP_CEL_END-P3_COV
                 error   "the coverage counters are inside CP_CEL -- decoded cel staging would overwrite them and they would corrupt a staged cel"

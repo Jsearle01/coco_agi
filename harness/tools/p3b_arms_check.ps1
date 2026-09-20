@@ -106,7 +106,11 @@ $ARMS = @(
   # therefore the only ones that draw in the text area at all. **Scoping the fix to the cel arm to
   # keep six hashes stable would have knowingly left it broken where it matters most.** The p3b
   # gate was run green against the moved arms before these were re-baselined [T-P0-116 §4].
-  @{ n = "p3b";        f = @("-DHAL_KEYBOARD");                          sz = 15266; sha = "EE9DCC53" },
+  # ★★★★★ RE-BASELINED T-P0-118: SAME SIZE, DIFFERENT BYTES -- 15,266 either way, because CP_CEL
+  # moved out of region A to MAP_INPUT and vm_tables relocated to the seed-stack slack. Neither
+  # changes how many bytes the image holds; both change where they sit. ★★★ A size-only check
+  # would have called this unchanged, which is why the baseline is a HASH.
+  @{ n = "p3b";        f = @("-DHAL_KEYBOARD");                          sz = 15266; sha = "5AA65B69" },
   @{ n = "p3b_text";   f = $TEXT;                                         sz = 16429; sha = "3250E5CF" },
   @{ n = "p3b_win3";   f = $TEXT + @("-DTEXT_WIN3");                      sz = 16429; sha = "64113D30" },
   @{ n = "p3b_notick"; f = $TEXT + @("-DTEXT_FAULT_NOTICK");              sz = 16426; sha = "A3FC78DD" },

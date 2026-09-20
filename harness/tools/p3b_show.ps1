@@ -322,7 +322,15 @@ if ($Wired) { $WANT += @("vm_vms","vm_passed","tx_wt_key","tx_wt_nwait") }
 # * text.s symbols exist in EVERY P3B_NO_CEL build, -Fault included: that arm links the engine and
 #   only declines to call the nine handlers. Kept off the line above because tx_wt_* need
 #   TEXT_WIRED, which -Fault deliberately leaves undefined.
-if ($Linked) { $WANT += @("txt_bgx","txt_bgy","txt_bgw","txt_bgh","txb_yoff","txt_winactive","txt_restore","P3_RBTRACE","p3rb_tn","P3_CODE_SPLIT","P3_TABLES_BASE","P3_TABLES_END") }
+if ($Linked) { $WANT += @("txt_bgx","txt_bgy","txt_bgw","txt_bgh","txb_yoff","txt_winactive","txt_restore","P3_RBTRACE","p3rb_tn") }
+# ★★★★★ THE RELOCATION SYMBOLS MOVED TO THE SHARED LINE [T-P0-118]. vm_tables.s is now relocated
+# in EVERY arm, not only the P3B_NO_CEL ones, so the host must see the split in every arm too.
+# ★★★★★ LEAVING THEM HERE COST THIS TASK A GREEN-LOOKING FAILURE: p3b_run.lua keys on the PRESENCE
+# of these three [p3b_run.lua:702] and silently fell back to a single run, so a four-run image was
+# poked linearly from $2000 -- the tables landed in the code and the code after the split landed
+# 626 bytes low. The guest still reported "160 of 160 cycles"; only the completion line was
+# missing. **A host that describes the image wrongly produces a run that looks almost right.**
+$WANT += @("P3_CODE_SPLIT","P3_TABLES_BASE","P3_TABLES_END")
 if ($Diag) { $WANT += @("P3_TXDIAG","tx_diag_n1","tx_diag_n2") }
 # * tx_wt_* exist in every wired build; the stall dump reads them to separate the three shapes a
 #   hang inside the wait loop can have.
