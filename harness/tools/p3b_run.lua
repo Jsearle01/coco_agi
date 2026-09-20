@@ -1305,6 +1305,25 @@ _G._n = emu.add_machine_frame_notifier(function()
                             w("      co_%s : %d", c[1], t)
                         end
                     end
+                    -- ★★★★★ THE RESTORE, COUNTED [T-P0-113, owed by T-P0-112's AC-3/AC-4].
+                    -- p3_restbytes is bytes actually copied shadow -> live, both planes, summed
+                    -- over the run; p3_prevn is how many rectangles the LAST frame left to put
+                    -- back. ★★★ The pair is what distinguishes "the restore ran" from "the
+                    -- restore ran and had something to do": a non-zero rect count with zero
+                    -- bytes would be a walk that mapped and copied nothing, which is exactly the
+                    -- shape a clamped span or a bad slice calc would produce.
+                    -- ★★ Under -DP3B_FAULT_NORESTORE the symbols still exist and both read ZERO,
+                    -- which is the fault arm's signature and is checked rather than assumed.
+                    if SYM.p3_restbytes then
+                        local rb = 0
+                        for k = 0, 3 do rb = rb * 256 + prog:read_u8(SYM.p3_restbytes + k) end
+                        local rn = SYM.p3_prevn and prog:read_u8(SYM.p3_prevn) or -1
+                        w("      restore : %d bytes put back, %d rect(s) live from last frame", rb, rn)
+                        if rb == 0 then
+                            w("      ★★★ RESTORE COPIED NOTHING -- either the fault arm is linked "
+                              .. "or the walk is not reaching the planes")
+                        end
+                    end
                 end
                 if _G._arena_hi then
                     local p = _G._arena_hi_parts

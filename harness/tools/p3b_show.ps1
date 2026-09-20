@@ -60,6 +60,14 @@ param(
   # is the one-variable arm [L-73] that turns "the counters are writing into logic 102" from an
   # address coincidence into a measurement. It composes with any arm above.
   [switch]$NoCount,
+  # ★★★★★ -NoRestore IS T-P0-112's FAULT ARM, AND IT IS A KNOWN-GOOD RED [§2W]. It removes the
+  # single `jsr p3_restore_prev` and nothing else (-3 B, measured), so sprite rectangles are never
+  # put back and an animating sprite accumulates the union of its cels as a filled rectangle
+  # behind itself. ★★★★ THAT IS NOT AN INVENTED FAULT: it is exactly what every build before
+  # T-P0-112 did, and what Jay reported at the first side-by-side -- "the port still shows a
+  # squarish background while the oracle shows that area as transparent". ★★★ A fault arm whose
+  # red the project has already seen on a screen is the strongest kind there is.
+  [switch]$NoRestore,
   [switch]$NoIrq,
   [double]$Hold   = 3.0
 )
@@ -193,6 +201,7 @@ if ($CelCheck) { $FLAGS += @("-DRES_CHECKSUM") }
 if ($CovFault) { $FLAGS += @("-DP3B_COVERAGE","-DP3B_FAULT_COV_ARENA","-DP3B_ACCEPT_COV_ARENA") }
 if ($RawVis)   { $FLAGS += "-DCOMP_FAULT_RAW_VIS" }
 if ($NoCount) { $FLAGS += "-DVM_NOCOUNT" }
+if ($NoRestore) { $FLAGS += "-DP3B_FAULT_NORESTORE" }
 
 & $LW --format=raw --output=build/p3b_probe_pk_fresh.bin --map=build/p3b_probe_pk.map -I. @FLAGS src/harness/p3b_probe.s
 if ($LASTEXITCODE -ne 0) { throw "p3b assemble failed" }
@@ -261,7 +270,13 @@ if ($IfDiag) { $WANT += @("vm_if_at","vm_if_logic","vm_if_n","vm_if_buf","vm_if_
 # it broke p3b_text, p3b_box, p3b_parse and p3b_row22 in one go -- the exact trap this file already
 # warns about three times, for MAP_FONT, for P3_TXDIAG and for tx_wt_*.
 if (-not $Linked) { $WANT += @("vc_err","vc_w","vc_h","vc_src","vc_srcend","vc_view","co_tested",
-                               "p3_spr","p3_nspr","co_written","co_rejkey","co_rejpri") }
+                               "p3_spr","p3_nspr","co_written","co_rejkey","co_rejpri",
+# ★★★★ T-P0-113: the restore's two observables. CEL ARM ONLY, on this line and not the shared
+# one, for the reason the comment above gives -- vm_symbols.py fails the whole run on a missing
+# name, and p3_restbytes/p3_prevn live inside `ifndef P3B_NO_CEL`. Putting them on the shared
+# line would break p3b_text, p3b_box, p3b_parse and p3b_row22 in one go, which is the trap this
+# file has now warned about four times.
+                               "p3_restbytes","p3_prevn") }
 # ═══════════════════════════════════════════════════════════════════════════════════════════
 if ($ResCheck -or $CelCheck) { $WANT += @("rck_n","rck_bad","rck_ring","rck_seen","rck_noted","rck_skipped","rck_full",
                             "rck_type","rck_idx","rck_live","rck_base","rck_len","rck_sum") }
