@@ -86,7 +86,11 @@ $ARMS = @(
   # colour into both nibbles under -DVIS_DOUBLED (`ldb co_col / lda #17 / mul / stb ,x` replacing
   # `lda co_col / sta ,x`). **Only this arm moves**: the text arms define P3B_NO_CEL, so
   # composite.s is not linked there, and comp_probe does not define VIS_DOUBLED.
-  @{ n = "p3b";        f = @();                                          sz = 14152; sha = "26763F91" },
+  # ★★★★★ RE-BASELINED T-P0-112, ONE ARM ONLY: 14152 -> 14666 (+514 B). The sprite restore, the
+  # priority shadow and the rectangle recorder all sit inside `ifndef P3B_NO_CEL`, so the six
+  # text arms below are byte-identical and were verified so rather than assumed -- that is the
+  # evidence the guarding worked, and it is why only this line moves.
+  @{ n = "p3b";        f = @();                                          sz = 14666; sha = "F84C874F" },
   @{ n = "p3b_text";   f = $TEXT;                                         sz = 16409; sha = "D09866C3" },
   @{ n = "p3b_win3";   f = $TEXT + @("-DTEXT_WIN3");                      sz = 16409; sha = "35AB01B0" },
   @{ n = "p3b_notick"; f = $TEXT + @("-DTEXT_FAULT_NOTICK");              sz = 16406; sha = "7A9A319C" },

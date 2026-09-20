@@ -197,7 +197,22 @@ vm_timed	src/harness/vm_probe.s	build/vm_probe.bin	-DHAL_GFX_MODE_SERVICE -DHAL_
 # cannot exercise it. A real gate needs the plane read back through the window, a scenario both
 # sides can name, and defect 3 fixed first.
 # ═══════════════════════════════════════════════════════════════════════════════════════════
-p3b	src/harness/p3b_probe.s	build/p3b_probe_pk_fresh.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED	integration probe -- PLANE_WIN_MMU comes from the SOURCE (line 65), never the command line; binary F875F7F6 13,870 B, re-baselined T-P0-102 (retired: 58AD3C27 13,918 B -- the AC-5 opcode counters left the arena window, -48 B; EVERY p3b TIMING FIGURE PUBLISHED AGAINST THE RETIRED BINARY IS RETIRED WITH IT, producer moved)	purpose=timing
+# ★★★★★ WHAT AN ifdef-EXCLUSION LOOKS LIKE ON A SCREEN, not merely that it exists [T-P0-110's
+# rule, landed here T-P0-112]. A row that records a subsystem as "not compiled in this arm" has
+# stated a fact about SCOPE and predicted nothing, and P6.52 proved that gap is not academic: it
+# recorded `co_save`/`co_restore` as excluded, correctly, twice, and three tasks passed with the
+# screen looked at twice before anyone said what the exclusion would DO.
+#   -DCP_SAVE          never defined anywhere in the tree; the block has never assembled and has
+#                      rotted [P6.56]. NOT this port's mechanism -- see the restore below.
+#   save-under, absent an animating sprite accumulates the union of its cels as a filled
+#                      rectangle behind itself [P6.55, found by Jay at the first side-by-side].
+#   -DP3B_FAULT_NORESTORE  reinstates exactly that: the fault arm for the restore below, and it
+#                      is a KNOWN-GOOD RED because it is what every build before T-P0-112 did.
+# ★★★ THE STALE-FIGURE TRAP, recorded because it caught this task: the binary figure on the row
+# below read "F875F7F6 13,870 B, re-baselined T-P0-102" through P6.47-P6.54, while
+# p3b_arms_check.ps1 was re-baselined each time. **The arms check is the live baseline; this row
+# is prose.** Both are updated here and the row now says which one to believe.
+p3b	src/harness/p3b_probe.s	build/p3b_probe_pk_fresh.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED	integration probe -- PLANE_WIN_MMU comes from the SOURCE (line 65), never the command line; binary F84C874F 14,666 B, re-baselined T-P0-112 (+514 B: the sprite restore, the priority shadow at blocks 45-46, and the rectangle recorder; retired: 26763F91 14,152 B). ★ THE AUTHORITATIVE BASELINE IS p3b_arms_check.ps1's table, NOT this line -- it went stale here for eight tasks	purpose=timing
 # ═══════════════════════════════════════════════════════════════════════════════════════════
 # ★★★★★ p3b_text -- THE SAME SOURCE, A SECOND CONFIGURATION [ruling C, T-P0-084f].
 #

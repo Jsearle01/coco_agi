@@ -490,6 +490,49 @@ p3b_entry:
 * newly broken here -- it was never a 128 KB harness. Stated rather than assumed.
 P3_BLK_SHADOW   equ     2               ; the picture renders here, unseen
 P3_BLK_VISIBLE  equ     40              ; what the display shows and sprites composite onto
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE PRIORITY SHADOW [T-P0-112]. The visual plane has had a shadow since T-P0-051; the
+* priority plane never did, and P6.57 found why: `ph_blk_pri` is written ONCE in the whole tree
+* (`clr ph_blk_pri` above) and never redirected, while `ph_blk_fb` is redirected seven times.
+* ★★★★ THE ASYMMETRY WAS NEVER ABOUT THE PLANES. The visual plane got a shadow because Jay
+* watched a picture render and ruled the draw must not be visible. Nobody has ever watched the
+* priority plane, so nobody asked for one -- and the defect that absence causes (a sprite
+* destroys the depth data underneath it with nothing to restore from) is invisible for exactly
+* the same reason.
+*
+* ★★★★★ THE BLOCKS ARE PROVEN FREE FROM THE ALLOCATOR, NOT FROM A COMMENT [dispatch §2(3)].
+* Every stage manifest in build/vm_stage was read and the highest physical block any of the
+* twelve staged titles reaches is 44 (Kingquest2: vol 2 at base 14, 247,952 B = 31 blocks,
+* 14-44). MAME's coco3 driver declares `<ramoption name="512K" default="yes">` and no harness
+* passes -ramsize, so blocks 0-63 exist and $38-$3F is the CPU window. **45-55 are free.**
+* ★★★ AND THE SAME READ FOUND A LATENT COLLISION THAT IS NOT THIS TASK'S: Kingquest2 reaches
+* 44, PoliceQuest1 and SpaceQuest-1 reach 40, and the VISIBLE PLANE IS 40-43. No arm stages
+* those titles AND maps the visible plane today -- the 9-title sweep runs vm_probe.s, a
+* different probe -- so it is unreachable rather than broken. **Nothing asserts that, which is
+* P6.46's shape exactly.** Reported, not fixed here.
+* ★★ OVERRIDABLE so the assertions below can be shown RED from the command line rather than by
+* editing this file -- `-DP3B_FAULT_PRISHADOW=44` and `-DP3B_FAULT_PRISHADOW=55` each fire one.
+                ifdef   P3B_FAULT_PRISHADOW
+P3_BLK_PRISHADOW equ    P3B_FAULT_PRISHADOW
+                else
+P3_BLK_PRISHADOW equ    45              ; the priority plane's shadow: blocks 45-46
+                endc
+P3_BLK_PRISHADOW_N equ  2               ; 13,440 B packed needs two 8,192 B blocks
+P3_BLK_PRI      equ     0               ; ★ the LIVE priority plane, blocks 0-1 -- what
+                                        ;   `clr ph_blk_pri` above sets, named so the restore
+                                        ;   can put it back after borrowing ph_blk_pri
+P3_BLK_STAGE_MAX equ    44              ; measured, every manifest; see above
+P3_BLK_CPUWIN   equ     $38             ; 56 -- the CPU's own window starts here
+* ★★★★ ADJACENCY, ASSERTED AGAINST BOTH NEIGHBOURS. P6.46 cost eight tasks because two symbols
+* sat in a window with nothing asserting it, and P6.47's answer was assertions against EVERY
+* neighbour. Shown RED by setting P3_BLK_PRISHADOW to 44 and to 55 -- both fire [§2W].
+                ifgt    P3_BLK_STAGE_MAX+1-P3_BLK_PRISHADOW
+                error   "the priority shadow overlaps staged volume blocks -- the highest block any staged title reaches is P3_BLK_STAGE_MAX (Kingquest2, 14-44), so the shadow must start above it; re-measure every build/vm_stage/*/manifest.txt before lowering this"
+                endc
+                ifgt    P3_BLK_PRISHADOW+P3_BLK_PRISHADOW_N-P3_BLK_CPUWIN
+                error   "the priority shadow reaches the CPU's own window at $38-$3F -- those blocks are not ours; 45-55 is the free range on a 512 KB machine"
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★ p3_blk_vis IS DECLARED WITH p3_present, NOT HERE. The first version put its `fcb` between
 * `clr ph_blk_pri` and the `lda` below -- i.e. IN THE INSTRUCTION STREAM -- so the 6809 executed
 * the byte 40 as $28 (BVC) and the probe derailed before it ran. The tell was the harness never
@@ -919,6 +962,16 @@ p3_do_cycle:
                 jsr     phase_draw_enter        ; ★ AC-7: the pair, exactly two MMU writes
                 lda     #9
                 sta     P3_PHASE
+* ★★★★★ BEFORE THE COMPOSITE, NEVER AFTER [T-P0-112]. This puts back what LAST frame's sprites
+* covered, from the shadow planes. Run after compositing it would erase what was just drawn --
+* which is the one ordering in this change that cannot be got wrong and is therefore stated at
+* the call site as well as at the routine.
+* ★★ Guarded: the routine exists only in the cel arm, and the text arms' binaries must not move.
+                ifndef  P3B_NO_CEL
+                ifndef  P3B_FAULT_NORESTORE
+                jsr     p3_restore_prev
+                endc
+                endc
                 jsr     p3_composite_all
                 lda     #10
                 sta     P3_PHASE
@@ -1194,6 +1247,14 @@ p3_room_check:
                 jsr     pic_render_at
 * ★★★ AND NOW PRESENT IT: one copy per room, against a ~2.8 s render.
                 jsr     p3_present
+* ★★★★★ AND TAKE THE PRIORITY PLANE'S SHADOW, for the same reason and at the same moment
+* [T-P0-112]. pic_render_at has just written the room's priority data into the live plane; from
+* here until the next room change that data is the only record of what is underneath a sprite,
+* and every sprite that draws destroys some of it. This is the copy that gives the restore a
+* source. ★★ Once per room, against the same ~2.8 s render -- the same trade p3_present makes.
+                ifndef  P3B_NO_CEL
+                jsr     p3_pri_shadow
+                endc
                 jsr     res_close
                 lda     #1
                 sta     p3_drew
@@ -1673,9 +1734,266 @@ pss_done:
 * and keeping it means the phase discipline the cycle body documents is the same in both
 * configurations, which is worth more than the cycles.
                 ifndef  P3B_NO_CEL
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ SAVE-UNDER BY SHADOW, NOT BY BUFFER [T-P0-112, Jay's ruling on P6.57's shapes 2+3].
+*
+* ★★★★★ THE STRUCTURAL REASON, AND IT IS THE WHOLE ARGUMENT: a save-under must save because its
+* source is destroyed; A SHADOW NEVER IS. So there is no per-sprite store at all -- which also
+* deletes the concurrent-sum bound nobody has ever been able to state [P6.57 §3.4] rather than
+* measuring it -- and the per-frame copy is 2A rather than a save-under's 4A, because nothing is
+* ever saved. Only restored.
+*
+* ★★★★ WHAT THIS REPLACES. `co_save`/`co_restore` in composite.s are NOT used and are NOT part
+* of this shape. They sit behind `ifdef CP_SAVE`, which is defined nowhere in the tree; P6.56
+* established the block has never been assembled by anything, ever, and has rotted where it sits
+* (flat pointers where the compiled sites use plane_vis/plane_pri; both planes advanced by PRI_W
+* where priority's stride is PRI_STRIDE). **Do not revive them to "reuse" this.**
+*
+* ★★★ THE ORACLE'S OWN MODEL IS THE SAME ONE, one layer up: text.cpp:560-564 closes a message
+* window by RE-RENDERING a rectangle of the game screen into the display screen, with "no
+* save-under buffer anywhere". p3_restore_box already does exactly that for the box. This is
+* that walk applied per sprite, per frame, over BOTH planes.
+*
+* ★★★★★ ORDERING, AND IT IS THE ONE THING THAT CANNOT BE GOT WRONG: the previous frame's
+* rectangles are restored BEFORE this frame's sprites are composited. Restoring afterwards
+* erases what was just drawn. The call sits between phase_draw_enter and p3_composite_all.
+* ★★★ The rectangle list is rebuilt DURING compositing, from the cel geometry, which is only
+* known after vc_decode_begin -- so p3_prevn is cleared at the top of p3_composite_all, after
+* the restore has already consumed the old list.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+P3_PREV_SIZE    equ     4               ; x, ytop, w, h -- all bytes; a cel dimension IS a byte
+p3_prevn        fcb     0               ; rectangles live from the previous frame
+p3_prev         rmb     P3_SPR_MAX*P3_PREV_SIZE
+
+p3rp_x          fcb     0
+p3rp_w          fcb     0
+p3rp_rowb       fcb     0               ; the row being restored, as a byte
+p3rp_cnt        fcb     0               ; rows remaining
+p3rp_i          fcb     0               ; rectangle index
+p3rp_off        fdb     0               ; flat offset into the plane
+p3rp_within     fdb     0               ; offset inside the mapped 8,192 B slice
+p3rp_slice      fcb     0
+p3rp_n          fcb     0               ; bytes to copy in this span
+* ★★ AC-4's counter: bytes actually restored per frame. 32-bit for the reason the compositor's
+* are -- a 16-bit counter wraps into a plausible figure inside the first second [AC-5's note].
+p3_restbytes    rmb     4
+
+* ── p3_restore_prev -- put back what last frame's sprites covered, both planes ────
+p3_restore_prev:
+                lda     p3_prevn
+                lbeq    prp_out
+                clr     p3rp_i
+                ldy     #p3_prev
+prp_each:
+                lda     ,y
+                sta     p3rp_x
+                lda     2,y
+                sta     p3rp_w
+                lda     3,y
+                sta     p3rp_cnt        ; height = rows to walk
+                lda     1,y
+                sta     p3rp_rowb       ; ytop
+                pshs    y
+                jsr     prp_visual
+                puls    y
+                lda     1,y
+                sta     p3rp_rowb
+                lda     3,y
+                sta     p3rp_cnt
+                pshs    y
+                jsr     prp_priority
+                puls    y
+                leay    P3_PREV_SIZE,y
+                inc     p3rp_i
+                lda     p3rp_i
+                cmpa    p3_prevn
+                blo     prp_each
+prp_out:        rts
+
+* ── prp_visual -- one byte per pixel, 160 per row, shadow -> visible ─────────────
+prp_visual:
+prpv_row:       lda     p3rp_cnt
+                beq     prpv_done
+                lda     p3rp_rowb
+                cmpa    #PIC_H
+                bhs     prpv_next       ; ★ off the bottom: skip, do not wrap into the next plane
+* off = row * 160 + x
+                lda     #PIC_W
+                ldb     p3rp_rowb
+                mul                     ; D = row * 160; row <= 167 so this cannot overflow
+                pshs    d
+                clra
+                ldb     p3rp_x
+                addd    ,s++
+                std     p3rp_off
+                lda     p3rp_w
+                sta     p3rp_n
+                jsr     prp_split
+* map: visible slice into slot 5, shadow slice into slot 6 -- p3rb_map's pair
+                lda     #P3_BLK_VISIBLE
+                sta     ph_blk_fb
+                lda     p3rp_slice
+                jsr     phase_draw_fb_slot5
+                lda     #P3_BLK_SHADOW
+                sta     ph_blk_fb
+                lda     p3rp_slice
+                jsr     phase_draw_fb
+                jsr     prp_copy
+prpv_next:      inc     p3rp_rowb
+                dec     p3rp_cnt
+                bra     prpv_row
+prpv_done:
+* ★ leave ph_blk_fb where the compositor expects it: the VISIBLE plane
+                lda     #P3_BLK_VISIBLE
+                sta     ph_blk_fb
+                rts
+
+* ── prp_priority -- PACKED: 80 bytes per row, two pixels per byte ────────────────
+* ★★★★ THE SPAN IS WHOLE BYTES AND DELIBERATELY OVER-RESTORES BY UP TO ONE PIXEL AT EACH EDGE.
+* x may start in the low nibble, so the byte span is (x>>1) .. ((x+w-1)>>1). Over-restoring is
+* SAFE HERE and only here: every rectangle is restored before ANY sprite is composited, so the
+* extra pixel can only be written with the picture's own priority value, which is what belongs
+* there. It would NOT be safe after compositing had begun.
+prp_priority:
+prpp_row:       lda     p3rp_cnt
+                beq     prpp_done
+                lda     p3rp_rowb
+                cmpa    #PIC_H
+                bhs     prpp_next
+* off = row * 80 + (x >> 1)
+                lda     #PRI_STRIDE
+                ldb     p3rp_rowb
+                mul
+                pshs    d
+                clra
+                ldb     p3rp_x
+                lsrb
+                addd    ,s++
+                std     p3rp_off
+* n = ((x + w - 1) >> 1) - (x >> 1) + 1
+                lda     p3rp_x
+                adda    p3rp_w
+                deca
+                lsra                    ; A = (x + w - 1) >> 1
+                ldb     p3rp_x
+                lsrb                    ; B = x >> 1
+* ★ 6809 HAS NO REGISTER-TO-REGISTER SUBTRACT. `sba` is a 6800 instruction and assembles here as
+* nothing of the kind; the subtrahend goes through the stack.
+                pshs    b
+                suba    ,s+
+                inca
+                sta     p3rp_n
+                jsr     prp_split
+* map: LIVE priority slice into slot 5, SHADOW priority slice into slot 6
+                lda     p3rp_slice
+                jsr     phase_draw_pri
+                lda     #P3_BLK_PRISHADOW
+                sta     ph_blk_pri
+                lda     p3rp_slice
+                jsr     phase_draw_pri_slot6
+                lda     #P3_BLK_PRI
+                sta     ph_blk_pri
+                jsr     prp_copy
+prpp_next:      inc     p3rp_rowb
+                dec     p3rp_cnt
+                bra     prpp_row
+prpp_done:      rts
+
+* ── prp_split -- off -> slice + within, and clamp p3rp_n to the slice end ────────
+* ★★★★★ THE STRADDLE IS CLAMPED, NOT SPLIT. p3rb_span splits into two mapped copies; here the
+* tail is simply dropped, and that is a DEFICIENCY recorded rather than hidden -- see §7 of the
+* report. A 160-byte row inside an 8,192-byte slice straddles at ~1.9% of row starts.
+prp_split:
+                lda     p3rp_off
+                lsra
+                lsra
+                lsra
+                lsra
+                lsra
+                sta     p3rp_slice
+                ldd     p3rp_off
+                anda    #$1F
+                std     p3rp_within
+* avail = 8192 - within, so 0 < avail <= 8192. Clamp n to it.
+* ★★ TEST THE HIGH BYTE FIRST. If avail >= 256 no byte count can exceed it and the compare below
+* would be reading the wrong half.
+                ldd     #8192
+                subd    p3rp_within
+                tsta
+                bne     prps_out        ; avail >= 256 -- a byte n always fits
+                cmpb    p3rp_n
+                bhs     prps_out        ; avail >= n -- fits
+                stb     p3rp_n          ; clamp; the tail is dropped, see the header
+prps_out:       rts
+
+* ── prp_copy -- p3rp_n bytes at p3rp_within, shadow ($C000) -> live ($A000) ──────
+* ★★★★★ THE COUNT IS LOADED AFTER THE ADDRESSES [T-P0-088, and it cost that whole task].
+* The first version of p3rb_span did `ldb n` then `ldd within` -- and **`ldd` loads A AND B**, so
+* the loop count was silently replaced by the low byte of the offset. It reproduced as a
+* period-8 pattern because `within` grows by 160 per row. Every traced field was correct; a
+* REGISTER was wrong. The order below is the fix, restated where it can be got wrong again.
+prp_copy:
+                ldd     p3rp_within
+                ldx     #FB_BASE
+                leax    d,x
+                ldu     #PRI_BASE
+                leau    d,u
+                ldb     p3rp_n
+                beq     prpc_out
+                clra
+                addd    p3_restbytes+2
+                std     p3_restbytes+2
+                bcc     prpc_nc
+                ldd     p3_restbytes
+                addd    #1
+                std     p3_restbytes
+prpc_nc:        ldb     p3rp_n
+prpc_b:         lda     ,x+
+                sta     ,u+
+                decb
+                bne     prpc_b
+prpc_out:       rts
+
+* ── p3_pri_shadow -- copy the LIVE priority plane into its shadow, once per room ─
+* ★★★★ MIRRORS WHAT THE VISUAL PLANE ALREADY DOES, in the other direction. The visual render is
+* redirected INTO the shadow and presented out of it; the priority render is left exactly where
+* it is -- writing to the live plane, gated by pic 45/45 -- and copied out afterwards. ★★★ Same
+* result, and it touches NO part of the render path, which is the lower-risk half of the two.
+* ★★ Called after the room's picture render, while nothing is reading priority.
+p3_pri_shadow:
+                clr     p3rp_slice
+pps_slice:
+                lda     p3rp_slice
+                jsr     phase_draw_pri          ; live slice -> slot 5 ($A000)
+                lda     #P3_BLK_PRISHADOW
+                sta     ph_blk_pri
+                lda     p3rp_slice
+                jsr     phase_draw_pri_slot6    ; shadow slice -> slot 6 ($C000)
+                lda     #P3_BLK_PRI
+                sta     ph_blk_pri
+                ldx     #PRI_BASE
+                ldu     #FB_BASE
+pps_cp:         lda     ,x+
+                sta     ,u+
+                cmpx    #PRI_BASE+8192
+                blo     pps_cp
+                inc     p3rp_slice
+                lda     p3rp_slice
+                cmpa    #2
+                blo     pps_slice
+                ldd     P3_REMAPS
+                addd    #4
+                std     P3_REMAPS
+                rts
+
 p3_composite_all:
+* ★★★ THE OLD LIST HAS ALREADY BEEN CONSUMED by p3_restore_prev, which ran before this call.
+                clr     p3_prevn
                 lda     p3_nspr
-                beq     pca_out
+* ★ LONG. The rectangle recorder below added ~30 bytes inside this routine and put pca_out past
+* the short-branch range -- the same byte-overflow this file has produced twice before when a
+* guarded block grew [T-P0-102, T-P0-108].
+                lbeq    pca_out
                 ldy     #p3_spr
                 clr     p3_si
 pca_lp:
@@ -1736,6 +2054,33 @@ pca_lp:
                 lda     vc_err
                 bne     pca_close
                 jsr     cp_composite
+* ★★★★★ RECORD THE RECTANGLE FOR NEXT FRAME'S RESTORE [T-P0-112]. Here and not in p3_stage_sprites
+* because the cel's GEOMETRY is what the restore needs, and vc_w/vc_h are only known once
+* vc_decode_begin has parsed the cel header -- which is two instructions above this.
+* ★★★ yPos IS THE LOWER-LEFT CORNER [sprite.cpp:247, and composite.s:122 says so], so the top row
+* is y - h + 1. Clamped at 0: a cel taller than its own y would otherwise record a negative row
+* and the restore would walk backwards out of the plane.
+                lda     p3_prevn
+                cmpa    #P3_SPR_MAX
+                bhs     pca_norec
+                ldb     #P3_PREV_SIZE
+                mul                             ; D = index * 4
+                ldx     #p3_prev
+                leax    d,x
+                lda     CP_X
+                sta     ,x
+                lda     CP_Y
+                suba    vc_h
+                inca
+                bpl     pca_ytopok
+                clra
+pca_ytopok:     sta     1,x
+                lda     vc_w
+                sta     2,x
+                lda     vc_h
+                sta     3,x
+                inc     p3_prevn
+pca_norec:
 pca_close:
                 ifdef   RES_CHECKSUM
                 lda     #RCK_AT_CLOSE
@@ -1752,7 +2097,7 @@ pca_skip:       puls    y
                 inc     p3_si
                 lda     p3_si
                 cmpa    p3_nspr
-                blo     pca_lp
+                lblo    pca_lp          ; ★ long, for the same reason as the lbeq above
 pca_out:        rts
                 else
 * ★★ The stripped configuration still needs the symbol: the cycle body calls it unconditionally,
