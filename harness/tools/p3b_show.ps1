@@ -78,6 +78,11 @@ param(
   # nothing and VAR_EGO_DIRECTION is never written. ★★★ A KNOWN-GOOD RED -- it is every build
   # before this task, and Jay has already reported it: "he doesn't move and i can't move him".
   [switch]$NoJoin,
+  # ★★★★ -PresentAll IS T-P0-116's FAULT ARM: p3_present copies all four apertures again instead
+  # of stopping at the game screen, so the picture clear's white lands on the text area. ★★★ A
+  # KNOWN-GOOD RED -- it is every build before this task, and Jay reported it at the side-by-side:
+  # "the text area is white again. we had it changed to black as it should be."
+  [switch]$PresentAll,
   [switch]$NoIrq,
   [double]$Hold   = 3.0
 )
@@ -214,6 +219,7 @@ if ($NoCount) { $FLAGS += "-DVM_NOCOUNT" }
 if ($NoRestore) { $FLAGS += "-DP3B_FAULT_NORESTORE" }
 if ($AlwaysRestore) { $FLAGS += "-DP3B_FAULT_ALWAYSRESTORE" }
 if ($NoJoin) { $FLAGS += "-DP3B_FAULT_NOJOIN" }
+if ($PresentAll) { $FLAGS += "-DP3B_FAULT_PRESENT_ALL" }
 # ★★★★★ THE CEL ARM GETS THE KEYBOARD TOO [T-P0-115]. Tested on the absence of -DP3B_NO_CEL rather
 # than on a list of the twelve text switches, because that list is the thing this file has already
 # been bitten by five times -- "a list repeated five times is a list that will be edited four
@@ -421,7 +427,7 @@ if ($Headless) {
   # ★★★★ `restore \d+ bytes` ADDED T-P0-114, and this comment is the reason the line above warns
   # about allowlists: the restore figure was owed by two tasks, was being computed correctly by
   # the guest the whole time, and was invisible because no pattern here named it.
-  Select-String -Path $log -Pattern 'OK prompt|program \d+ bytes|vocabulary |window discrimination|par_vocab written|COMMAND TYPED|parse at cycle|TYPING |TYPED LINE|prompt: enabled|row 22|NO KEYS REACHED|NEVER REACHED|STUCK|cycles in|final room|restore \d+ bytes|ego: x=|P3_PBUF' |
+  Select-String -Path $log -Pattern 'OK prompt|program \d+ bytes|vocabulary |window discrimination|par_vocab written|COMMAND TYPED|parse at cycle|TYPING |TYPED LINE|prompt: enabled|row 22|NO KEYS REACHED|NEVER REACHED|STUCK|cycles in|final room|restore \d+ bytes|ego: x=|text area rows|P3_PBUF' |
     ForEach-Object { $_.Line }
   if ($stuck) { "★★★ p3b FAILED -- the watchdog fired"; exit 1 }
   if ($nowords) { "★★★ p3b FAILED -- a fed command matched no dictionary words"; exit 1 }

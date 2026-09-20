@@ -1525,6 +1525,8 @@ p3_bv:          std     ,x++
 * [pic_probe.s:541-549].
 * ★ Both bytes live HERE, after a `rts` and before the entry label, so nothing falls through them.
 p3p_slice       fcb     0
+p3p_end         fdb     0               ; ★ T-P0-116: this aperture's copy bound, in memory for
+                                        ;   the same reason the slice counter is -- `ldd` kills B
 p3_blk_vis      fcb     P3_BLK_VISIBLE  ; the harness display reads this; it never moves
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ p3_restore_box -- close the message window by re-rendering ITS RECTANGLE, shadow -> visible.
@@ -1730,12 +1732,51 @@ p3p_next:
                 sta     ph_blk_fb
                 lda     p3p_slice
                 jsr     phase_draw_fb
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ PRESENT THE GAME SCREEN, NOT THE WHOLE ALLOCATION [T-P0-116]. Jay, at the side-by-side:
+* *"the text area is white again. we had it changed to black as it should be."*
+*
+* ★★★★★ THE MECHANISM, AND IT IS AN EXTENT MISMATCH RATHER THAN A REGRESSION. The visual plane
+* is 160x168 = 26,880 bytes -- rows 0-167, the GAME SCREEN. The blocks holding it are 2-5 and
+* 40-43, four apertures = 32,768, so rows 168-199 (the TEXT AREA, 5,120 B) and 768 spare bytes
+* live in the same allocation and are not part of the plane. Init blacks all 32,768 of the
+* VISIBLE plane [p3_black_visible], which is what made the text area black and is what Jay
+* remembers. **But p3_clear_planes whitens all 32,768 of the SHADOW before each render, and this
+* routine copied all 32,768 across** -- so every room change repainted the blacked text area with
+* the picture clear's white. ★★★ Not a regression: the black was real, and the first room's
+* present has always overwritten it.
+*
+* ★★★★ THE ORACLE KEEPS THE TWO APART AND SO SHOULD WE: _gameScreen is "160x168 - screen, where
+* the actual game content is drawn to" and is a different buffer from _displayScreen
+* [graphics.h:116,119 at the pin]. **The shadow is our _gameScreen, and a game screen has no text
+* area to present.**
+*
+* ★★ THE LAST SLICE STOPS SHORT: 26,880 = three full apertures + 2,304. ★★★★ Expressed as a
+* count and NOT as `FB_BASE+(PIC_W*PIC_H)` -- that is AD-111's exact expression, $C000+$6900 =
+* $12900, which lwasm truncates to $2900 and which cleared two bytes instead of 26,880. The
+* addition here is $C000+$900 = $C900 and cannot overflow, but the constant is kept small anyway.
+P3_PRESENT_TAIL equ     (PIC_W*PIC_H)-(3*8192)  ; 2,304 bytes into the fourth aperture
+                ifgt    P3_PRESENT_TAIL-8192
+                error   "the game screen no longer ends inside the fourth aperture -- p3_present's tail bound is wrong"
+                endc
+* --- how far this aperture goes: full, except the last, which ends at the game screen ---
+* ★★★ A IS LOADED BEFORE D, because `ldd` writes A as well and reading p3p_slice after it would
+* read the constant's high byte. The same clobber class this file has now recorded four times.
+                ifndef  P3B_FAULT_PRESENT_ALL
+                lda     p3p_slice
+                cmpa    #3
+                beq     p3p_tail
+                endc
+                ldd     #FB_BASE+8192
+                bra     p3p_setend
+p3p_tail:       ldd     #FB_BASE+P3_PRESENT_TAIL
+p3p_setend:     std     p3p_end
 * --- one aperture, two bytes at a time ---
                 ldx     #FB_BASE                ; $C000, the shadow slice
                 ldu     #PRI_BASE               ; $A000, the visible slice (borrowed slot 5)
 p3p_cp:         ldd     ,x++
                 std     ,u++
-                cmpx    #FB_BASE+8192
+                cmpx    p3p_end
                 blo     p3p_cp
                 inc     p3p_slice
                 lda     p3p_slice

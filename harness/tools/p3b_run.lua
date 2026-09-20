@@ -1099,6 +1099,29 @@ _G._n = emu.add_machine_frame_notifier(function()
                   SYM.p3_prevn and string.format("  (%d rect(s) live at exit)",
                                                  prog:read_u8(SYM.p3_prevn)) or "")
             end
+            -- ★★★★★ THE TEXT AREA, COUNTED [T-P0-116 AC-5]. Jay: "the text area is white again."
+            -- The visual plane is 160x168 = 26,880 B (rows 0-167); rows 168-199 are the TEXT AREA
+            -- and live in the same four blocks, at offsets 26,880..31,999 -- which is slice 3,
+            -- offsets 2,304..7,423. ★★★ p3_black_visible blacks all four slices at init, so a
+            -- non-zero count here means something REPAINTED the text area after init, and before
+            -- T-P0-116 that something was p3_present copying the picture clear's white across.
+            -- ★★ Mapping slot 6 here is safe and is what the plane dump at the foot of this file
+            -- already does: the DISPLAY follows VOFFSET, not slot 6, so remapping it shows nothing.
+            do
+                local BV = 40                       -- P3_BLK_VISIBLE
+                prog:write_u8(SLOT6, BV + 3)        -- visible slice 3 -> $C000
+                local nonzero, first, firstv = 0, nil, nil
+                for off = 2304, 2304 + 5120 - 1 do
+                    local v = prog:read_u8(FB_BASE + off)
+                    if v ~= 0 then
+                        nonzero = nonzero + 1
+                        if not first then first, firstv = off - 2304, v end
+                    end
+                end
+                w("    text area rows 168-199: %d of 5120 bytes non-black%s",
+                  nonzero,
+                  first and string.format("   first at +%d = $%02X", first, firstv) or "  ★ ALL BLACK")
+            end
             -- ★★★★★ THE EGO'S LOOP, AS A NUMBER [T-P0-115 §4C(2)]. "He faces the other way" is an
             -- eye-gate answer; this is the same fact as a loop index, and the oracle's own tables
             -- predict it exactly: loopTable4[3] = 0 (RIGHT) and loopTable4[7] = 1 (LEFT), and

@@ -97,13 +97,22 @@ $ARMS = @(
   # -- the cel arm now takes -DHAL_KEYBOARD, which pulls in input.s (~318 B) plus the key-to-
   # direction join. ★★★ Selecting existing HAL code is not a HAL change [T-P0-085c §6]; the six
   # text arms already took this flag and are byte-identical below, which is the proof.
-  @{ n = "p3b";        f = @("-DHAL_KEYBOARD");                          sz = 15246; sha = "A2724197" },
-  @{ n = "p3b_text";   f = $TEXT;                                         sz = 16409; sha = "D09866C3" },
-  @{ n = "p3b_win3";   f = $TEXT + @("-DTEXT_WIN3");                      sz = 16409; sha = "35AB01B0" },
-  @{ n = "p3b_notick"; f = $TEXT + @("-DTEXT_FAULT_NOTICK");              sz = 16406; sha = "7A9A319C" },
-  @{ n = "p3b_nomap";  f = $TEXT + @("-DP3B_VOCAB_NOMAP");                sz = 16406; sha = "379A9421" },
-  @{ n = "p3b_fault";  f = $TEXT + @("-DTEXT_MODELLED");                  sz = 15533; sha = "FA9C8531" },
-  @{ n = "p3b_flat";   f = $TEXT + @("-DTEXT_MODELLED","-DTEXT_VOCAB_FLAT"); sz = 15518; sha = "E3E95063" }
+  # ★★★★★ RE-BASELINED T-P0-116, AND THIS TIME ALL SEVEN MOVED, BY EXACTLY +20 B EACH. That
+  # uniformity is the evidence it is one change and nothing else: p3_present now stops at the
+  # GAME SCREEN (26,880 B) instead of copying all four apertures (32,768), so the picture clear's
+  # white no longer lands on the text area at rows 168-199.
+  # ★★★★★ p3_present IS SHARED BY EVERY CONFIGURATION -- it is not inside `ifndef P3B_NO_CEL` --
+  # and the defect mattered MORE in the text arms, which are the only ones that link text.s and
+  # therefore the only ones that draw in the text area at all. **Scoping the fix to the cel arm to
+  # keep six hashes stable would have knowingly left it broken where it matters most.** The p3b
+  # gate was run green against the moved arms before these were re-baselined [T-P0-116 §4].
+  @{ n = "p3b";        f = @("-DHAL_KEYBOARD");                          sz = 15266; sha = "EE9DCC53" },
+  @{ n = "p3b_text";   f = $TEXT;                                         sz = 16429; sha = "3250E5CF" },
+  @{ n = "p3b_win3";   f = $TEXT + @("-DTEXT_WIN3");                      sz = 16429; sha = "64113D30" },
+  @{ n = "p3b_notick"; f = $TEXT + @("-DTEXT_FAULT_NOTICK");              sz = 16426; sha = "A3FC78DD" },
+  @{ n = "p3b_nomap";  f = $TEXT + @("-DP3B_VOCAB_NOMAP");                sz = 16426; sha = "9DAFE0E3" },
+  @{ n = "p3b_fault";  f = $TEXT + @("-DTEXT_MODELLED");                  sz = 15553; sha = "99DDA1AF" },
+  @{ n = "p3b_flat";   f = $TEXT + @("-DTEXT_MODELLED","-DTEXT_VOCAB_FLAT"); sz = 15538; sha = "32C658EB" }
 )
 
 # ★★★ -DP3B_COVERAGE puts the two opcode counters back [p3b_probe.s]. It is a REAL byte change --
