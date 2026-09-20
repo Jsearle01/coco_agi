@@ -317,4 +317,11 @@ Substantial, and it drove every finding:
 
 ### 11 — Commit
 
-<filled at commit>  (pushed to origin/wip before this report)
+★ **No source commit exists, because this task changed no source.** The report is its own
+commit and cannot name its own hash, so it is recorded here by the follow-up commit that adds
+this line:
+
+- `d3ede9b` — P6.55 report (this file)
+- this line added in the commit immediately following `d3ede9b`
+
+Both pushed to origin/wip before this report. Pool rows pushed separately (§10).
