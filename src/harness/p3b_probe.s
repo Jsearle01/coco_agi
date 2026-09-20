@@ -1761,7 +1761,11 @@ pss_done:
 * known after vc_decode_begin -- so p3_prevn is cleared at the top of p3_composite_all, after
 * the restore has already consumed the old list.
 * ═══════════════════════════════════════════════════════════════════════════════════════════
-P3_PREV_SIZE    equ     4               ; x, ytop, w, h -- all bytes; a cel dimension IS a byte
+* ★★★★ SEVEN BYTES SINCE T-P0-114, NOT FOUR. The first four are the rectangle; the last three are
+* the cel's IDENTITY, and they are what make "has this sprite changed" answerable. Geometry alone
+* cannot: a same-size cel swap at the same position is byte-identical in the first four.
+* ★★ Costs 48 bytes of p3_prev (16 x 3) to save a full erase-and-repaint per unchanged sprite.
+P3_PREV_SIZE    equ     7               ; x, ytop, w, h, view, loop, cel -- all bytes
 p3_prevn        fcb     0               ; rectangles live from the previous frame
 p3_prev         rmb     P3_SPR_MAX*P3_PREV_SIZE
 
@@ -1785,6 +1789,38 @@ p3_restore_prev:
                 clr     p3rp_i
                 ldy     #p3_prev
 prp_each:
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ ERASE ONLY WHAT CHANGED [T-P0-114]. An unchanged sprite's pixels are IDENTICAL to the
+* ones already on the plane, so erasing it and repainting it is a no-op that costs a visible
+* blink -- and the blink is the erase, not the animation.
+*
+* ★★★★★ JAY IS THE EVIDENCE, and it came from a fault arm nobody built for this question. On
+* -NoRestore: *"graham looks the same except he is not blinking anymore."* Graham neither moves
+* nor animates, so the ONLY difference between the two arms for him is whether he was erased.
+*
+* ★★★★★ WHAT "CHANGED" MEANS, AND WHY IT IS NOT THE RECTANGLE. The record used to be four bytes
+* of pure GEOMETRY (x, ytop, w, h). A sprite that stays put and swaps to a DIFFERENT CEL OF THE
+* SAME SIZE has an identical rectangle and different pixels -- so a geometry-only test would skip
+* the erase and **leave the old cel on the screen forever**, which is worse than a blink and is
+* the failure this comparison exists to prevent. The record therefore carries the cel's IDENTITY
+* -- view, loop, cel -- and all five fields are compared.
+*
+* ★★★★ THE COMPARISON IS AGAINST THIS FRAME'S STAGED LIST, WHICH IS ALREADY POPULATED:
+* p3_stage_sprites runs at phase 5 and this runs at phase 9. ★★★ Index-wise, and that is SAFE in
+* the only direction that matters: if the staged set shifts, the fields disagree and we restore,
+* which is merely wasteful. A false SKIP would need x, y, view, loop and cel all to match -- and
+* a sprite matching all five is one whose pixels are identical whatever its index.
+*
+* ★★★★★ THE SPRITE IS STILL COMPOSITED. Skipping the erase must NOT mean skipping the draw:
+* a changed neighbour's restore can reset priority inside this sprite's rectangle, and the
+* composite pass is what repairs it. ★★★ Re-compositing is harmless on both planes -- the visual
+* write is identical, and co_depth re-stamps the same viewPriority it stamped last frame, so the
+* depth test reaches the same decision it reached before.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+                ifndef  P3B_FAULT_ALWAYSRESTORE
+                jsr     prp_same
+                beq     prp_skip                ; unchanged -> do not erase it
+                endc
                 lda     ,y
                 sta     p3rp_x
                 lda     2,y
@@ -1803,12 +1839,51 @@ prp_each:
                 pshs    y
                 jsr     prp_priority
                 puls    y
+prp_skip:
                 leay    P3_PREV_SIZE,y
                 inc     p3rp_i
                 lda     p3rp_i
                 cmpa    p3_prevn
                 blo     prp_each
 prp_out:        rts
+
+* ── prp_same -- is record i identical to this frame's staged sprite i? ───────────
+* ★ Returns Z SET when UNCHANGED (caller skips the erase). Y must survive; A, B and X do not.
+* ★★ The five fields are x, y, view, loop and cel. The record keeps ytop and the staged list
+* keeps y, so the reconstruction is ytop + h - 1 -- done here rather than stored twice [§2F].
+prp_same:
+                lda     p3rp_i
+                cmpa    p3_nspr
+                blo     prp_ns_have
+* ★★★★★ NO SPRITE i THIS FRAME -> CHANGED, AND Z MUST BE CLEARED EXPLICITLY. The `cmpa` above
+* SETS Z when i == p3_nspr, which is the commonest way to arrive here (the list shrank by one),
+* so falling through to a bare `rts` would report "unchanged" and skip erasing a sprite that has
+* just been REMOVED -- leaving it on the screen permanently. Caught by reading the flags rather
+* than the branch.
+                andcc   #$FB                    ; Z is CC bit 2
+                rts
+prp_ns_have:
+                ldb     #P3_SPR_SIZE
+                mul                             ; D = i * 6
+                ldx     #p3_spr
+                leax    d,x
+                lda     ,y                      ; x
+                cmpa    ,x
+                bne     prp_ns_no
+                lda     1,y                     ; ytop
+                adda    3,y                     ;  + h
+                deca                            ;  - 1  == the staged y
+                cmpa    1,x
+                bne     prp_ns_no
+                lda     4,y                     ; view
+                cmpa    3,x
+                bne     prp_ns_no
+                lda     5,y                     ; loop
+                cmpa    4,x
+                bne     prp_ns_no
+                lda     6,y                     ; cel -- the last compare SETS Z for the caller
+                cmpa    5,x
+prp_ns_no:      rts
 
 * ── prp_visual -- one byte per pixel, 160 per row, shadow -> visible ─────────────
 prp_visual:
@@ -2079,6 +2154,16 @@ pca_ytopok:     sta     1,x
                 sta     2,x
                 lda     vc_h
                 sta     3,x
+* ★★★★★ AND THE CEL'S IDENTITY [T-P0-114]. All three are in scope here and nowhere later: the
+* loop loaded p3_view/vc_loop/vc_cel from p3_spr at the top of this iteration, and vc_decode_begin
+* has since parsed the header they name. Without these, next frame's comparison sees only a
+* rectangle and cannot tell a cel swap from a still sprite.
+                lda     p3_view
+                sta     4,x
+                lda     vc_loop
+                sta     5,x
+                lda     vc_cel
+                sta     6,x
                 inc     p3_prevn
 pca_norec:
 pca_close:

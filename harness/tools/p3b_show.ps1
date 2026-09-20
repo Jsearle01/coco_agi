@@ -68,6 +68,12 @@ param(
   # squarish background while the oracle shows that area as transparent". ★★★ A fault arm whose
   # red the project has already seen on a screen is the strongest kind there is.
   [switch]$NoRestore,
+  # ★★★★ -AlwaysRestore IS T-P0-114's FAULT ARM. It forces the changed/unchanged test TRUE, so
+  # every recorded rectangle is erased and repainted -- which is exactly P6.58's behaviour and
+  # therefore a KNOWN-GOOD RED: Jay has already watched it blink. ★★★ Differencing it against the
+  # clean arm is also AC-2's census, because the two builds differ in one variable and the gap in
+  # p3_restbytes IS the bytes not touched for unchanged sprites.
+  [switch]$AlwaysRestore,
   [switch]$NoIrq,
   [double]$Hold   = 3.0
 )
@@ -202,6 +208,7 @@ if ($CovFault) { $FLAGS += @("-DP3B_COVERAGE","-DP3B_FAULT_COV_ARENA","-DP3B_ACC
 if ($RawVis)   { $FLAGS += "-DCOMP_FAULT_RAW_VIS" }
 if ($NoCount) { $FLAGS += "-DVM_NOCOUNT" }
 if ($NoRestore) { $FLAGS += "-DP3B_FAULT_NORESTORE" }
+if ($AlwaysRestore) { $FLAGS += "-DP3B_FAULT_ALWAYSRESTORE" }
 
 & $LW --format=raw --output=build/p3b_probe_pk_fresh.bin --map=build/p3b_probe_pk.map -I. @FLAGS src/harness/p3b_probe.s
 if ($LASTEXITCODE -ne 0) { throw "p3b assemble failed" }
@@ -397,7 +404,10 @@ if ($Headless) {
   # does not name, and what it does not name is always the newest thing -- here AC-3's whole
   # observable printed to the log and never to the console [the same shape as the star-in-a-pattern
   # loss two tasks ago: the filter kept every table and removed the conclusion].
-  Select-String -Path $log -Pattern 'OK prompt|program \d+ bytes|vocabulary |window discrimination|par_vocab written|COMMAND TYPED|parse at cycle|TYPING |TYPED LINE|prompt: enabled|row 22|NO KEYS REACHED|NEVER REACHED|STUCK|cycles in|final room|P3_PBUF' |
+  # ★★★★ `restore \d+ bytes` ADDED T-P0-114, and this comment is the reason the line above warns
+  # about allowlists: the restore figure was owed by two tasks, was being computed correctly by
+  # the guest the whole time, and was invisible because no pattern here named it.
+  Select-String -Path $log -Pattern 'OK prompt|program \d+ bytes|vocabulary |window discrimination|par_vocab written|COMMAND TYPED|parse at cycle|TYPING |TYPED LINE|prompt: enabled|row 22|NO KEYS REACHED|NEVER REACHED|STUCK|cycles in|final room|restore \d+ bytes|P3_PBUF' |
     ForEach-Object { $_.Line }
   if ($stuck) { "★★★ p3b FAILED -- the watchdog fired"; exit 1 }
   if ($nowords) { "★★★ p3b FAILED -- a fed command matched no dictionary words"; exit 1 }

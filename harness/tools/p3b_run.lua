@@ -1085,6 +1085,20 @@ _G._n = emu.add_machine_frame_notifier(function()
             w("    median %.4f s/cycle = %.2f cycles/second", med, 1.0/med)
             w("    mean   %.4f s/cycle = %.2f cycles/second", tot/NCYC, NCYC/tot)
             w("    remaps total %d = %.2f per cycle", rd16(REMAPS), rd16(REMAPS)/NCYC)
+            -- ★★★★★ THE RESTORE, IN THE SUMMARY AND NOT IN A GATED DIAGNOSTIC [T-P0-114].
+            -- The first version of this readout went beside the composite counters, which sit
+            -- inside a diagnostic block that does not run on an ordinary sweep -- so the number
+            -- existed in the guest, the reader existed in the host, and NOTHING EVER PRINTED IT.
+            -- ★★★ Two tasks owed this figure and neither produced one; a counter whose readout is
+            -- behind a flag nobody passes is not published, it is merely written down [§2W].
+            if SYM.p3_restbytes then
+                local rb = 0
+                for k = 0, 3 do rb = rb * 256 + prog:read_u8(SYM.p3_restbytes + k) end
+                w("    restore %d bytes over %d cycles = %.1f per cycle%s",
+                  rb, NCYC, rb / NCYC,
+                  SYM.p3_prevn and string.format("  (%d rect(s) live at exit)",
+                                                 prog:read_u8(SYM.p3_prevn)) or "")
+            end
             -- ★★★★ AC-5: the per-cycle breakdown, from the phase tap.
             local order = {"pace(wait)", "interpret", "sprites", "roomcheck", "composite"}
             local tot = 0

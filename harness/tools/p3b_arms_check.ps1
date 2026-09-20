@@ -90,7 +90,10 @@ $ARMS = @(
   # priority shadow and the rectangle recorder all sit inside `ifndef P3B_NO_CEL`, so the six
   # text arms below are byte-identical and were verified so rather than assumed -- that is the
   # evidence the guarding worked, and it is why only this line moves.
-  @{ n = "p3b";        f = @();                                          sz = 14666; sha = "F84C874F" },
+  # ★★★★ RE-BASELINED T-P0-114: 14666 -> 14785 (+119 B) for the changed/unchanged comparison and
+  # the three identity bytes the rectangle record now carries. Six text arms unchanged again --
+  # everything added sits inside `ifndef P3B_NO_CEL`, and that is verified below, not assumed.
+  @{ n = "p3b";        f = @();                                          sz = 14785; sha = "B3E4AD4C" },
   @{ n = "p3b_text";   f = $TEXT;                                         sz = 16409; sha = "D09866C3" },
   @{ n = "p3b_win3";   f = $TEXT + @("-DTEXT_WIN3");                      sz = 16409; sha = "35AB01B0" },
   @{ n = "p3b_notick"; f = $TEXT + @("-DTEXT_FAULT_NOTICK");              sz = 16406; sha = "7A9A319C" },
