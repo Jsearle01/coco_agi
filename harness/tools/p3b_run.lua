@@ -1305,6 +1305,33 @@ _G._n = emu.add_machine_frame_notifier(function()
                       rd32(SYM.co_tested), rd32(SYM.co_written), rd32(SYM.co_rejkey),
                       rd32(SYM.co_rejpri), SYM.vc_err and prog:read_u8(SYM.vc_err) or -1)
                 end
+                -- ★★★★★ WHICH SPRITES ACTUALLY COMPOSITED [T-P0-127 §1.3(4)]. p3_prevn is
+                -- incremented only AFTER cp_composite returns [p3b_probe.s:2613], so a staged
+                -- sprite that is dropped at res_open or vc_decode_begin never appears here.
+                -- **staged 4 with prevn 2 means two sprites were dropped before the blit**, and
+                -- the drop paths (pca_skip / pca_close) record nothing at all -- a silent refusal,
+                -- which is the diagnostic gap this readout closes [§2W.3].
+                -- ★★★ p3_prev is 7 bytes: x, ytop, w, h, view, loop, cel.
+                -- ★★★★★ WHY the drop, when -SprStats recorded it [T-P0-127].
+                if SYM.p3_ndrop then
+                    local nd = prog:read_u8(SYM.p3_ndrop)
+                    w("    sprites dropped before the blit: %d   last: view %d, res_err %d",
+                      nd, prog:read_u8(SYM.p3_dropview), prog:read_u8(SYM.p3_droperr))
+                end
+                if SYM.p3_prev and SYM.p3_prevn then
+                    local pn = prog:read_u8(SYM.p3_prevn)
+                    w("    composited this frame: %d of %d staged%s", pn,
+                      prog:read_u8(SYM.p3_nspr),
+                      pn < prog:read_u8(SYM.p3_nspr)
+                        and "   ★★★ SOME SPRITES WERE DROPPED BEFORE THE BLIT" or "")
+                    for i = 0, math.min(pn, 8) - 1 do
+                        local b = SYM.p3_prev + i * 7
+                        w("       rect[%d] x=%3d ytop=%3d w=%2d h=%2d view=%3d loop=%d cel=%d",
+                          i, prog:read_u8(b), prog:read_u8(b+1), prog:read_u8(b+2),
+                          prog:read_u8(b+3), prog:read_u8(b+4), prog:read_u8(b+5),
+                          prog:read_u8(b+6))
+                    end
+                end
             end
             if SYM.p3_spr and SYM.p3_nspr and prog:read_u8(SYM.p3_nspr) > 0 then
                 local b = SYM.p3_spr
@@ -1379,6 +1406,44 @@ _G._n = emu.add_machine_frame_notifier(function()
             -- version ended every line with "(1/1 = the game ordered both)" including the run
             -- where it was 1/0 -- **a label that cannot be wrong is not a reading** [§2W.3], and
             -- the fault arm's own red would have shipped wearing a green caption.
+            -- ═══════════════════════════════════════════════════════════════════════════
+            -- ★★★★★ DID ANY PIXEL LAND WHERE THE ALLIGATORS ARE? [T-P0-127 §4C]
+            -- P3B_RECT="x0,y0,x1,y1" in AGI SCRIPT coordinates: x is 0-159 and maps 1:1 to a
+            -- plane byte (160 bytes/row, 2 px/byte, and AGI's 160-wide x is pixel-doubled), y is
+            -- 0-167 and maps 1:1 to a row.
+            -- ★★★★ VISIBLE vs SHADOW, the same discriminator the scroll census used: the shadow
+            -- holds the picture as pic_render_at drew it and is not written again, so **every
+            -- differing byte is something drawn ON TOP** -- a sprite here, since no text reaches
+            -- these rows.
+            -- ★★★ This distinguishes "the compositor refused" from "the pixels landed and are not
+            -- being seen", which are different tasks [§6's fifth trigger].
+            if os.getenv("P3B_RECT") then
+                local x0, y0, x1, y1 = os.getenv("P3B_RECT"):match("(%d+),(%d+),(%d+),(%d+)")
+                x0, y0, x1, y1 = tonumber(x0), tonumber(y0), tonumber(x1), tonumber(y1)
+                local diff, first = 0, nil
+                for r = y0, y1 do
+                    for c = x0, x1 do
+                        local off = r * 160 + c
+                        if off < 26880 then
+                            local sl, wi = off >> 13, off & 0x1FFF
+                            prog:write_u8(0xFFA6, 2 + sl)          -- shadow
+                            local s = prog:read_u8(0xC000 + wi)
+                            prog:write_u8(0xFFA6, 40 + sl)         -- visible
+                            local v = prog:read_u8(0xC000 + wi)
+                            if v ~= s then
+                                diff = diff + 1
+                                if not first then
+                                    first = string.format("x=%d y=%d vis=$%02X sha=$%02X", c, r, v, s)
+                                end
+                            end
+                        end
+                    end
+                end
+                w("    rect x=%d-%d y=%d-%d: %d of %d bytes differ from the shadow%s",
+                  x0, x1, y0, y1, diff, (x1 - x0 + 1) * (y1 - y0 + 1),
+                  first and ("   first " .. first)
+                        or "   ★★★ NOTHING DRAWN THERE")
+            end
             -- ★★★★★ WHAT THE SCAN PUBLISHED INTO VAR 19 [T-P0-124 AC-1]. Read from the guest's
             -- sticky copy, not from VAR 19 itself: vm_post_cycle clears VAR 19 every cycle, so
             -- sampling the variable at the park reports zero however many keys were published.

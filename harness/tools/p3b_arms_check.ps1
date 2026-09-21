@@ -131,7 +131,15 @@ $ARMS = @(
   # `ifdef P3B_CEL_LINK` AND `ifdef HAL_KEYBOARD` -- so the five P3B_NO_CEL arms are byte-identical
   # and their six gate rows are untouched. ★★★ That split is a FINDING as well as a convenience:
   # **a text-only arm cannot publish VAR 19, so have.key can never fire in one.**
-  @{ n = "p3b";        f = @("-DHAL_KEYBOARD");                          sz = 15475; sha = "475064B0" },
+  # ★★★★★ RE-BASELINED T-P0-127: the two CEL-LINKED arms moved +7 B. p3_composite_all now
+  # invalidates res_curblk before every VIEW fetch, because cp_composite writes the framebuffer
+  # through slot 6 and res_core skips the MMU write when its cached block matches [res_core.s:
+  # 1005-1010]. **Two of four sprites were being fetched from the framebuffer and refused with
+  # RES_E_SIG** -- the alligators. The five text arms link no compositor and are unchanged.
+  # ★★★ +2 B more for the ytop clamp testing the BORROW instead of the SIGN: `bpl` clamped every
+  # restore rectangle whose top row was >= 128 to zero, so a sprite low on the screen never had
+  # its own trail erased. Jay: "they stretch as they move."
+  @{ n = "p3b";        f = @("-DHAL_KEYBOARD");                          sz = 15484; sha = "3F4BDC80" },
   # ★★★★★ RE-BASELINED T-P0-125: the FIVE TEXT_WIRED arms moved +83 B (clear.lines is real), and
   # p3b, p3b_fault and p3b_flat did NOT -- the first links no text engine and the other two are
   # -DTEXT_MODELLED, which takes vm_text_ops.s's `equ` branch. ★★★ The split falls exactly along
@@ -148,7 +156,7 @@ $ARMS = @(
   # ★★★ It is NOT a variant of the text arms: P3B_NO_CEL keeps its own meaning and all seven arms
   # above are byte-identical. This adds a shape rather than changing one.
   # ★★ -DP3B_IRQ comes with it, as it does for every wired text build.
-  @{ n = "p3b_comb";   f = @("-DHAL_KEYBOARD","-DP3B_COMBINED","-DP3B_IRQ"); sz = 18694; sha = "062599B8" }
+  @{ n = "p3b_comb";   f = @("-DHAL_KEYBOARD","-DP3B_COMBINED","-DP3B_IRQ"); sz = 18703; sha = "5F96E2BD" }
 )
 
 # ★★★ -DP3B_COVERAGE puts the two opcode counters back [p3b_probe.s]. It is a REAL byte change --

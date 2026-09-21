@@ -2532,11 +2532,46 @@ pca_lp:
                 sta     vc_cel
                 pshs    y
 * ── the VIEW resource, through the real path ──
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ INVALIDATE THE VOLUME WINDOW'S CACHE BEFORE EVERY FETCH, AND THIS IS THE ALLIGATORS.
+* res_core caches which physical block it believes slot 6 holds in res_curblk and SKIPS the MMU
+* write when the block matches [res_core.s:1005-1010]. **cp_composite writes the framebuffer
+* THROUGH SLOT 6**, so by the time the next sprite is fetched the register holds a framebuffer
+* slice while res_curblk still names a volume block.
+* ★★★★★ MEASURED: sprites [0] view 0 and [1] view 97 want DIFFERENT blocks from the stale value,
+* so they map and succeed. Sprite [2] wants view 107 in vol 1 block 14 -- **the block sprite [1]
+* just left cached** -- so the map is skipped, res_open reads framebuffer bytes as a resource
+* header, and the signature check fails with RES_E_SIG. Sprite [3] is the same view and fails
+* identically. **Exactly two of four, exactly the two Jay cannot see** [T-P0-127].
+* ★★★★ THE PROBE ALREADY KNEW THIS SHAPE IN TWO PLACES and neither covered this one: the cycle
+* body invalidates at the loop top [p3_enter_vm_phase] and phase_draw_enter invalidates the PLANE
+* caches for the same reason -- *"a cache of a register's contents is wrong the moment anyone else
+* writes that register"*. **The compositor is an "anyone else" nobody had listed.**
+* ★★★ Per FETCH, not once per loop: cp_composite runs between iterations, so one invalidation at
+* the top would be stale again by the second sprite.
+                lda     #$FF
+                sta     res_curblk
                 lda     #RES_VIEW
                 ldb     p3_view
                 jsr     res_open
                 lda     res_err
-                bne     pca_skip
+                beq     pca_gotview
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE SILENT DROP, RECORDED [T-P0-127]. This branch has always skipped the sprite and left
+* NO TRACE -- no counter, no error byte, nothing the host can read. **"2 of 4 staged sprites
+* composited" was as far as any instrument could get**, and which two, and why, was unanswerable.
+* ★★★★ Jay's "there are no alligators" is this branch firing twice a frame for view 107.
+* ★★★ Behind a flag so every shipped arm stays byte-identical; res_err is LIVE and is overwritten
+* by the next fetch, so it has to be captured HERE or not at all [§2W.3: a diagnostic that arrives
+* after the value has moved reports a different question's answer].
+                ifdef   P3B_SPRSTATS
+                sta     p3_droperr              ; the res_err that caused it
+                ldb     p3_view
+                stb     p3_dropview
+                inc     p3_ndrop
+                endc
+                bra     pca_skip
+pca_gotview:
 * ★★★★★ THE VIEW IS BASELINED HERE AND VERIFIED BEFORE IT IS RELEASED [T-P0-103]. A VIEW is a
 * TRANSIENT -- opened, decoded from, composited, closed, all inside this iteration -- so there is
 * no later bind to catch a corruption at. **The window that matters is the one between these two
@@ -2590,11 +2625,24 @@ pca_lp:
                 leax    d,x
                 lda     CP_X
                 sta     ,x
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE CLAMP TESTED THE SIGN AND HAD TO TEST THE BORROW [T-P0-127]. `bpl` reads bit 7, so
+* **every ytop >= 128 was taken for a negative number and clamped to 0**:
+*     y=161, h=4  ->  161-4+1 = 158 = $9E, bit 7 set  ->  ytop recorded as 0
+*     y= 51, h=4  ->   51-4+1 =  48 = $30, bit 7 clear ->  ytop recorded as 48   (correct)
+* ★★★★★ AND THE RESTORE RECTANGLE IS WHAT THIS FEEDS, so an object low on the screen had last
+* frame's pixels put back at rows 0-3 instead of 158-161 -- **its own trail was never erased.**
+* Jay, watching the alligators once they finally drew: *"they stretch as they move."*
+* ★★★★ THE UNDERFLOW THE CLAMP EXISTS FOR IS REAL -- a cel taller than its own y -- but the sign
+* bit cannot distinguish it from a legitimately large row. **The borrow out of the subtraction
+* can**: it is set exactly when vc_h > CP_Y, which is the only case that wraps.
+* ★★★ L-40's rule, third instance in this tree: a byte compared as signed that was never signed.
                 lda     CP_Y
                 suba    vc_h
+                bcs     pca_ytopzero            ; borrow: vc_h > CP_Y -- a real underflow
                 inca
-                bpl     pca_ytopok
-                clra
+                bra     pca_ytopok
+pca_ytopzero:   clra
 pca_ytopok:     sta     1,x
                 lda     vc_w
                 sta     2,x
@@ -2658,6 +2706,12 @@ p3_nfall        fdb     0               ; how many draw.pic fetches had to be de
 p3_nspr         fcb     0
 p3_si           fcb     0
 p3_view         fcb     0
+* ★★★ T-P0-127's drop record. Flag-guarded: the shipped arms carry none of it.
+                ifdef   P3B_SPRSTATS
+p3_droperr      fcb     0               ; res_err from the last sprite dropped before the blit
+p3_dropview     fcb     0               ; which view it wanted
+p3_ndrop        fcb     0               ; how many sprites have been dropped
+                endc
 p3_spr          rmb     P3_SPR_MAX*P3_SPR_SIZE
 
 * ── the phase pair, counted ──────────────────────────────────────────────────────
