@@ -186,4 +186,5 @@ eye gate failed** — §4A.3's pattern exactly: a finding about what the count c
 - `seeds/AGI/live/2026-09-21-a-faster-sensor-sees-the-noise-the-slow-one-averaged-away.md`
 
 ### 11 — Commit
-(recorded below; pushed to origin/wip before this report was surfaced)
+`22be587` — 6 files changed, 478 insertions(+), 1 deletion(-).
+Pushed to origin/wip (`16dd852..22be587`).
