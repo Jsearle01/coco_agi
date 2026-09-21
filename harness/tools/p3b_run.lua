@@ -1077,6 +1077,38 @@ _G._n = emu.add_machine_frame_notifier(function()
                     _G._key_posts = (_G._key_posts or 0) + 1
                 end
             end
+            -- ═══════════════════════════════════════════════════════════════════════════
+            -- ★★★★★ THE OBJECT TABLE, PER CYCLE [T-P0-126 §4B/§4C]. The game positions objects
+            -- 11 and 12 at (121,161) and (73,166); we stage both at x=147. **Two different inputs
+            -- producing one output** is either a read that does not vary per slot or a value that
+            -- moved after the write -- and update_position's edge clamp is
+            -- `x = SCRIPT_WIDTH - xSize` [vm_objects.s:429-442], which is the SAME number for two
+            -- objects sharing a view. 160 - 13 = 147. **This watches x between the write and the
+            -- draw to see whether it is clamped or never arrived.**
+            -- ★★★★ VM_OBJ is MAP_PRI_SLICE = $A000 [p3b_probe.s:52], i.e. SLOT 5, so the host maps
+            -- it for the read and puts it back from the guest's own ph_blk_slot5 -- the byte that
+            -- exists precisely because a client may hold something there [mmu_phase.s:63-72].
+            -- ★★★ Host-side only: no guest byte changes and the arms cannot move.
+            if os.getenv("P3B_OBJTRACE") and SYM.ph_blk_slot5 then
+                local every = tonumber(os.getenv("P3B_OBJTRACE")) or 10
+                if n % every == 0 then
+                    local keep = prog:read_u8(SYM.ph_blk_slot5)
+                    prog:write_u8(0xFFA5, keep)
+                    local function fld(slot, off) return prog:read_u8(0xA000 + slot * 32 + off) end
+                    local parts = {}
+                    for _, s in ipairs({0, 1, 11, 12}) do
+                        parts[#parts+1] = string.format(
+                            "[%d] x=%3d y=%3d xs=%2d view=%3d l=%d c=%d fl=%02X%02X dir=%d ss=%d"
+                            .. " ct=%d/%d mo=%d wander=%d",
+                            s, fld(s,0), fld(s,1), fld(s,2), fld(s,4), fld(s,5), fld(s,6),
+                            fld(s,10), fld(s,11), fld(s,12), fld(s,13), fld(s,17), fld(s,16),
+                            fld(s,19), fld(s,22))
+                    end
+                    w("  [obj] cycle %3d objtop=$%04X", n,
+                      SYM.vm_objtop and rd16(SYM.vm_objtop) or 0)
+                    for _, p in ipairs(parts) do w("        %s", p) end
+                end
+            end
             if os.getenv("P3B_SCROLL_TRACE") and n % 5 == 0 then
                 local rows = {}
                 for crow = 0, 20 do

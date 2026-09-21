@@ -417,7 +417,7 @@ $WANT += @("P3_CODE_SPLIT","P3_TABLES_BASE","P3_TABLES_END")
 # ★★★★ SHARED LINE BECAUSE THE DEFINITION IS UNCONDITIONAL. Both bytes are declared outside every
 # ifdef in p3b_probe.s, so the want-line's condition must be "always" too [P6.66's rule, which this
 # file states four lines down and which I broke in the task that wrote it].
-$WANT += @("p3_drew","p3_shown","p3_errpic","p3_errtop","p3_errdepth","res_depth",
+$WANT += @("p3_drew","p3_shown","p3_errpic","p3_errtop","p3_errdepth","res_depth","vm_objtop",
            "p3_drawtop","p3_drawdepth","res_top","p3_nfall","p3_drawccur","res_ccur",
            "p3_errccur")
 # ★★★★★ T-P0-120's THREE CANNOT GO ON THE SHARED LINE, AND THE REASON REFINES P6.64'S LESSON.
@@ -578,7 +578,7 @@ if ($Headless) {
   # ★★★★ `restore \d+ bytes` ADDED T-P0-114, and this comment is the reason the line above warns
   # about allowlists: the restore figure was owed by two tasks, was being computed correctly by
   # the guest the whole time, and was invisible because no pattern here named it.
-  Select-String -Path $log -Pattern 'OK prompt|program \d+ bytes|vocabulary |window discrimination|par_vocab written|COMMAND TYPED|parse at cycle|TYPING |TYPED LINE|prompt: enabled|row 22|NO KEYS REACHED|NEVER REACHED|STUCK|cycles in|final room|restore \d+ bytes|ego: x=|text area rows|picture: draw\.pic|REFUSED at draw\.pic|LOGIC CACHE had taken|arena at draw\.pic|rendered AFTER the logic|VAR 19|staged sprites|^ +\[\d+\] x=|compositor: tested|scroll band|char row|TOTAL \d+ bytes drawn|NEVER WRITTEN|P3_PBUF' |
+  Select-String -Path $log -Pattern 'OK prompt|program \d+ bytes|vocabulary |window discrimination|par_vocab written|COMMAND TYPED|parse at cycle|TYPING |TYPED LINE|prompt: enabled|row 22|NO KEYS REACHED|NEVER REACHED|STUCK|cycles in|final room|restore \d+ bytes|ego: x=|text area rows|picture: draw\.pic|REFUSED at draw\.pic|LOGIC CACHE had taken|arena at draw\.pic|rendered AFTER the logic|VAR 19|staged sprites|^ +\[\d+\] x=|compositor: tested|\[obj\] cycle|scroll band|char row|TOTAL \d+ bytes drawn|NEVER WRITTEN|P3_PBUF' |
     ForEach-Object { $_.Line }
   if ($stuck) { "★★★ p3b FAILED -- the watchdog fired"; exit 1 }
   if ($nowords) { "★★★ p3b FAILED -- a fed command matched no dictionary words"; exit 1 }
