@@ -529,6 +529,14 @@ local typed, type_report = false, nil
 -- drives the SCAN and keys on VAR 19, which is what have.key reads.
 local KEY_AT = tonumber(os.getenv("P3B_KEY_AT") or "0")
 local KEY_CH = os.getenv("P3B_KEY_CH") or "\r"
+-- ★★★★★ P3B_BURST -- KEYS MADE AGAINST EDGES CAPTURED [T-P0-128 §4C(1)]. Posts BURST distinct
+-- letters, one per cycle once natkeyboard's queue has drained, from cycle BURST_AT. Each post holds
+-- the key a frame or two and then releases it, so each should be exactly ONE key-down edge to a
+-- 60 Hz scanner -- and that is the claim the count tests.
+-- ★★★ One per CYCLE, deliberately: at ~2.6 cycles/second that is slow enough that every key is
+-- released before the next, so a shortfall is the latch missing a press, not presses merging.
+local BURST    = tonumber(os.getenv("P3B_BURST") or "0")
+local BURST_AT = tonumber(os.getenv("P3B_BURST_AT") or "20")
 
 -- ═══════════════════════════════════════════════════════════════════════════════════════════
 -- ★★★★★ P3B_INJECT -- A KEY AT THE EDITOR's OWN ENTRY POINT, ONE PER PARK [T-P0-093 AC-3].
@@ -615,6 +623,18 @@ _G._n = emu.add_machine_frame_notifier(function()
         local s = cpu.state["S"].value
         -- ★★ Ignore the pre-handover value: DECB's stack is elsewhere and would peg the mark.
         if s > 0x0400 and s < s_low then s_low, s_low_frame = s, frame end
+    end
+    -- ═══════════════════════════════════════════════════════════════════════════════════════
+    -- ★★★★★ P3B_ENTER_EVERY -- POST ENTER PER FRAME, NOT PER CYCLE [T-P0-128]. The per-cycle
+    -- posters (P3B_KEY_AT, P3B_BURST) run on a NEW CYCLE, and a blocking message box stops cycles:
+    -- once it opens, those posters never fire again and the run stalls on a box nothing can close.
+    -- **That is a limit of the harness, not of the port** -- a person's ENTER at the box would still
+    -- arrive -- and this is the arm that tells the two apart: keys keep coming whatever the guest
+    -- is doing, so if the latch delivers them to tx_wait_dismiss, the box closes.
+    local every = tonumber(os.getenv("P3B_ENTER_EVERY") or "0")
+    if every > 0 and state == "cycle" and frame % every == 0 and m.natkeyboard.empty then
+        m.natkeyboard:post("\r")
+        _G._enter_posts = (_G._enter_posts or 0) + 1
     end
     if state == "load" and not _G._p3b_ok then
         if decb_ready() then
@@ -1066,6 +1086,54 @@ _G._n = emu.add_machine_frame_notifier(function()
             -- ★★★ Re-posted while natkeyboard's queue is drained, for the reason the typing loop
             -- records: the guest looks once per CYCLE and a single post holds the key for a frame
             -- or two, so one post is about a one-in-five chance of being seen.
+            if BURST > 0 and n >= BURST_AT and (_G._burst_n or 0) < BURST
+                    and m.natkeyboard.empty then
+                local i = _G._burst_n or 0
+                -- ★★★★ P3B_BURST_CH picks the key. LETTERS STRANDED THE FIRST RUN: the first one
+                -- advanced the title, room 1 put up a message box, and tx_wait_dismiss -- correctly
+                -- -- ignored every later letter, because only ENTER or ESC dismiss
+                -- [text.cpp:421-443]. The run stalled on a box nothing could close. **That was the
+                -- converted fourth scanner behaving exactly right**, so the count uses ENTER.
+                local ch = os.getenv("P3B_BURST_CH")
+                -- ★★★★ ARROWS ARE CODED KEYS [T-P0-128, after Jay: "everything animating but
+                -- nothing moving"]. A comma list like "{RIGHT},{RIGHT},{UP}" cycles through
+                -- MAME's natkeyboard codes via post_coded, so a regression that only a DIRECTION key
+                -- triggers can be reproduced headless instead of asked of Jay again.
+                if ch and ch:find("{", 1, true) then
+                    local seq = {}
+                    for tok in ch:gmatch("[^,]+") do seq[#seq+1] = tok end
+                    m.natkeyboard:post_coded(seq[(i % #seq) + 1])
+                else
+                    m.natkeyboard:post(ch == "enter" and "\r"
+                                       or ch and ch:sub(1, 1)
+                                       or string.char(97 + (i % 26)))
+                end
+                _G._burst_n = i + 1
+            end
+            -- ★★★★★ READ THE COUNT WHEN THE BURST ENDS, NOT WHEN THE RUN DOES [T-P0-128]. A later
+            -- message box that nothing dismisses can stall the run -- it did, in BOTH the latch arm
+            -- and the -NoVblKeys arm, so it is the scenario and not the latch -- and a stalled run
+            -- never reaches the summary. **An instrument should not need the program to finish in
+            -- order to report on something that finished long before.**
+            -- ★★★★ p3_nvarkey is the COMPARABLE figure across both arms: the non-direction keys
+            -- that actually reached the publish. In the VBL arm they come off the queue; in the
+            -- -NoVblKeys arm they come from the once-per-cycle scan. **Same counter, same meaning,
+            -- two input paths** -- which is what makes the pair a measurement of the latch alone.
+            if BURST > 0 and SYM.p3_nvarkey and not _G._burst_said
+                    and (_G._burst_n or 0) >= BURST and m.natkeyboard.empty then
+                _G._burst_settle = (_G._burst_settle or 0) + 1
+                if _G._burst_settle >= 3 then           -- a few cycles for the last key to land
+                    _G._burst_said = true
+                    local seen = prog:read_u8(SYM.p3_nvarkey)
+                    local q = SYM.P3_KQ_NIN and string.format(
+                        "   [queue: captured %d, dropped %d, drained %d]",
+                        prog:read_u8(SYM.P3_KQ_NIN), prog:read_u8(SYM.P3_KQ_NDROP),
+                        prog:read_u8(SYM.P3_KQ_NOUT)) or "   [no queue: per-cycle scan]"
+                    w("    VBL key queue at cycle %d: made %d, reached the game %d%s%s",
+                      n, _G._burst_n, seen, q,
+                      seen < _G._burst_n and "   ★★★ PRESSES MISSED" or "   ★ every press delivered")
+                end
+            end
             if KEY_AT > 0 and n >= KEY_AT and not _G._key_done then
                 local v19 = prog:read_u8(0x0800 + 19)
                 if v19 ~= 0 then
@@ -1443,6 +1511,18 @@ _G._n = emu.add_machine_frame_notifier(function()
                   x0, x1, y0, y1, diff, (x1 - x0 + 1) * (y1 - y0 + 1),
                   first and ("   first " .. first)
                         or "   ★★★ NOTHING DRAWN THERE")
+            end
+            -- ★★★★★ THE VBL KEY QUEUE [T-P0-128 §4C(1)]. made = what the host posted; captured =
+            -- key-down edges the interrupt enqueued; drained = what the cycle took out. **made ==
+            -- captured is the headline**: it says the latch saw every press whatever the cycle
+            -- rate, which is the whole point of moving the scan to vertical blank.
+            if SYM.P3_KQ_NIN then
+                local made = _G._burst_n or 0
+                local cap = prog:read_u8(SYM.P3_KQ_NIN)
+                w("    VBL key queue: made %d, captured %d, dropped %d, drained %d   last $%02X%s",
+                  made, cap, prog:read_u8(SYM.P3_KQ_NDROP), prog:read_u8(SYM.P3_KQ_NOUT),
+                  prog:read_u8(SYM.P3_KQ_LAST),
+                  (made > 0 and cap < made) and "   ★★★ PRESSES MISSED" or "")
             end
             -- ★★★★★ WHAT THE SCAN PUBLISHED INTO VAR 19 [T-P0-124 AC-1]. Read from the guest's
             -- sticky copy, not from VAR 19 itself: vm_post_cycle clears VAR 19 every cycle, so

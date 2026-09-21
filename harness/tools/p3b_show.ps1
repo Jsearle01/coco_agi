@@ -114,6 +114,14 @@ param(
   # res_open failure path has always skipped silently [T-P0-127]. Flag-guarded, so every shipped
   # arm stays byte-identical; the three bytes and four instructions exist only in this arm.
   [switch]$SprStats,
+  # ★★★★★ -NoVblKeys IS T-P0-128's FAULT ARM: the combined arm goes back to scanning the matrix once
+  # per interpreter cycle, at LEVELS. That is every build before this task and a known-good red in
+  # Jay's own words: "i was not able to control graham reliably."
+  [switch]$NoVblKeys,
+  # ★★★★★ -VblKeys OPTS IN to the VBL key latch [T-P0-128]. It FAILED its eye gate -- Jay saw the
+  # game loop with everything animating and nothing moving -- so it is off by default and the
+  # combined arm ships the per-cycle scan. Leading suspect: edge bounce (~5 edges per press).
+  [switch]$VblKeys,
   # ★★★★ -RoomDrive IS THE COMPARISON ARM, NOT A FAULT: it restores the retired p3_room_check
   # driver, so the picture is rendered and presented by room DETECTION as it was before this
   # task. **The claim "the game now drives the render" needs an arm where it does not** [§2W].
@@ -274,6 +282,8 @@ if ($NoVarKey) { $FLAGS += "-DP3B_FAULT_NOVARKEY" }
 # non-black bytes across the advance instead of dropping to its cleared value.
 if ($NoClearLines) { $FLAGS += "-DP3B_FAULT_NOCLEARLINES" }
 if ($SprStats) { $FLAGS += "-DP3B_SPRSTATS" }
+if ($NoVblKeys) { $FLAGS += "-DP3B_FAULT_NOVBLKEYS" }
+if ($VblKeys) { $FLAGS += "-DP3B_VBLKEYS_OPT" }
 if ($RoomDrive) { $FLAGS += "-DP3B_ROOMDRIVE" }
 # ★★★ -Combined needs P3B_IRQ as the text arms do: the text engine's print path blocks on a key,
 # and the vector stubs at $FEF0 are what P3_REGIONB_END reserves for.
@@ -389,6 +399,10 @@ if ($CelLink) { $WANT += @("vc_err","vc_w","vc_h","vc_src","vc_srcend","vc_view"
 # ★★★ Gated on the FLAG that defines them, not on $CelLink alone -- P6.66's rule, and these three
 # exist only under -DP3B_SPRSTATS.
                                $(if ($SprStats) { "p3_droperr","p3_dropview","p3_ndrop" }),
+# ★★★★ The VBL key queue exists exactly when P3B_VBL_KEYS does: -Combined and NOT -NoVblKeys
+# [p3b_probe.s, the flag block]. The SAME condition as the definition, spelled from the switches.
+                               $(if ($Combined -and $VblKeys -and -not $NoVblKeys) {
+                                   "P3_KQ_NIN","P3_KQ_NDROP","P3_KQ_NOUT","P3_KQ_LAST" }),
 # ★★ T-P0-115's two: also cel-arm only, and also inside `ifdef HAL_KEYBOARD` -- but the cel arm
 # is the only arm that gets both, so this line is still the right home for them.
                                "p3_ndirs","p3_newdir") }
@@ -586,7 +600,7 @@ if ($Headless) {
   # ★★★★ `restore \d+ bytes` ADDED T-P0-114, and this comment is the reason the line above warns
   # about allowlists: the restore figure was owed by two tasks, was being computed correctly by
   # the guest the whole time, and was invisible because no pattern here named it.
-  Select-String -Path $log -Pattern 'OK prompt|program \d+ bytes|vocabulary |window discrimination|par_vocab written|COMMAND TYPED|parse at cycle|TYPING |TYPED LINE|prompt: enabled|row 22|NO KEYS REACHED|NEVER REACHED|STUCK|cycles in|final room|restore \d+ bytes|ego: x=|text area rows|picture: draw\.pic|REFUSED at draw\.pic|LOGIC CACHE had taken|arena at draw\.pic|rendered AFTER the logic|VAR 19|staged sprites|^ +\[\d+\] x=|compositor: tested|\[obj\] cycle|rect x=\d|sprites dropped before the blit|composited this frame|^ +rect\[\d|DROPPED BEFORE THE BLIT|scroll band|char row|TOTAL \d+ bytes drawn|NEVER WRITTEN|P3_PBUF' |
+  Select-String -Path $log -Pattern 'OK prompt|program \d+ bytes|vocabulary |window discrimination|par_vocab written|COMMAND TYPED|parse at cycle|TYPING |TYPED LINE|prompt: enabled|row 22|NO KEYS REACHED|NEVER REACHED|STUCK|cycles in|final room|restore \d+ bytes|ego: x=|text area rows|picture: draw\.pic|REFUSED at draw\.pic|LOGIC CACHE had taken|arena at draw\.pic|rendered AFTER the logic|VAR 19|VBL key queue|stack low-water|staged sprites|^ +\[\d+\] x=|compositor: tested|\[obj\] cycle|rect x=\d|sprites dropped before the blit|composited this frame|^ +rect\[\d|DROPPED BEFORE THE BLIT|scroll band|char row|TOTAL \d+ bytes drawn|NEVER WRITTEN|P3_PBUF' |
     ForEach-Object { $_.Line }
   if ($stuck) { "★★★ p3b FAILED -- the watchdog fired"; exit 1 }
   if ($nowords) { "★★★ p3b FAILED -- a fed command matched no dictionary words"; exit 1 }

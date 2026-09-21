@@ -156,6 +156,9 @@ $ARMS = @(
   # ★★★ It is NOT a variant of the text arms: P3B_NO_CEL keeps its own meaning and all seven arms
   # above are byte-identical. This adds a shape rather than changing one.
   # ★★ -DP3B_IRQ comes with it, as it does for every wired text build.
+  # ★★★★ T-P0-128's VBL key latch is OPT-IN (-DP3B_VBLKEYS_OPT) after it failed its eye gate, so
+  # the shipped combined arm is back to its P6.74 bytes. Built with the latch it was 18782 B /
+  # B9F06823 (+79); that figure is recorded here so the next task re-enabling it has a reference.
   @{ n = "p3b_comb";   f = @("-DHAL_KEYBOARD","-DP3B_COMBINED","-DP3B_IRQ"); sz = 18703; sha = "5F96E2BD" }
 )
 

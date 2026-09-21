@@ -457,8 +457,23 @@ tx_wt_notimed:
 tx_wt_loop:
 * ── the key scan: ENTER dismisses, ESC dismisses and cancels [text.cpp:421-443] ──
 * ★★ Nothing else dismisses. A build that took any key would pass an eye gate and be wrong.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE FOURTH SCANNER, AND T-P0-128's DISPATCH DID NOT LIST IT. p3_key_latch, p3_poll_key and
+* p3_poll_dir were named; this blocking wait spins on the matrix while a print box is up, and in
+* the VBL arm that would make TWO owners of the PIA's column register for exactly as long as a box
+* is on screen -- **the hazard that fails intermittently rather than always**, when the interrupt
+* lands mid-scan. Found by grepping every caller rather than trusting the list [§2H check 3].
+* ★★★★ So it DRAINS the VBL queue there. Edges, not levels: one ENTER press dismisses once, which
+* is the oracle's KEYDOWN-only delivery [keyboard.cpp:333-334]; any other key is drained and
+* ignored, as it is for dismissal in text.cpp:421-443.
+* ★★★ UNGATED IN THIS ARM: p3b_box is a P3B_NO_CEL row and exercises the scan branch below, not
+* this one. Stated rather than implied.
+                ifdef   P3B_VBL_KEYS
+                jsr     p3_kq_get
+                else
                 jsr     HAL_key_scan
                 tsta
+                endc
                 beq     tx_wt_tick
                 cmpa    #HAL_KEY_ENTER
                 beq     tx_wt_done

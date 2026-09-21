@@ -178,6 +178,42 @@ P3B_TEXT_LINK   equ     1               ; src/engine/text.s is linked
 P3B_TEXT_LINK   equ     1
                 endc
                 endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ P3B_VBL_KEYS -- THE KEYBOARD IS SCANNED AT VERTICAL BLANK, NOT AT THE CYCLE RATE [T-P0-128].
+* p3_poll_dir scanned once per interpreter cycle, which with four sprites is 2.6 times a second
+* [P6.74's measurement], so a keypress had about a one-in-three chance of falling between polls.
+* ★★★★★ AND IT SAMPLED A LEVEL WHERE THE ORACLE DELIVERS AN EDGE. ScummVM enqueues on KEYDOWN only
+* and DISCARDS OS auto-repeat for direction keys [keyboard.cpp:226-242, `!event.kbdRepeat`], so a
+* held arrow is ONE event. A per-cycle level scan sees a held key on every cycle, and the
+* same-direction-stops rule [keyboard.cpp:537-611] then toggles the ego: set, stop, set, stop.
+* **Holding an arrow -- which is what I told Jay to do -- made it worse.**
+* ★★★★ So the latch records KEY-DOWN TRANSITIONS at 60 Hz and the cycle drains them. Both defects
+* go with one mechanism.
+* ★★★ COMBINED ARM ONLY. It needs P3B_IRQ (a VBL to scan in) and P3B_CEL_LINK (p3_poll_dir, the
+* drain point). `p3b` has no IRQ and keeps its per-cycle scan -- one owner of the PIA either way --
+* and the five text arms stay byte-identical. -DP3B_FAULT_NOVBLKEYS is the fault arm.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ OPT-IN, BECAUSE IT FAILED ITS EYE GATE [T-P0-128]. Headless it delivers every press (20 of
+* 20, against 10 of 20 for the per-cycle scan). Jay, playing it: **"after a few cycles of animation
+* the game goes into a loop with everything animating, but nothing moving just flashing including
+* graham."**
+* ★★★★ THE LEADING SUSPECT IS EDGE BOUNCE, NOT PROVEN: a coded arrow post produced ~5 captured
+* edges per press (40 from 8). Each extra edge of the same arrow is "the same direction again",
+* which STOPS the ego [keyboard.cpp:537-611] -- go, stop, go, stop -- and a walk cycle animating in
+* place is very close to what Jay describes. The per-cycle scan at 2.6 Hz sampled too slowly to see
+* bounce; a 60 Hz edge detector sees all of it. **It needs debouncing before it ships.**
+* ★★★ NOT REPRODUCED HEADLESS: coded arrows do not register as directions in EITHER arm, and the
+* stall the headless run does reach is a message box that occurs in BOTH arms -- pre-existing, and
+* a blocking box stops cycling, so it cannot be the flashing Jay saw.
+* ★★ So it stays in the tree behind -DP3B_VBLKEYS_OPT, with every instrument, and the combined arm
+* ships the per-cycle scan it had before this task.
+                ifdef   P3B_COMBINED
+                ifdef   P3B_VBLKEYS_OPT
+                ifndef  P3B_FAULT_NOVBLKEYS
+P3B_VBL_KEYS    equ     1
+                endc
+                endc
+                endc
 * ★★★★★ PIC_WIRED -- the game's own picture opcodes are REAL in this build [T-P0-121]. Every
 * p3b configuration links the renderer (pic_render_at) and owns both planes, so unlike
 * TEXT_WIRED this is not conditional on an arm: the thing it needs is always present.
@@ -352,6 +388,34 @@ CP_CEL          equ     MAP_INPUT+672           ; ★ $1EA0. ONE ROW; VC_ROW_MAX
 CP_CEL_BYTES    equ     256
                 ifgt    CP_CEL+CP_CEL_BYTES-MAP_INPUT_END
                 error   "CP_CEL overruns MAP_INPUT -- the decoded-cel row no longer fits in the tail left by P3_PBUF and the diagnostic records; re-measure MAP_INPUT's occupancy before moving it again"
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE KEY QUEUE, AND IT MUST BE IN SLOT 0 [T-P0-128]. It is written from the VBL interrupt,
+* which can fire in ANY phase -- including the text window, which borrows slots 3-6 -- so the
+* buffer has to be mapped in every one of them. Slot 0 is never remapped [mmu_phase.s].
+* ★★★★ CP_CEL ends at MAP_INPUT+672+256 = $1FA0, so $1FA0-$1FFF is 96 bytes nothing owns. (The
+* P3_RBTRACE collision message below still says "$1F60"; +928 is $1FA0 and that figure is stale.)
+* ★★★ SINGLE PRODUCER, SINGLE CONSUMER, SO NO INTERRUPT MASKING: the IRQ writes only TAIL and the
+* drainer writes only HEAD, and a byte store is atomic on a 6809.
+* ★★★ These are ADDRESSES, not fcb -- the image does not initialise them, so init clears them
+* before IRQs are enabled.
+                ifdef   P3B_VBL_KEYS
+P3_KQ           equ     CP_CEL+CP_CEL_BYTES     ; $1FA0
+* ★★★★ 16, THE ORACLE'S KEY_QUEUE_SIZE [agi.h:571]. The first build used 8 and a per-frame ENTER
+* poster DROPPED 33 of 110: keys pile up during a ~8 s picture render, when nothing drains, and 7
+* usable slots (one is the full/empty sentinel) is under 4 seconds of a person tapping. 16 costs
+* 8 more bytes of the 96 free.
+P3_KQ_SIZE      equ     16                      ; a power of two: the index wraps with a mask
+P3_KQ_HEAD      equ     P3_KQ+P3_KQ_SIZE        ; written ONLY by the drainer
+P3_KQ_TAIL      equ     P3_KQ_HEAD+1            ; written ONLY by the IRQ
+P3_KQ_LAST      equ     P3_KQ_TAIL+1            ; the key the IRQ saw last frame -- the edge detector
+P3_KQ_NIN       equ     P3_KQ_LAST+1            ; edges enqueued, for the host
+P3_KQ_NDROP     equ     P3_KQ_NIN+1             ; edges dropped on a full queue, for the host
+P3_KQ_NOUT      equ     P3_KQ_NDROP+1           ; keys drained, for the host
+P3_KQ_END       equ     P3_KQ_NOUT+1
+                ifgt    P3_KQ_END-$2000
+                error   "the VBL key queue overruns slot 0 -- it must end at or below $2000"
+                endc
                 endc
                 ifgt    MAP_INPUT+672-CP_CEL
                 error   "CP_CEL starts inside P3_PBUF or the diagnostic records -- it must begin at or after MAP_INPUT+672"
@@ -915,7 +979,25 @@ p3_cal:         leax    -1,x
 * ★★ 3 bytes, inside the 16 reserved out of the vocabulary window (see P3_VOCAB_END).
                 lda     #$7E                    ; JMP
                 sta     $FEF7
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE KEY LATCH CHAINS IN FRONT OF THE SHARED HANDLER, IT DOES NOT MODIFY IT [T-P0-128].
+* irq_vbl.s is SHARED with POP and Karateka and hal_sync_check.py gates it three ways. **This probe
+* already owns the first hop** -- it writes this very JMP because its MMU remap destroyed the ROM's
+* -- so pointing the JMP at p3_irq, which latches and then JMPs to hal_vbl_handler, adds a stage
+* without touching a shared byte. §2M.
+                ifdef   P3B_VBL_KEYS
+                ldx     #p3_irq
+* ★★★ Clear the queue BEFORE the IRQ can write it: these are raw slot-0 addresses and hold whatever
+* RAM held.
+                clr     P3_KQ_HEAD
+                clr     P3_KQ_TAIL
+                clr     P3_KQ_LAST
+                clr     P3_KQ_NIN
+                clr     P3_KQ_NDROP
+                clr     P3_KQ_NOUT
+                else
                 ldx     #hal_vbl_handler
+                endc
                 stx     $FEF8
                 andcc   #$EF                    ; opt in -- CC.I clear, IRQs live from here
                 endc
@@ -1299,6 +1381,12 @@ p3_feed         equ     p3_parse_line
 * stray key cannot sit latched across an accept.input.
 p3_keybuf       fcb     0
 p3_key_latch:
+* ★★★★★ A NO-OP IN THE VBL ARM [T-P0-128]. This park-loop latch was a harness stand-in for the
+* key queue the port did not have [see its header at p3_wait]; the VBL latch IS that queue, and a
+* second scanner here would be the §1.2 hazard -- two owners of the PIA's column register.
+                ifdef   P3B_VBL_KEYS
+                rts
+                else
                 lda     txt_penab
                 beq     pkl_out
                 lda     p3_keybuf
@@ -1308,6 +1396,7 @@ p3_key_latch:
                 beq     pkl_out
                 sta     p3_keybuf
 pkl_out:        rts
+                endc
 
 * ★★ p3_poll_key takes the latched key first and falls back to a live scan, so a key held across
 * the cycle boundary is still seen on a build where the park loop did not run (the first cycle).
@@ -1319,9 +1408,16 @@ p3_poll_key:
                 clr     p3_keybuf
                 bra     ppk_have
 ppk_scan:
+* ★★★★★ NO FALLBACK SCAN IN THE VBL ARM [T-P0-128]. The editor's keys arrive through p3_keybuf,
+* forwarded by p3_poll_dir from the VBL queue. Scanning here would make this a second owner of
+* the PIA and reintroduce §1.2's hazard, intermittently -- only when the IRQ lands mid-scan.
+                ifdef   P3B_VBL_KEYS
+                bra     ppk_out
+                else
                 jsr     HAL_key_scan
                 tsta
                 beq     ppk_out
+                endc
 ppk_have:
                 sta     P3_KEY
                 inc     P3_NKEY
@@ -1368,12 +1464,76 @@ p3_ndirs        fcb     0               ; direction keys accepted, for the host
 * ★★★ These two bytes are the measurement AC-1 asks for: WHAT was published and HOW OFTEN.
 p3_varkey       fcb     0               ; the last key published into VAR 19
 p3_nvarkey      fcb     0               ; how many keys have been published
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE VBL KEY LATCH [T-P0-128]. p3_irq is the $FEF7 target in this arm: latch, then the
+* shared handler unchanged. A 6809 IRQ stacks the full machine state and hal_vbl_handler ends in
+* RTI, so nothing here needs to save a register.
+                ifdef   P3B_VBL_KEYS
+p3_irq:
+                jsr     p3_vbl_latch
+                jmp     hal_vbl_handler
+
+* ★★★★★ THE ONLY CALLER OF HAL_key_scan IN THIS ARM [§1.2's hazard]. The PIA's column register is
+* a single shared resource: if the main loop were mid-scan when this fired, both would read rows
+* for a column the other had set. **One owner of the PIA**, the same rule mmu_phase.s holds for the
+* MMU [§2N]. p3_poll_dir, p3_poll_key and the park-loop latch all DRAIN in this arm.
+* ★★★★★ AN EDGE, NOT A LEVEL. Enqueue only when the scanned key DIFFERS from last frame's and is
+* non-zero: a held key is one event, a release is remembered but not enqueued. That is the
+* oracle's KEYDOWN-only enqueue with OS auto-repeat discarded [keyboard.cpp:226-242, 333-334].
+* ★★★ ON A FULL QUEUE THE NEWEST KEY IS DROPPED AND COUNTED. The oracle's keyEnqueue has NO full
+* check [keyboard.h:27-31]: a 17th key advances END onto START and the queue reads as EMPTY, losing
+* all sixteen. **A declared divergence** [§2I]: it preserves every key a person can type at the
+* drain rate and loses one instead of sixteen when they cannot.
+p3_vbl_latch:
+                jsr     HAL_key_scan            ; A = key or 0
+                cmpa    P3_KQ_LAST
+                beq     pvl_out                 ; unchanged: still held, or still nothing
+                sta     P3_KQ_LAST
+                tsta
+                beq     pvl_out                 ; a release -- remembered, not an event
+                ldb     P3_KQ_TAIL
+                ldx     #P3_KQ
+                sta     b,x                     ; the spare slot when full, so harmless if dropped
+                incb
+                andb    #P3_KQ_SIZE-1
+                cmpb    P3_KQ_HEAD
+                beq     pvl_full
+                stb     P3_KQ_TAIL
+                inc     P3_KQ_NIN
+                rts
+pvl_full:       inc     P3_KQ_NDROP
+pvl_out:        rts
+
+* ── p3_kq_get -- the drainer. out: A = next key, Z set if there was none ──────────
+p3_kq_get:
+                ldb     P3_KQ_HEAD
+                cmpb    P3_KQ_TAIL
+                beq     pkg_empty
+                ldx     #P3_KQ
+                lda     b,x
+                incb
+                andb    #P3_KQ_SIZE-1
+                stb     P3_KQ_HEAD
+                inc     P3_KQ_NOUT
+                tsta
+                rts
+pkg_empty:      clra
+                rts
+                endc
+
 p3_poll_dir:
                 ifdef   P3B_FAULT_NOJOIN
                 rts                     ; ★ AC-7's arm: the join removed, which is "i can't move him"
                 endc
+* ★★★★★ DRAIN, DO NOT SCAN, WHEN THE IRQ OWNS THE PIA [T-P0-128]. In the VBL arm this takes the
+* next key-down EDGE from the queue; elsewhere it still scans the matrix once per cycle, and the
+* main loop is then the PIA's only owner because there is no interrupt to contend with it.
+                ifdef   P3B_VBL_KEYS
+                jsr     p3_kq_get
+                else
                 jsr     HAL_key_scan
                 tsta
+                endc
                 beq     ppd_out
                 ldb     #1
                 cmpa    #HAL_KEY_UP
@@ -1418,6 +1578,22 @@ p3_poll_dir:
 * "consumed" answer joins this same branch.**
 *
 * ★★ `key & 0xFF` is implicit: HAL_key_scan returns one byte [hal_globals.s:249].
+* ★★★★★ AND HAND IT TO THE EDITOR, ONLY IF THE PROMPT IS ENABLED [T-P0-128, cycle.cpp:350-351].
+* In the VBL arm p3_poll_key no longer scans -- the IRQ owns the PIA -- so this is where the editor's
+* key now comes from. **txt_penab is tested HERE, on the forward, and still in p3_poll_key**: the
+* guard is about the CONSUME and it survives exactly as P6.71 left it.
+* ★★★ Placed before the publish only because `tst` and `sta` leave A intact and vm_setvar does
+* not; both land before p3_run_vm, so the order the logic observes is the oracle's.
+                ifdef   P3B_VBL_KEYS
+                ifdef   TEXT_PROMPT
+                tst     txt_penab
+                beq     ppd_nofwd
+                tst     p3_keybuf
+                bne     ppd_nofwd               ; one deep: do not overwrite an unread key
+                sta     p3_keybuf
+ppd_nofwd:
+                endc
+                endc
                 ifndef  P3B_FAULT_NOVARKEY
                 sta     p3_varkey               ; ★ sticky copy -- see below
                 inc     p3_nvarkey
