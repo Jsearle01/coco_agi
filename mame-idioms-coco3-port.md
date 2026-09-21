@@ -2722,3 +2722,47 @@ that was believed is evidence.
 `2026-09-06-a-region-reserved-for-one-thing-may-already-hold-another` (pool `ad5943b`).
 *Established:* P6.4 2026-09-06, `harness/tools/p3b_run.lua`, `p3b_show.lua`, `p3b_show.ps1`,
 `src/harness/p3b_probe.s`.
+
+---
+
+## 44. A PC profiler for the guest: an emulated-time timer, and `CURPC`, not `PC` (P6.76)
+
+**MAME has no guest profiler, and a frame notifier is a biased one.** A PC read once per frame
+always lands at the same point of the video frame, so anything synchronised to VBL is over- or
+under-counted and a workload periodic at a divisor of 60 Hz aliases.
+
+**The shape that works** — at the top level of a `-script`, which MAME runs as a coroutine:
+
+```lua
+while n < stop do
+    emu.wait(1.0 / 997)                       -- emulated seconds; 997 is coprime to 60
+    local pc  = cpu.state["CURPC"].value      -- ★ NOT "PC"
+    local blk = prog:read_u8(0xFFA0 + (pc >> 13)) & 0x3F   -- §22a: mask the top two bits
+    hist[pc * 256 + blk] = (hist[pc * 256 + blk] or 0) + 1
+end
+```
+
+★★★★★ **`cpu.state["PC"]` IS THE FETCH POINTER, NOT THE INSTRUCTION.** MAME aborts the CPU's
+timeslice to fire the timer, and the 6809 can be caught mid-instruction: `PC` then already holds
+a jump target or the next address. The first P6.76 profile put **41 title samples on one
+straight-line init instruction** that nothing executes after boot; at the same instants
+`CURPC` read `$21B8`. **A profiler reading `PC` charges a call to its callee and a return to the
+line after it** — small in bulk (routine shares moved ≤ 1.4 points), wrong at every boundary, and
+it produces addresses that cannot be explained from the map. In a tight spin loop (§10's stall
+sampler) the two agree closely enough not to matter.
+
+★★★★ **It does not perturb the guest.** Write-tapped stage totals were identical to four decimals
+under 997 Hz and 60 Hz sampling, and the 35-cycle castle span was 10.5125 s profiled against
+10.5136 s unprofiled.
+
+★★★★ **Check it against an exact instrument before believing it.** Record the guest's stage marker
+with each sample; the per-stage sample shares must match the write-tapped stage timer (§19l). They
+agreed within 0.2 points on every stage, in two workloads whose stage split differed by 70 points.
+
+★★★ **Frame-lock bias, measured:** the same window sampled at exactly 60 Hz differed by ≤ 1.0
+point per subsystem (630 samples; ≈ 1.9 points of sampling error at 38%). **Small here because
+this workload runs flat out and is not VBL-synchronised** — not a licence to use the frame
+notifier for one that is.
+
+*Established:* P6.76 2026-09-21, `harness/tools/p3b_run.lua` (`P3B_PROFILE`, `P3B_PROFILE_HZ`,
+`P3B_PROFILE_PC`), `harness/tools/pc_profile.py`.

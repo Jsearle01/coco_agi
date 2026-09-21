@@ -207,6 +207,24 @@ P3B_TEXT_LINK   equ     1
 * a blocking box stops cycling, so it cannot be the flashing Jay saw.
 * ★★ So it stays in the tree behind -DP3B_VBLKEYS_OPT, with every instrument, and the combined arm
 * ships the per-cycle scan it had before this task.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ PARKED, AT JAY'S DIRECTION [T-P0-129 §2]. WHOEVER RE-OPENS THIS STARTS FROM THE ALLIGATORS,
+* NOT FROM BOUNCE -- the paragraph above was written before this was noticed, and it points the
+* wrong way:
+*   1. MEASURED, THEN FAILED. Headless it captured 20 of 20 presses against the per-cycle scan's
+*      10 of 20. Live, Jay: "everything animating, but nothing moving just flashing including
+*      graham."
+*   2. ★★★★★ THE ALLIGATORS STOPPED TOO, AND THEY NEVER READ A KEY -- they move by wander. So
+*      bounce explains Graham and cannot explain the alligators; something that corrupts shared
+*      STATE explains both. Bounce is not the leading suspect for the whole symptom.
+*   3. THE LEAD, UNVERIFIED: HAL_key_scan was written for the main loop and keeps its scratch in
+*      the direct page ($0000-$0020). Called from inside an interrupt, it overwrites any DP byte
+*      a main-loop HAL routine was holding at the instant the IRQ landed, and that routine then
+*      resumes on corrupted scratch. [no-ref: DP overlap between HAL_key_scan and the routines it
+*      can interrupt -- discharge at re-open, by listing both sets of DP addresses]
+*   4. ★★★★ A SHIPPED DEFECT THIS DOES NOT DEPEND ON: p3_poll_dir samples the key LEVEL once per
+*      cycle where the oracle delivers one EDGE per press [keyboard.cpp:226-242], so a held arrow
+*      reads set, stop, set. That is live in the combined arm today, latch or no latch.
                 ifdef   P3B_COMBINED
                 ifdef   P3B_VBLKEYS_OPT
                 ifndef  P3B_FAULT_NOVBLKEYS

@@ -873,6 +873,15 @@ _G._n = emu.add_machine_frame_notifier(function()
                 vms   = SYM.vm_vms and rd32(SYM.vm_vms) or -1,
             }
         end
+        -- ★★★★ THIS IS ALSO A PROFILER, AND A BIASED ONE [T-P0-129 §9]. One PC per frame notifier
+        -- means every sample sits at the same point in the video frame: anything synchronised to
+        -- VBL (the IRQ handler, a loop spinning on hal_frame, the handshake park) is over- or
+        -- under-counted, and a workload periodic at a divisor of 60 Hz aliases. For a STALL that is
+        -- fine -- the guest is in one loop and the loop is the answer. For a PROFILE use
+        -- P3B_PROFILE below, which samples off the frame; its 60 Hz arm measured this bias at
+        -- <= 1.0 point per subsystem for the castle, because that workload is not VBL-synchronised.
+        -- ★★★ And "PC" is the 6809's FETCH pointer, not the executing instruction -- CURPC is.
+        -- Harmless in a tight spin loop; see P3B_PROFILE for where it is not.
         local pc = cpu.state["PC"].value
         spin[pc] = (spin[pc] or 0) + 1
         -- ★★★★★ THE THRESHOLD WAS 240 FRAMES AND THE MESSAGE SAID 900. Four emulated seconds is
@@ -2629,3 +2638,71 @@ _G._n = emu.add_machine_frame_notifier(function()
         return
     end
 end)
+
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+-- ★★★★★ P3B_PROFILE -- A PC PROFILER THAT IS NOT LOCKED TO THE FRAME [T-P0-129 §4B].
+-- The stall sampler above is ALSO a profiler -- one PC per frame notifier -- and it is biased: it
+-- always samples at the same point in the video frame, so anything synchronised to VBL (the IRQ
+-- handler, a loop that spins on the frame counter, the handshake park) is systematically over- or
+-- under-counted, and a periodic workload that beats against 60 Hz aliases.
+-- ★★★★ This samples on an emulated-time timer (emu.wait) at P3B_PROFILE_HZ, default 997: coprime
+-- to 60, so the sample phase sweeps the frame instead of sitting on one point of it. MAME aborts
+-- the CPU's timeslice to fire the timer, so the PC is the instruction executing at that instant.
+-- ★★★ P3B_PROFILE_HZ=60 is the frame-locked arm, kept so the bias can be MEASURED rather than
+-- asserted: run both over the same window and difference the histograms.
+-- ★★★ Records PC AND the MMU block behind PC's slot ($FFA0 + PC>>13, readable -- idioms §22a), so
+-- a PC in a remapped slot is attributable to what was mapped there, not guessed from the map.
+-- ★★ P3B_PROFILE="A-B" samples while the released-cycle count n is in [A, B). Headless only:
+-- this loop blocks the top level of the script, which p3b_room.lua's dofile would wait on.
+local PROF = os.getenv("P3B_PROFILE")
+if PROF then
+    local pa, pb = PROF:match("^(%d+)%-(%d+)$")
+    pa, pb = tonumber(pa), tonumber(pb)
+    local hz = tonumber(os.getenv("P3B_PROFILE_HZ") or "997")
+    local WHYPC = tonumber(os.getenv("P3B_PROFILE_PC") or "", 16)
+    local hist, ns, t_first, t_last = {}, 0, nil, nil
+    while n < pb do
+        emu.wait(1.0 / hz)
+        if state == "cycle" and n >= pa and n < pb then
+            -- ★★★★★ CURPC, NOT PC. The first profile read "PC" and found 41 title samples on one
+            -- straight-line INIT instruction ($20B9, `std txt_winon`), once per cycle, which
+            -- nothing executes after boot. P3B_PROFILE_PC showed CURPC=$21B8 at the same instants:
+            -- MAME's "PC" is the 6809's FETCH pointer, which mid-instruction already holds a
+            -- jump target or the next address; CURPC is the instruction actually executing.
+            -- **A sampler that reads the fetch pointer charges a call to its callee and a
+            -- return to its caller's next line** -- small in bulk, wrong at every boundary.
+            local pc = cpu.state["CURPC"].value
+            -- ★★ & $3F: the top two bits of an MMU register read are not driven -- the first
+            -- profile saw slot 1 as $39, $B9, $F9 and $79, which are one block [idioms §22a].
+            local blk = prog:read_u8(0xFFA0 + (pc >> 13)) & 0x3F
+            -- ★★★★ AND THE STAGE MARKER (P3_PHASE, odd = inside a stage). This is what lets the
+            -- profile be CHECKED: its per-stage sample shares must agree with the write-tapped
+            -- stage timer, which is exact. A profiler that disagrees with it is wrong [§2W].
+            local key = (pc * 256 + blk) * 256 + prog:read_u8(PHASE)
+            hist[key] = (hist[key] or 0) + 1
+            -- ★★★ P3B_PROFILE_PC=<hex>: for a PC the map cannot explain, say what is ACTUALLY in
+            -- RAM there and who called it -- the map describes the image, not the running machine.
+            if WHYPC == pc and (_G._why or 0) < 6 then
+                _G._why = (_G._why or 0) + 1
+                local s = cpu.state["S"].value
+                local by, st = {}, {}
+                for i = 0, 5 do by[#by + 1] = string.format("%02X", prog:read_u8(pc + i)) end
+                for i = 0, 7 do st[#st + 1] = string.format("%02X", prog:read_u8(s + i)) end
+                local cur = cpu.state["CURPC"] and cpu.state["CURPC"].value or -1
+                w("PROFILE-PC $%04X (CURPC $%04X) at cycle %d, %.6f s: RAM there = %s; S=$%04X, stack %s",
+                  pc, cur, n, m.time:as_double(), table.concat(by, " "), s, table.concat(st, " "))
+            end
+            ns = ns + 1
+            t_first = t_first or m.time:as_double()
+            t_last = m.time:as_double()
+        end
+    end
+    local fh = io.open(OUT .. "/profile.txt", "w")
+    fh:write(string.format("# window cycles %d-%d  hz %g  samples %d  span %.4f s\n",
+                           pa, pb, hz, ns, (t_last or 0) - (t_first or 0)))
+    for k, c in pairs(hist) do
+        fh:write(string.format("%04X %02X %02X %d\n", k // 65536, (k // 256) % 256, k % 256, c))
+    end
+    fh:close()
+    w("PROFILE: %d samples at %g Hz over cycles %d-%d -> %s/profile.txt", ns, hz, pa, pb, OUT)
+end
