@@ -552,6 +552,14 @@ vp_feed_nonf:
 * the file's modelled branch: nine `equ`s to vm_op_modelled, zero bytes emitted, and vm_probe.bin
 * is byte-identical to what it was before the wiring existed.
                 include "src/harness/vm_text_ops.s"
+* ★★★★★ AND THE SAME FOR THE PICTURE OPCODES -- AD-176 AGAIN, TEN TASKS LATE [T-P0-130].
+* P6.67 (db181fc) generated `fdb vmop_draw_pic / vmop_show_pic / vmop_configure_screen` into
+* vm_tables.s and wrote, in vm_pic_ops.s's header, that vm_probe takes the file's modelled branch
+* -- **but never added this include**, so vm_probe has not ASSEMBLED since: `Undefined symbol
+* vmop_draw_pic`. The nine-title gate was not run in any task since, so nothing noticed. ★★★ No
+* PIC_WIRED here, so this is three `equ`s to vm_op_modelled and zero bytes -- the state that
+* header describes, which the gate had simply never been built against.
+                include "src/harness/vm_pic_ops.s"
 
                 include "src/hal/coco3-dsk/hal_globals.s"
                 include "src/hal/coco3-dsk/sys.s"

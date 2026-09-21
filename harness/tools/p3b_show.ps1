@@ -132,6 +132,17 @@ param(
   # ★★★ It is not a fault arm and not a variant of -Text: P3B_NO_CEL keeps its own meaning and the
   # six text arms stay byte-identical. This adds a shape rather than changing one.
   [switch]$Combined,
+  # ★★★★★ -Count IS T-P0-130's COUNTING ARM. The shipped combined arm no longer counts pixels
+  # (COMP_NOCOUNT, p3b_probe.s's flag block); -Count puts the four compositor counters back for the
+  # readouts that need them -- P3B_SPRITES' "compositor:" line and the rectangle census's co_* rows.
+  # ★★★ Without it those readouts say the counters are OFF rather than printing zeros, because a
+  # zero reads as "nothing composited" [P6.74's silent drop is the precedent].
+  [switch]$Count,
+  # ★★★★ -ViewHdrTest / -ViewFaultOneMap: T-P0-130 AC-8. The first runs set.view on P3B_VIEWTEST's
+  # view once, in the VM phase, and publishes what the in-place header read produced; the second
+  # makes that read's two-byte fields map the window ONCE, which is wrong exactly at a straddle.
+  [switch]$ViewHdrTest,
+  [switch]$ViewFaultOneMap,
   [switch]$NoIrq,
   [double]$Hold   = 3.0
 )
@@ -288,6 +299,9 @@ if ($RoomDrive) { $FLAGS += "-DP3B_ROOMDRIVE" }
 # ★★★ -Combined needs P3B_IRQ as the text arms do: the text engine's print path blocks on a key,
 # and the vector stubs at $FEF0 are what P3_REGIONB_END reserves for.
 if ($Combined) { $FLAGS += @("-DP3B_COMBINED") + $IRQ }
+if ($Count) { $FLAGS += "-DP3B_COUNT" }
+if ($ViewHdrTest) { $FLAGS += "-DP3B_VIEWHDR_TEST" }
+if ($ViewFaultOneMap) { $FLAGS += "-DVM_VIEW_FAULT_ONEMAP" }
 # ★★★★★ THE CEL ARM GETS THE KEYBOARD TOO [T-P0-115]. Tested on the absence of -DP3B_NO_CEL rather
 # than on a list of the twelve text switches, because that list is the thing this file has already
 # been bitten by five times -- "a list repeated five times is a list that will be edited four
@@ -381,8 +395,17 @@ if ($IfDiag) { $WANT += @("vm_if_at","vm_if_logic","vm_if_n","vm_if_buf","vm_if_
 # ★★★ The source condition is `ifdef P3B_CEL_LINK`, which is "this arm did not ask for
 # -DP3B_NO_CEL". Spelled from $FLAGS so it cannot drift from the flag that actually selects it.
 $CelLink = ($FLAGS -notcontains "-DP3B_NO_CEL")
-if ($CelLink) { $WANT += @("vc_err","vc_w","vc_h","vc_src","vc_srcend","vc_view","co_tested",
-                               "p3_spr","p3_nspr","co_written","co_rejkey","co_rejpri",
+# ★★★★★ THE FOUR COUNTERS ONLY WHERE THEY COUNT [T-P0-130]. The symbols exist in every cel-linked
+# build (composite.s reserves them unconditionally), so asking for them never fails -- and that is
+# the hazard: in the shipped combined arm they would be read as ZEROS and printed as a result.
+# **Condition = the source's**: p3b_probe.s sets COMP_NOCOUNT under P3B_COMBINED and not P3B_COUNT.
+# Absent from the symbol file, p3b_run.lua says the counters are off instead of quoting them.
+$Counting = $CelLink -and (-not $Combined -or $Count)
+# ★★ T-P0-130 AC-8's two symbols exist only under -DP3B_VIEWHDR_TEST -- the same condition.
+if ($ViewHdrTest) { $WANT += @("p3_vh_view","p3_vh_loop","p3_vh_cel","p3_vh_out","p3_vh_off","p3_vh_le") }
+if ($CelLink) { $WANT += @("vc_err","vc_w","vc_h","vc_src","vc_srcend","vc_view",
+                               $(if ($Counting) { "co_tested","co_written","co_rejkey","co_rejpri" }),
+                               "p3_spr","p3_nspr",
 # ★★★★★ T-P0-124's two bytes belong HERE and not on the shared line. p3_poll_dir is nested inside
 # `ifdef P3B_CEL_LINK` AND `ifdef HAL_KEYBOARD` [p3b_probe.s:1359-1360], so p3_varkey/p3_nvarkey do
 # not exist in the five P3B_NO_CEL arms and asking for them there fails the whole run.
@@ -484,6 +507,9 @@ if ($WithInput) {
   if ($LASTEXITCODE -ne 0) { throw "no verified input lines for $Title" }
   $stageArgs += @("--input", "$stage\input.gen.txt")
 }
+# ★★★ P3B_ALSO_VOLS stages volumes the reference run does not touch -- T-P0-130 AC-8 reads VIEWs
+# (MUMG 85 in vol 2, PQ1 233 in vol 3) that no early cycle reaches. Absent, staging is unchanged.
+if ($env:P3B_ALSO_VOLS) { $stageArgs += @("--also-vols", $env:P3B_ALSO_VOLS) }
 python harness\tools\vm_stage.py @stageArgs
 if ($LASTEXITCODE -ne 0) { throw "staging did not fit" }
 

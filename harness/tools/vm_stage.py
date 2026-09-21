@@ -64,6 +64,10 @@ def main():
     ap.add_argument("--input", default="",
                     help="a vm_input_script.py file: '<cycle> <text>' per line. "
                          "Both legs read THIS file; the guest gets it via vm_sweep.lua.")
+    # ★★ T-P0-130 AC-8: stage volumes the reference run never loads, so a test can reach a VIEW
+    # no early cycle does. Off by default -- every gate invocation stages exactly what it did.
+    ap.add_argument("--also-vols", default="",
+                    help="comma-separated extra volume numbers to stage")
     a = ap.parse_args()
 
     out = pathlib.Path(a.out)
@@ -142,6 +146,9 @@ def main():
         touched.add(game.entry("LOGIC", nr).volume)
     for nr in vm._view_cache:
         touched.add(game.entry("VIEW", nr).volume)
+    for s in a.also_vols.split(","):
+        if s.strip():
+            touched.add(int(s))
 
     (out / "oracle.bin").write_bytes(b"".join(rec.rows))
     print("oracle trace : %d cycles x 288 bytes -> %s"

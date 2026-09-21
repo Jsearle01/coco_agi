@@ -437,6 +437,22 @@ local function stage()
                 end
             end)
     end
+    -- ★★★★ T-P0-130 AC-8: the view the -ViewHdrTest arm runs set.view on, once, in the VM phase.
+    if SYM.p3_vh_view then
+        local v, l, c = (os.getenv("P3B_VIEWTEST") or ""):match("^(%d+),?(%d*),?(%d*)$")
+        v, l, c = tonumber(v), tonumber(l) or 0, tonumber(c) or 0
+        if not v then w("★★★ -ViewHdrTest needs P3B_VIEWTEST=<view>[,<loop>,<cel>]"); return false end
+        prog:write_u8(SYM.p3_vh_view, v)
+        prog:write_u8(SYM.p3_vh_loop, l)
+        prog:write_u8(SYM.p3_vh_cel, c)
+        w("view-header test: set.view(%d) will run once, loop %d cel %d", v, l, c)
+        local off = tonumber(os.getenv("P3B_VIEWOFF") or "")
+        if off and SYM.p3_vh_off then
+            prog:write_u8(SYM.p3_vh_off, off >> 8)
+            prog:write_u8(SYM.p3_vh_off + 1, off & 0xFF)
+            w("view-header test: and a raw LE16 read at payload +%d", off)
+        end
+    end
     return true
 end
 
@@ -631,6 +647,59 @@ _G._n = emu.add_machine_frame_notifier(function()
     -- **That is a limit of the harness, not of the port** -- a person's ENTER at the box would still
     -- arrive -- and this is the arm that tells the two apart: keys keep coming whatever the guest
     -- is doing, so if the latch delivers them to tx_wait_dismiss, the box closes.
+    -- ═══════════════════════════════════════════════════════════════════════════════════════
+    -- ★★★★★ P3B_HOLDKEY="FIELD:cycle:frames[:taps:gap]" -- A KEY HELD FOR AN EXACT TIME, THROUGH
+    -- THE MACHINE's OWN KEYBOARD PORT [T-P0-130, after Jay: "the old build took about 3 or 4 to
+    -- start him moving left. the new build didnt move him at all"].
+    -- ★★★★ natkeyboard's post_coded arrows never registered as directions headless [P6.75], so
+    -- arrow behaviour could only be asked of Jay -- and a person's taps differ every time, which
+    -- cannot separate "this build ignores arrows" from "this tap was missed". This presses the
+    -- ioport FIELD itself, the way keymatrix_probe.lua proved reaches the PIA matrix, for a fixed
+    -- number of frames starting at a fixed cycle: the same press, byte for byte, in every build.
+    -- ★★ Field names match exactly, case-insensitively [keymatrix_probe.lua's rule].
+    if state == "cycle" and os.getenv("P3B_HOLDKEY") then
+        if not _G._hk then
+            local f, c, fr, t, g = os.getenv("P3B_HOLDKEY"):match("^(%w+):(%d+):(%d+):?(%d*):?(%d*)$")
+            local fld
+            for _, port in pairs(m.ioport.ports) do
+                for name, fl in pairs(port.fields) do
+                    if f and name:lower() == f:lower() then fld = fl end
+                end
+            end
+            _G._hk = { fld = fld, at = tonumber(c), frames = tonumber(fr), taps = tonumber(t) or 1,
+                       gap = tonumber(g) or 60, done = 0, down = nil, next = nil, log = {} }
+            if not fld then w("★★★ P3B_HOLDKEY: no ioport field named %s", tostring(f)) end
+        end
+        local h = _G._hk
+        -- ★★★★ P3B_HOLDKEY_CYCLES=1 reads frames/gap as CYCLES: press when the cycle count reaches
+        -- `at`, release `frames` cycles later. Frame-timed presses land on different cycles in
+        -- builds of different speed, so they cannot compare two builds' LOGIC; cycle-timed ones
+        -- give every build the same input per cycle, and identical logic must then give an
+        -- identical ego trace.
+        if h.fld and h.done < h.taps and os.getenv("P3B_HOLDKEY_CYCLES") then
+            if h.down then
+                if n - h.down >= h.frames then
+                    h.fld:set_value(0); h.down = nil; h.done = h.done + 1
+                    h.next = n + h.gap
+                    h.log[#h.log + 1] = string.format("released at cycle %d", n)
+                end
+            elseif n >= h.at and (not h.next or n >= h.next) then
+                h.fld:set_value(1); h.down = n
+                h.log[#h.log + 1] = string.format("pressed at cycle %d", n)
+            end
+        elseif h.fld and h.done < h.taps then
+            if h.down then
+                if frame - h.down >= h.frames then
+                    h.fld:set_value(0); h.down = nil; h.done = h.done + 1
+                    h.next = frame + h.gap
+                    h.log[#h.log + 1] = string.format("released at cycle %d", n)
+                end
+            elseif n >= h.at and (not h.next or frame >= h.next) then
+                h.fld:set_value(1); h.down = frame
+                h.log[#h.log + 1] = string.format("pressed at cycle %d", n)
+            end
+        end
+    end
     local every = tonumber(os.getenv("P3B_ENTER_EVERY") or "0")
     if every > 0 and state == "cycle" and frame % every == 0 and m.natkeyboard.empty then
         m.natkeyboard:post("\r")
@@ -1381,6 +1450,15 @@ _G._n = emu.add_machine_frame_notifier(function()
                     w("    compositor: tested=%d written=%d rejected key=%d pri=%d  vc_err=%d",
                       rd32(SYM.co_tested), rd32(SYM.co_written), rd32(SYM.co_rejkey),
                       rd32(SYM.co_rejpri), SYM.vc_err and prog:read_u8(SYM.vc_err) or -1)
+                else
+                    -- ★★★★★ SAID, NOT SILENT [T-P0-130]. The shipped combined arm does not count
+                    -- pixels (COMP_NOCOUNT), and p3b_show.ps1 leaves the counters off the symbol
+                    -- file there. **A zero here would read as "nothing composited"** -- P6.74's
+                    -- silent drop is the precedent -- so the absence is named, with the arm that
+                    -- has them. CP_BLITS (below, and in the summary) still counts composites.
+                    w("    compositor: pixel counters OFF in this arm (COMP_NOCOUNT) -- rebuild with"
+                      .. " -Count for tested/written/rejected;  vc_err=%d",
+                      SYM.vc_err and prog:read_u8(SYM.vc_err) or -1)
                 end
                 -- ★★★★★ WHICH SPRITES ACTUALLY COMPOSITED [T-P0-127 §1.3(4)]. p3_prevn is
                 -- incremented only AFTER cp_composite returns [p3b_probe.s:2613], so a staged
@@ -1471,6 +1549,28 @@ _G._n = emu.add_machine_frame_notifier(function()
               prog:read_u8(SYM.res_err or 0))
             w("    final room %d, sprites %d, err %d, status=$%02X",
               prog:read_u8(ROOM), prog:read_u8(NSPR), prog:read_u8(ERR), prog:read_u8(STATUS))
+            if _G._hk then
+                w("    HOLDKEY %s: %s;  p3_ndirs=%s p3_newdir=%s", os.getenv("P3B_HOLDKEY"),
+                  table.concat(_G._hk.log, ", "),
+                  SYM.p3_ndirs and prog:read_u8(SYM.p3_ndirs) or "?",
+                  SYM.p3_newdir and prog:read_u8(SYM.p3_newdir) or "?")
+            end
+            -- ★★★★ T-P0-130 AC-8's readout. p3_vh_view reads $FF once the test has RUN, so a
+            -- result is distinguishable from a test that never fired [§2W].
+            if SYM.p3_vh_out then
+                local o = SYM.p3_vh_out
+                w("    VIEWHDR %s: numloops=%d numcels=%d loop=%d cel=%d xsize=%d ysize=%d",
+                  prog:read_u8(SYM.p3_vh_view) == 0xFF and "ran" or "★★★ DID NOT RUN",
+                  prog:read_u8(o), prog:read_u8(o + 1), prog:read_u8(o + 2),
+                  prog:read_u8(o + 3), prog:read_u8(o + 4), prog:read_u8(o + 5))
+                if SYM.p3_vh_le and os.getenv("P3B_VIEWOFF") then
+                    -- ★★ $E000 is what the fault arm reads in place of a straddle's high byte
+                    -- (slot 7, never remapped), printed so a non-discriminating case is visible.
+                    w("    VIEWHDR raw LE16 at +%s = %d ($%04X);  byte at $E000 = $%02X",
+                      os.getenv("P3B_VIEWOFF"), rd16(SYM.p3_vh_le), rd16(SYM.p3_vh_le),
+                      prog:read_u8(0xE000))
+                end
+            end
             -- ★★★★★ THE PICTURE OPCODES' RECEIPT [T-P0-121]. draw.pic sets p3_drew and clears
             -- p3_shown; show.pic sets p3_shown [op_cmd.cpp:1210,1218]. **drew=1 shown=1 means the
             -- GAME ordered both halves**; drew=1 shown=0 is the -DP3B_FAULT_SHOWPIC arm, where the
@@ -1757,6 +1857,10 @@ _G._n = emu.add_machine_frame_notifier(function()
                             for k = 0, 3 do t = t * 256 + prog:read_u8(c[2] + k) end
                             w("      co_%s : %d", c[1], t)
                         end
+                    end
+                    -- ★★★★ Same rule as the sprite readout [T-P0-130]: no counters, say so.
+                    if not SYM.co_tested then
+                        w("      co_* : pixel counters OFF in this arm (COMP_NOCOUNT) -- use -Count")
                     end
                     -- ★★★★★ THE RESTORE, COUNTED [T-P0-113, owed by T-P0-112's AC-3/AC-4].
                     -- p3_restbytes is bytes actually copied shadow -> live, both planes, summed

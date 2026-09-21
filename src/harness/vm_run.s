@@ -22,6 +22,11 @@
 
 SCRIPT_WIDTH    equ     160
 SCRIPT_HEIGHT   equ     168
+* ★★★★ THIS FILE READS VIEW HEADERS IN PLACE [T-P0-130], through res_core.s's read-through, which
+* exists only where it is asked for. Defined here because every probe that links vm_run.s includes
+* it BEFORE res_core.s (vm_probe.s:539/542, p3b_probe.s), and every probe that does not link it
+* must assemble res_core.s exactly as before.
+RES_PEEK        equ     1
 
 * ── interpreter state that vm_core.s reads ────────────────────────────────────────
 vm_code         fdb     0               ; -> the CURRENT logic's bytecode (inside the arena)
@@ -34,7 +39,9 @@ vm_blk_y1       fcb     0
 vm_blk_x2       fcb     0
 vm_blk_y2       fcb     0
 vm_rndlo        fcb     0
-vm_vwbase       fdb     0               ; base of the VIEW currently open
+* ★★★ vm_vwbase IS RETIRED [T-P0-130]: the VIEW is no longer copied, so it has no base address.
+* Header fields are read by PAYLOAD OFFSET through res_peek -- see "VIEW metadata" below.
+vm_vwidth       fcb     0               ; the cel width, held across the height's res_peek
 vm_vtmp         fdb     0
 vm_vtmp2        fdb     0
 
@@ -239,36 +246,70 @@ vm_mark_view:   rts
 * yields a plausible width and height from the middle of the pixel data.
 * ═══════════════════════════════════════════════════════════════════════════════════
 
-* vm_view_open: A = view number -> vm_vwbase, or halts.
+* ═══════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ IN PLACE, NOT COPIED [T-P0-130 removal 2]. This used to res_open the WHOLE VIEW into the
+* arena -- several KB -- and read, at most:
+*     +2 loop count (1 B) · loop n's offset (2 B) · that loop's cel count (1 B)
+*     · cel m's offset (2 B) · the cel's width and height (2 B)
+* **eight bytes at up to five places**, then res_close. P6.76 measured those copies at ~550 of the
+* resource manager's ~1,660 castle samples. ★★★ Now res_locate finds the record and res_peek reads
+* ONE byte per call, mapping its own block, so a two-byte field that straddles an 8 KB boundary is
+* read correctly by construction [res_core.s's read-through header].
+* ★★★★ WHO STILL COPIES: p3_composite_all's per-sprite VIEW (it DECODES the cel, many bytes, and it
+* runs in the composite stage, where slot 6 is not the volume window between fetches). **Only the
+* VM's metadata reads moved**, and only because they run in the interpret stage, where res_curblk is
+* true at every call [res_core.s names the invalidations that make it so].
+* ★★ No arena frame is pushed any more, so vm_view_close is a no-op: calling res_close here would
+* now pop the CALLER's frame -- the running logic's.
+* ═══════════════════════════════════════════════════════════════════════════════════
+
+* vm_view_open: A = view number -> the VIEW located for res_peek, or halts.
 vm_view_open:
                 ldb     #RES_VIEW
                 exg     a,b
-                jsr     res_open
+                jsr     res_locate
                 lda     res_err
                 lbne    vm_res_fail
-                ldx     res_base
-                stx     vm_vwbase
                 rts
-vm_view_close:  jmp     res_close
+vm_view_close:  rts
 
-* vm_le16: X -> two little-endian bytes; returns D
-vm_le16:        ldb     ,x
-                lda     1,x
+* vm_vbyte: D = payload offset -> A = that byte. Clobbers B and X.
+vm_vbyte:       jmp     res_peek
+
+* vm_le16: D = payload offset of a little-endian field -> D = its value. Clobbers X.
+* ★★★★★ TWO PEEKS, TWO MAPPINGS: the low byte and the high byte each map their own block.
+                ifndef  VM_VIEW_FAULT_ONEMAP
+vm_le16:
+                pshs    d
+                jsr     vm_vbyte                ; A = low byte
+                pshs    a
+                ldd     1,s
+                addd    #1
+                jsr     vm_vbyte                ; A = high byte, through ITS block
+                puls    b                       ; B = low
+                leas    2,s
+                rts                             ; D = high:low
+                else
+* ★★★★ -DVM_VIEW_FAULT_ONEMAP [T-P0-130 AC-8]: map ONCE and read both bytes through that one
+* window -- the natural way to write this, and wrong exactly when the field's second byte is in
+* the next block: 1,x is then $E000, which is slot 7's code, not the VIEW. Every other field in
+* the corpus is unaffected, so this arm is green on the nine-title gate and red only where a
+* straddle is actually read -- which is what P3B_VIEWHDR_TEST constructs.
+vm_le16:
+                jsr     vm_vbyte                ; A = low byte; X -> it, in the window
+                tfr     a,b
+                lda     1,x                     ; ★ INJECTED: the next byte, same mapping
                 rts
+                endc
 
-* vm_loop_ptr: A = loop number -> X = pointer to that loop's header
+* vm_loop_ptr: A = loop number -> D = PAYLOAD OFFSET of that loop's header
 vm_loop_ptr:
                 tfr     a,b
                 clra
                 aslb
                 rola                            ; D = n*2
                 addd    #5
-                addd    vm_vwbase
-                tfr     d,x
-                jsr     vm_le16                 ; D = loop offset (relative to the resource)
-                addd    vm_vwbase
-                tfr     d,x
-                rts
+                jmp     vm_le16                 ; D = loop offset (relative to the resource)
 
 * ── set_view / set_loop / set_cel ────────────────────────────────────────────────
 * ★ set_view walks into set_loop walks into set_cel; that chain is what gives an object its
@@ -281,8 +322,9 @@ vm_set_view:
                 lda     ,s+
                 ldx     ,s
                 sta     VMO_VIEW,x
-                ldy     vm_vwbase
-                lda     2,y                     ; loop count
+                ldd     #2
+                jsr     vm_vbyte                ; A = loop count (clobbers X)
+                ldx     ,s
                 sta     VMO_NUMLOOPS,x
                 lda     VMO_LOOP,x
                 cmpa    VMO_NUMLOOPS,x
@@ -316,8 +358,8 @@ vm_set_loop_open:
 vm_slo_ok:
                 sta     VMO_LOOP,x
                 pshs    a,x
-                jsr     vm_loop_ptr             ; X -> the loop header
-                lda     ,x                      ; cel count
+                jsr     vm_loop_ptr             ; D = the loop header's payload offset
+                jsr     vm_vbyte                ; A = cel count
                 puls    b,x                     ; B = loop nr (discarded), X = object
                 sta     VMO_NUMCELS,x
                 lda     VMO_CEL,x
@@ -354,8 +396,8 @@ vm_sco_ok:
                 sta     vm_celnr
                 pshs    x
                 lda     VMO_LOOP,x
-                jsr     vm_loop_ptr             ; X -> loop header
-                stx     vm_vtmp                 ; keep the LOOP base: cel offsets are relative
+                jsr     vm_loop_ptr             ; D = loop header's payload offset
+                std     vm_vtmp                 ; keep the LOOP base: cel offsets are relative
                 lda     vm_celnr
                 tfr     a,b
                 clra
@@ -363,12 +405,23 @@ vm_sco_ok:
                 rola
                 addd    #1
                 addd    vm_vtmp
-                tfr     d,x
                 jsr     vm_le16                 ; D = cel offset, RELATIVE TO THE LOOP
-                addd    vm_vtmp
-                tfr     d,x                     ; X -> the cel header
-                lda     ,x                      ; width
-                ldb     1,x                     ; height
+                addd    vm_vtmp                 ; D = the cel header's payload offset
+* ★★★ Width and height are two peeks as well: the pair can straddle (PQ1 view 233 loop 3 cel 0).
+                ifndef  VM_VIEW_FAULT_ONEMAP
+                pshs    d
+                jsr     vm_vbyte                ; A = width
+                sta     vm_vwidth
+                puls    d
+                addd    #1
+                jsr     vm_vbyte                ; A = height
+                tfr     a,b                     ; B = height
+                lda     vm_vwidth               ; A = width
+                else
+* ★★★★ The fault arm maps the PAIR once too, so every two-byte read in this file is faulted.
+                jsr     vm_vbyte                ; A = width; X -> it, in the window
+                ldb     1,x                     ; ★ INJECTED: height through the same mapping
+                endc
                 puls    x
                 sta     VMO_XSIZE,x
                 stb     VMO_YSIZE,x

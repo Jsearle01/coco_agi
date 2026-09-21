@@ -232,6 +232,26 @@ P3B_VBL_KEYS    equ     1
                 endc
                 endc
                 endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE SHIPPED COMBINED ARM DOES NOT COUNT PIXELS [T-P0-130 removal 1].
+* cp_composite called co_inc32 -- a 32-bit software increment through U -- for EVERY source pixel,
+* and again per reject and per control step [composite.s:181-191, 236-239, 347-350, 474-476,
+* 585-588]. **P6.76 profiled that at 11.9% of a castle cycle**: a measuring instrument left on in
+* the build being measured.
+* ★★★★ THE INSTRUMENT MOVES, IT DOES NOT DISAPPEAR. -DP3B_COUNT is the counting arm and keeps every
+* p3b readout that reads co_tested / co_written / co_rejkey / co_rejpri -- p3b_run.lua's sprite and
+* rectangle readouts and p3b_show.ps1's want-line, which gate on the same condition as this block.
+* ★★★ IN THE SOURCE AND NOT ON A COMMAND LINE, so every builder of the combined arm -- p3b_show.ps1,
+* p3b_arms_check.ps1, a hand build -- gets the shipped form without being told.
+* ★★ CP_BLITS is NOT a counter this removes: it is one add per COMPOSITE, not per pixel
+* [composite.s:140-142], so "how many cels composited" survives in both arms.
+* ★★ The cel arm (`p3b`) keeps counting: it is not the shipped build, and gates.manifest's rows
+* for it quote co_tested and co_rej_pri as their evidence.
+                ifdef   P3B_COMBINED
+                ifndef  P3B_COUNT
+COMP_NOCOUNT    equ     1
+                endc
+                endc
 * ★★★★★ PIC_WIRED -- the game's own picture opcodes are REAL in this build [T-P0-121]. Every
 * p3b configuration links the renderer (pic_render_at) and owns both planes, so unlike
 * TEXT_WIRED this is not conditional on an arm: the thing it needs is always present.
@@ -1139,6 +1159,9 @@ p3_enter_vm_phase:
 * phase_draw_enter so its comments stay where they were written, and the whole change reads as
 * a factoring rather than a move [3 bytes: the bra and the rts].
 p3_after_vm_phase:
+                ifdef   P3B_VIEWHDR_TEST
+                jsr     p3_vh_test              ; ★ T-P0-130 AC-8, test arm only
+                endc
 * ★★★ AC-5's brackets. One `sta` per boundary; the host tap does the arithmetic. Placed around
 * the calls rather than inside them so a stage's cost includes its own call overhead, which is
 * what a budget consumer cares about.
@@ -1221,10 +1244,16 @@ P3_SPR_SIZE     equ     6               ; x, y, prio, view, loop, cel
 * virtual time track each other [vm_cycle.s]; copying the sequence rather than inventing one
 * keeps this build's VM identical to the gated one.
 * ★★★★★ PACE AND INTERPRET ARE TIMED SEPARATELY, AND CONFLATING THEM INVERTED AC-5's ANSWER.
-* vm_pace is a BUSY-WAIT: it spins on vm_step_clock until vm_passed reaches vm_tdelay, so time
-* inside it is the interpreter deliberately hitting the rate the GAME asked for (var 10), not
-* work. Timed as one "vm" stage it read 0.156 s/cycle and 6.66 cycles/second -- which looks like
-* a capacity shortfall against the corpus's 10 and is nothing of the sort.
+* ★★★★★ CORRECTED [T-P0-130, from P6.76 §3(2)]: vm_pace IS NOT A WAIT IN REAL TIME. It spins
+* vm_step_clock -- a counter -- until vm_passed reaches vm_tdelay (var 10 x 3), which is SIX
+* counter steps for KQ1 whatever the wall clock says, measured at 0.00065 s a cycle, 0.2%. It
+* reproduces the reference's VIRTUAL clock so cycle count and the game timers (vars 11-14) track
+* each other [vm_cycle.s:307-311]; **it does not hold the port to the rate the game asked for.**
+* ★★★★ So nothing paces this port to real time. At 0.25-0.30 s a cycle that is harmless; once a
+* cycle fits inside KQ1's 100 ms it will run too fast, and a VBL-based pace becomes necessary.
+* ★★ The history, kept because it was believed: this said "a BUSY-WAIT ... deliberately hitting
+* the rate the GAME asked for", and the split below was made on that belief. Timed as one "vm"
+* stage it read 0.156 s/cycle and 6.66 cycles/second.
 * ★★★★ **A budget that cannot separate waiting from working cannot answer "is it fast enough."**
 * Split, the question becomes arithmetic: interpret is the capacity, pace is the gap between
 * capacity and the requested rate.
@@ -1638,6 +1667,79 @@ ppd_set:
                 inc     p3_ndirs
 ppd_out:        rts
                 endc
+                endc
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ -DP3B_VIEWHDR_TEST -- T-P0-130 AC-8: A STRADDLING HEADER, READ BY THE REAL PATH.
+* The corpus has three VIEW header fields whose two bytes sit either side of an 8 KB boundary
+* [view_straddle.py] and the nine-title gate reads none of them in 600 cycles -- so the gate cannot
+* show the in-place read handles one. This does: once, in the VM phase (called just after
+* p3_enter_vm_phase, where res_curblk is true), it runs vm_set_view on a scratch object for the
+* view the host poked into p3_vh_view -- the routine set.view runs, loop 0, cel 0 -- and publishes
+* what it read. ★★★ The host compares against the view's bytes read offline
+* [view_straddle.py --expect]; -DVM_VIEW_FAULT_ONEMAP is the arm that must disagree.
+* ★★ Out here and not beside its call: inside the loop body it pushed two short branches out of
+* range. **Test arm only: no shipped arm assembles a byte of this.**
+                ifdef   P3B_VIEWHDR_TEST
+p3_vh_view      fcb     $FF             ; the view to test; $FF = none, or already done
+* ★★★ AND WHICH LOOP AND CEL: set_view keeps an object's loop and cel when they are in range, so
+* presetting them walks set_loop and set_cel to the straddling field. The first run tested KQ2
+* view 209 at loop 0 cel 0 and BOTH arms passed -- that field's high byte is $00 and so was the
+* byte the fault read in its place. **A fault a test cannot see is a fact about the test.**
+p3_vh_loop      fcb     0
+p3_vh_cel       fcb     0
+p3_vh_out       rmb     6               ; numloops, numcels, loop, cel, xsize, ysize
+* ★★★★★ AND A RAW 16-BIT READ AT A CHOSEN PAYLOAD OFFSET, THROUGH vm_le16 -- THE SAME ROUTINE THE
+* HEADER FIELDS USE. The three corpus straddles could not discriminate: KQ2 209's high byte is
+* $00, which is also what the fault read in its place, and MUMG 85 / PQ1 233 live in volumes the
+* p3b staging cannot hold (§7). **So the straddle is constructed**: the host picks an offset whose
+* two bytes sit either side of a block boundary and whose high byte differs from the one the fault
+* would read, and this reads it by the production path. $FFFF = skip.
+p3_vh_off       fdb     $FFFF
+p3_vh_le        fdb     0
+p3_vh_obj       rmb     VMO_SIZE        ; a scratch object: never in the object table
+p3_vh_test:
+                lda     p3_vh_view
+                cmpa    #$FF
+                beq     pvh_out
+                ldx     #p3_vh_obj
+                ldb     #VMO_SIZE
+pvh_clr:        clr     ,x+
+                decb
+                bne     pvh_clr
+                ldx     #p3_vh_obj
+                lda     #100                    ; mid-screen, so the clip leaves x/y alone
+                sta     VMO_X,x
+                sta     VMO_Y,x
+                lda     p3_vh_loop
+                sta     VMO_LOOP,x
+                lda     p3_vh_cel
+                sta     VMO_CEL,x
+                lda     p3_vh_view
+                jsr     vm_set_view             ; ★ the real path: set_view -> set_loop -> set_cel
+                ldx     #p3_vh_obj
+                ldu     #p3_vh_out
+                lda     VMO_NUMLOOPS,x
+                sta     ,u+
+                lda     VMO_NUMCELS,x
+                sta     ,u+
+                lda     VMO_LOOP,x
+                sta     ,u+
+                lda     VMO_CEL,x
+                sta     ,u+
+                lda     VMO_XSIZE,x
+                sta     ,u+
+                lda     VMO_YSIZE,x
+                sta     ,u
+                ldd     p3_vh_off
+                cmpd    #$FFFF
+                beq     pvh_noraw
+                jsr     vm_le16                 ; ★ the VIEW is still located from set_view
+                std     p3_vh_le
+pvh_noraw:
+                lda     #$FF
+                sta     p3_vh_view              ; once
+pvh_out:        rts
                 endc
 
 * ── p3_room_check — fetch and render the room's PICTURE when the room changes ────

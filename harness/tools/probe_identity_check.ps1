@@ -23,7 +23,14 @@ $PROBES = @(
   # RETIRED at T-P0-108: 9,667 B 771F147D -> 9,866 B B51A6760 (+199). The priority band table and
   # its derivation live in vm_objects.s, so every probe that links the VM carries them.
   # ★★★ The vm gate is what says the behaviour is unchanged: 9/9, 0 divergent cycles of 600 each.
-  @{ n = "vm";   s = "src/harness/vm_probe.s";   f = @("-DHAL_GFX_MODE_SERVICE","-DHAL_SYS_FAST_CLOCK"); sz = 9866; sha = "B51A6760" },
+  # ★★★★★ RETIRED at T-P0-130: 9,866 B B51A6760 -> 9,985 B 6831382D (+119), and THIS ROW HAD BEEN
+  # UNBUILDABLE FOR TEN TASKS. P6.67 (db181fc) put vmop_draw_pic/show_pic/configure_screen into
+  # vm_tables.s and never added vm_pic_ops.s to vm_probe.s, so it failed with `Undefined symbol`.
+  # **This check reported MOVED against a pin it could not reproduce, and no task ran it**, which
+  # is how ten tasks passed without the vm gate. The include adds ZERO bytes (three equs); the
+  # +119 is exactly T-P0-130's in-place VIEW header read, the same delta as every p3b arm.
+  # ★★★ vm 9/9, 0 divergent cycles of 600 each, run fresh; its fault arm red on Kingquest2.
+  @{ n = "vm";   s = "src/harness/vm_probe.s";   f = @("-DHAL_GFX_MODE_SERVICE","-DHAL_SYS_FAST_CLOCK"); sz = 9985; sha = "6831382D" },
   @{ n = "pic";  s = "src/harness/pic_probe.s";  f = @("-DHAL_GFX_MODE_SERVICE");                        sz = 0;    sha = "" },
   @{ n = "res";  s = "src/harness/res_probe.s";  f = @("-DHAL_GFX_MODE_SERVICE");                        sz = 0;    sha = "" },
   # ★★★★ PINNED AT T-P0-105, because this one MOVED and an on-disk baseline cannot notice that.

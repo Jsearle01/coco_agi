@@ -741,6 +741,96 @@ rf_have:        puls    b                       ; B = resource index
 rf_ok:          rts
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════
+* ── res_locate / res_peek ── READ A RESOURCE IN PLACE, WITHOUT COPYING IT [T-P0-130] ─────
+*
+* ★★★★★ A READ-THROUGH, ADDED BESIDE THE SEAM AND NOT THROUGH IT. res_open copies the whole
+* resource into the arena, which is right for bytes that are EXECUTED or DECODED many times and
+* wrong for a caller that wants eight header bytes: set.view / set.loop / set.cel copied an entire
+* VIEW -- several KB -- to read a loop count, two offsets and a width and height [vm_run.s], and
+* P6.76 profiled that at a third of the resource manager's 16.8% of a castle cycle.
+* ★★★★ The seam is kept [design §4.2a, res_seam.py]: the caller still names (type, index) and a
+* PAYLOAD offset, and never learns the volume, the record offset or res_hdrlen. Nothing here
+* touches res_open, res_fetch, res_top or the cache, so the resource gate's path is unchanged.
+*
+* ★★★★★ ONE BYTE PER MAPPING, AND THAT IS THE STRADDLE PROOF. res_peek maps the block holding the
+* ONE byte asked for and returns it. A caller wanting a 16-bit field calls it twice, and each call
+* maps its own block -- so a field whose two bytes sit either side of an 8 KB boundary is read
+* correctly by construction. **The corpus has three such fields** (KQ2 view 209, PQ1 view 233,
+* MUMG view 85 -- view_straddle.py), and the nine-title gate reads none of them in 600 cycles,
+* which is why -DVM_VIEW_FAULT_ONEMAP and -DP3B_VIEWHDR_TEST exist.
+*
+* ★★★★★ AND IT IS ONLY SAFE WHERE res_curblk IS TRUE -- the P6.74 hazard. res_map_block SKIPS the
+* MMU write when res_curblk matches, so if anyone else moved slot 6 without invalidating it, this
+* reads the wrong block while certain it is right. The VM phase guarantees it: every path that
+* maps a plane into slot 6 during the interpret stage leaves through p3_enter_vm_phase or
+* tx_window_exit, and both store $FF to res_curblk [p3b_probe.s, vm_text_ops.s]. **That is the
+* same guarantee res_fetch has always relied on at the same instant**; this adds no new exposure.
+* ★★★ NOT SAFE IN THE COMPOSITE STAGE, where cp_composite writes slot 6 between fetches -- which
+* is why the compositor's per-sprite copy is untouched and is the next task's to price.
+*
+* ★★ Cost: res_ptr is ~90 CPU cycles a byte. Eight bytes is ~720, against a VIEW copy at ~12
+* cycles a BYTE across several KB.
+* ★★ Guarded: only builds that link vm_run.s define RES_PEEK, so res_probe, cel_probe, pic_probe
+* and comp_probe assemble exactly as before.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+                ifdef   RES_PEEK
+res_lcoff       fdb     0               ; volume offset of payload byte 0, low 16 bits
+res_lcoffhi     fcb     0               ; ... high 4 bits
+res_lcvol       fcb     0               ; ... and its volume
+
+* res_locate: A = type, B = index -> res_err (0 = found). Checks the record signature, as
+* res_fetch does, so a bad DIR entry fails the same way under either path.
+res_locate:
+                jsr     res_find
+                lda     res_err
+                bne     rl_out
+                lda     res_vol
+                sta     res_lcvol
+                jsr     res_ptr                 ; X -> signature byte 0
+                lda     ,x
+                cmpa    #$12
+                bne     rl_badsig
+* ★★ byte 1 of the signature through its OWN mapping: the record header can straddle too.
+                ldd     res_off
+                addd    #1
+                std     res_off
+                bcc     rl_s1
+                inc     res_offhi
+rl_s1:          jsr     res_ptr
+                lda     ,x
+                cmpa    #$34
+                bne     rl_badsig
+* payload = record start + res_hdrlen. res_off is record start + 1 here, so add hdrlen - 1.
+                ldb     res_hdrlen
+                decb
+                clra
+                addd    res_off
+                std     res_lcoff
+                lda     res_offhi
+                adca    #0
+                sta     res_lcoffhi
+                clr     res_err
+rl_out:         rts
+rl_badsig:      lda     #RES_E_SIG
+                sta     res_err
+                rts
+
+* res_peek: D = payload offset -> A = that byte. Clobbers B, X and res_off/res_offhi/res_vol --
+* which describe the last FETCH only while res_fetch is running, and nothing reads them after.
+res_peek:
+                addd    res_lcoff
+                std     res_off
+                lda     res_lcoffhi
+                adca    #0                      ; ★ lda leaves C alone, so this is addd's carry
+                sta     res_offhi
+                lda     res_lcvol
+                sta     res_vol
+                jsr     res_ptr
+                lda     ,x
+                rts
+                endc
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 * ── res_fetch ── A = type, B = index -> RES_SLOT, res_len. THE SEAM'S ONLY ENTRY POINT.
 *
 * ★★★ A caller asks for "LOGIC 3" and gets bytes. It never learns the volume, the offset or
