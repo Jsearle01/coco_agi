@@ -1251,6 +1251,29 @@ _G._n = emu.add_machine_frame_notifier(function()
             -- predict it exactly: loopTable4[3] = 0 (RIGHT) and loopTable4[7] = 1 (LEFT), and
             -- loopTable2 agrees on both [view.cpp:719-725]. ★★★ p3_spr is 6 bytes a row --
             -- x, y, prio, view, loop, cel -- and slot 0 is the ego.
+            -- ★★★★★ EVERY STAGED SPRITE, NOT ONLY THE EGO [after Jay: "there was no alligators"].
+            -- Room 1 stages four objects and the compositor is demonstrably running (250 B/cycle of
+            -- restore traffic), so "no alligators" is not a drawing failure -- it is a question
+            -- about WHICH objects are staged and what happens to their cels. The ego line below
+            -- prints slot 0; this prints all of them, with the compositor's own verdict counters.
+            -- ★★★ co_rejkey / co_rejpri are the two ways a cel can be drawn and invisible: every
+            -- pixel transparent, or every pixel losing the priority test. **They separate "never
+            -- queued" from "queued and rejected", which is the whole question here.**
+            if os.getenv("P3B_SPRITES") and SYM.p3_spr and SYM.p3_nspr then
+                local n = prog:read_u8(SYM.p3_nspr)
+                w("    staged sprites: %d", n)
+                for i = 0, math.min(n, 16) - 1 do
+                    local b = SYM.p3_spr + i * 6
+                    w("       [%d] x=%3d y=%3d prio=%2d view=%3d loop=%d cel=%d",
+                      i, prog:read_u8(b), prog:read_u8(b+1), prog:read_u8(b+2),
+                      prog:read_u8(b+3), prog:read_u8(b+4), prog:read_u8(b+5))
+                end
+                if SYM.co_tested then
+                    w("    compositor: tested=%d written=%d rejected key=%d pri=%d  vc_err=%d",
+                      rd32(SYM.co_tested), rd32(SYM.co_written), rd32(SYM.co_rejkey),
+                      rd32(SYM.co_rejpri), SYM.vc_err and prog:read_u8(SYM.vc_err) or -1)
+                end
+            end
             if SYM.p3_spr and SYM.p3_nspr and prog:read_u8(SYM.p3_nspr) > 0 then
                 local b = SYM.p3_spr
                 w("    ego: x=%d y=%d view=%d LOOP=%d cel=%d%s",
