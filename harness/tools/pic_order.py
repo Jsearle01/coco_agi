@@ -36,6 +36,8 @@ sys.path.insert(0, str(ROOT / "tools"))
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 from agivm import optable                          # noqa: E402
+from agivm import tests as tests_mod               # noqa: E402
+from agivm.state import VM_VAR_KEY as VM_VAR_KEY_NR  # noqa: E402
 from agivm.cycle import Vm                         # noqa: E402
 from agivm.dispatch import OpcodeError             # noqa: E402
 from volread import resource                       # noqa: E402
@@ -79,6 +81,16 @@ def main():
     ap.add_argument("--cycles", type=int, default=40)
     ap.add_argument("--seed", type=int, default=12345)
     ap.add_argument("--watch", default=DEFAULT_WATCH)
+    ap.add_argument("--late", type=int, default=120,
+                    help="cycle from which a test counts as 'in the wait loop'")
+    # ★★★★★ SIMULATE A KEYPRESS THE WAY THE ORACLE DOES [T-P0-123 §4D]. cmdHaveKey sets
+    # VM_VAR_KEY when a key arrives [op_test.cpp:133], and BOTH our 6809 vmtest_have_key and this
+    # reference's condHaveKey are true iff VM_VAR_KEY is non-zero. **So writing that variable for
+    # one cycle IS a keypress, on both sides** -- and it answers whether the title's wait exits
+    # on have.key without a byte of 6809 or a guess about the arbitration.
+    ap.add_argument("--post-key", type=lambda s: int(s, 0), default=0,
+                    help="key code to place in VM_VAR_KEY (0 = post nothing)")
+    ap.add_argument("--post-at", type=int, default=200, help="cycle at which to post it")
     a = ap.parse_args()
 
     names = [s.strip() for s in a.watch.split(",") if s.strip()]
@@ -126,6 +138,50 @@ def main():
         print("★★★ NOT WRAPPED (no handler bound -- this run is blind to them): %s"
               % ", ".join("%s($%02X)" % (n, v) for v, n in unwrapped))
 
+    # ═══════════════════════════════════════════════════════════════════════════════════════
+    # ★★★★★ WHICH CONTROLLER DOES THE SCRIPT POLL? [T-P0-123 §4A's stop condition]
+    # set.key binds a 16-bit AGI keycode to a controller SLOT; controller(n) tests that slot.
+    # **Knowing which slots a waiting script actually tests is what decides whether a key
+    # representation gap matters**: a wait on a slot bound to an ASCII key is reachable with an
+    # 8-bit scan code, and a wait on one bound to scancode<<8 is not.
+    # ★★★ condController is a TEST, not a command, so the command-handler wrapping above cannot
+    # see it. Wrapped the same way, on the module the dispatch table binds from.
+    # ★★★★★ EVERY TEST, not only controller. The first version of this watched condController
+    # alone, found it never evaluated, and could say what the wait ISN'T but not what it IS --
+    # which is half a measurement [§2W.3: a diagnostic that can only report absence].
+    ctrl_tests = {}
+    test_counts = {}
+    LATE = a.late
+
+    posted = {"done": False}
+
+    def _wrap_test(name, fn):
+        def rec(vm_, p):
+            # ★★★ Posted at the have.key test itself, which is where the oracle's key would
+            # arrive: condHaveKey pumps events and sets VM_VAR_KEY on a press.
+            if (a.post_key and not posted["done"] and name == "have.key"
+                    and vm_.cycle_nr >= a.post_at):
+                posted["done"] = True
+                vm_.state.vars[VM_VAR_KEY_NR] = a.post_key
+                print("  ★ posted key $%02X into VAR %d at cycle %d"
+                      % (a.post_key, VM_VAR_KEY_NR, vm_.cycle_nr))
+            c = test_counts.setdefault(name, [0, 0])
+            c[0] += 1
+            if vm_.cycle_nr >= LATE:
+                c[1] += 1
+            if name == "controller":
+                r = ctrl_tests.setdefault(p[0], [0, None, None])
+                r[0] += 1
+                if r[1] is None:
+                    r[1] = vm_.cycle_nr
+                r[2] = vm_.cycle_nr
+            return fn(vm_, p)
+        return rec
+
+    for t in vm.table.tests:
+        if t is not None and t.handler is not None:
+            t.handler = _wrap_test(t.name, t.handler)
+
     vm.start()
     status = 0
     try:
@@ -154,6 +210,29 @@ def main():
         print("    %-18s %d" % (name, counts[name]))
     if not counts:
         print("    (none of the watched opcodes executed)")
+
+    # ── which controller slots the script polls, and the set.key bindings that feed them ──
+    print()
+    if ctrl_tests:
+        binds = {}
+        for _c, _l, name, p, _res, _r, _f in events:
+            if name == "set.key" and len(p) >= 3:
+                binds.setdefault(p[2], []).append(p[0] | (p[1] << 8))
+        print("controller(n) tested by the script:")
+        print("   slot  tests  first  last   set.key bound this slot to")
+        for slot in sorted(ctrl_tests):
+            n, first, last = ctrl_tests[slot]
+            keys = binds.get(slot)
+            desc = ", ".join("$%04X" % k for k in keys) if keys else "★★★ NOTHING (never bound)"
+            print("   %4d  %5d  %5d  %4d   %s" % (slot, n, first, last, desc))
+    else:
+        print("controller(n): never tested in this window")
+    print()
+    print("tests evaluated   (late = from cycle %d, i.e. after the credits stop)" % a.late)
+    print("   test                     total     late")
+    for name in sorted(test_counts, key=lambda k: -test_counts[k][1]):
+        tot, late = test_counts[name]
+        print("   %-22s %7d  %7d" % (name, tot, late))
 
     # ── §6: can implementing show.pic's flag-15 clear move the nine-title gate? ──
     shows = [e for e in events if e[2] == "show.pic"]
