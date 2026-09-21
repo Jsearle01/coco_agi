@@ -180,4 +180,5 @@ offset or touch the deferred-render fallback [both out of scope].
 - `seeds/AGI/live/2026-09-20-a-guard-tested-only-where-it-works.md`
 
 ### 11 — Commit
-(recorded below; pushed to origin/wip before this report was surfaced)
+`8a2c709` — 5 files changed, 366 insertions(+), 14 deletions(-).
+Pushed to origin/wip (`c95f501..8a2c709`).
