@@ -189,4 +189,5 @@ a task about VAR 19 is the reshaping §8 forbids.
 - `seeds/AGI/live/2026-09-20-a-number-that-moved-the-right-way-is-not-a-number-that-arrived.md`
 
 ### 11 — Commit
-(recorded below; pushed to origin/wip before this report was surfaced)
+`d1972b7` — 6 files changed, 333 insertions(+), 7 deletions(-).
+Pushed to origin/wip (`42a26c7..d1972b7`).
