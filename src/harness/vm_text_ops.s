@@ -549,11 +549,74 @@ vmop_prevent_input      equ     vm_op_modelled
 * 266 non-black bytes across the advance, and I read a CHANGE as a CLEAR and told Jay to expect
 * the text to go. 266 is not zero. **A number that moved in the right direction is not evidence
 * that it reached the right value** [§2W.3].
-* ★★★ Implementing it is a text-engine task, not a line here: it needs the oracle's row range and
-* txt_boxfill, and it lands in the six P3B_NO_CEL gate rows. Named as the next task, not slipped
-* into one about VAR 19.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ IMPLEMENTED [T-P0-125]. $4E clear.lines(upper, lower, colour) -- op_cmd.cpp:2181,
+* text.cpp:635-653:
+*
+*     rowUpper = p[0]; rowLower = p[1]; colour = calculateTextBackground(p[2]);
+*     if (rowUpper > rowLower) rowLower = rowUpper;          // a guard for buggy games
+*     clearLines -> clearBlock(upper, 0, lower, FONT_COLUMN_CHARACTERS-1, colour)
+*                -> clip; translateFontRectToDisplayScreen; drawDisplayRect(...)
+*
+* ★★★★★ IT WRITES THE DISPLAY SCREEN, NOT THE GAME SCREEN, so it never touches the picture --
+* §6's "would it have to touch the picture area" answered from the oracle before any code.
+* ★★★★ ONE ROW AT A TIME THROUGH txt_clearline, WHICH ALREADY WAS THIS OPCODE'S INNER LOOP:
+* text.s:1135 says so in as many words -- *"clearBlock(row, 0, row, 39, colour) in the oracle...
+* this is one tx_boxfill"*. **clear.lines is that routine, upper through lower**, and nothing new
+* was needed in text.s.
+* ★★★ THE COLOUR RULE IS THE ORACLE'S, NOT "the argument": calculateTextBackground returns 15
+* only when gfxMode AND the argument is non-zero, else 0 [text.cpp]. **KQ1 calls
+* clear.lines(21, 24, 0)** -- measured -- so the title's clear is BLACK over rows 21-24, exactly
+* the strip p3_black_visible establishes and p3_present stops short of [P6.62].
+TX_CL_ROWS      equ     4               ; ★ state, not registers: txt_clearline clobbers A and B
+tx_cl_row       fcb     0               ; the row being cleared, walked upper -> lower
+tx_cl_last      fcb     0               ; the bounded lower row
+tx_cl_col       fcb     0               ; the computed background colour
+tx_cl_save      fcb     0               ; txt_bg, restored after
+                ifndef  P3B_FAULT_NOCLEARLINES
+vmop_clear_lines:
+                jsr     vm_p0
+                sta     tx_cl_row
+                jsr     vm_p1
+                cmpa    tx_cl_row
+                bhs     vcl_bounded
+                lda     tx_cl_row               ; upper > lower -> lower = upper [op_cmd.cpp:2189]
+vcl_bounded:    sta     tx_cl_last
+* ---- calculateTextBackground(p[2]) ----
+                jsr     vm_p2
+                tsta
+                beq     vcl_black
+                tst     vm_gfxmode
+                beq     vcl_black
+                lda     #15
+                bra     vcl_setbg
+vcl_black:      clra
+vcl_setbg:      sta     tx_cl_col
+* ★★★ txt_clearline takes its colour from txt_bg and the oracle passes one explicitly, so the
+* attribute is set for the fill and PUT BACK: clear.lines must not change what the next glyph
+* draws on [AD-160's shape -- an attribute left behind drew twelve glyphs black on black].
+                lda     txt_bg
+                sta     tx_cl_save
+                lda     tx_cl_col
+                sta     txt_bg
+                jsr     tx_window_enter
+vcl_lp:         lda     tx_cl_row
+                cmpa    tx_cl_last
+                bhi     vcl_done
+                jsr     txt_clearline
+                inc     tx_cl_row
+                bra     vcl_lp
+vcl_done:       jsr     tx_window_exit
+                lda     tx_cl_save
+                sta     txt_bg
+                rts
+                endc
+* ★★★★★ AC-9's FAULT ARM: -DP3B_FAULT_NOCLEARLINES puts the bare `rts` back. It is today's
+* behaviour and a KNOWN-GOOD RED in Jay's own words, quoted above.
+                ifdef   P3B_FAULT_NOCLEARLINES
 vmop_clear_lines:
                 rts
+                endc
 * ★★★★★ STILL A STUB, AND NOW WITH THE EVIDENCE RATHER THAN THE INTENTION [T-P0-092 §4A(4)].
 * _inputCursorChar is 0 at text.cpp:58 and **inputEditOn and inputEditOff are both no-ops while it
 * is zero** [text.cpp:673, :682]. So the command line renders completely without this opcode: there

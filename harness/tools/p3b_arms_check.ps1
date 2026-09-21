@@ -132,10 +132,14 @@ $ARMS = @(
   # and their six gate rows are untouched. ★★★ That split is a FINDING as well as a convenience:
   # **a text-only arm cannot publish VAR 19, so have.key can never fire in one.**
   @{ n = "p3b";        f = @("-DHAL_KEYBOARD");                          sz = 15475; sha = "475064B0" },
-  @{ n = "p3b_text";   f = $TEXT;                                         sz = 16632; sha = "1C81FDB6" },
-  @{ n = "p3b_win3";   f = $TEXT + @("-DTEXT_WIN3");                      sz = 16632; sha = "5FAD7359" },
-  @{ n = "p3b_notick"; f = $TEXT + @("-DTEXT_FAULT_NOTICK");              sz = 16629; sha = "0CE2F408" },
-  @{ n = "p3b_nomap";  f = $TEXT + @("-DP3B_VOCAB_NOMAP");                sz = 16629; sha = "F1573AD3" },
+  # ★★★★★ RE-BASELINED T-P0-125: the FIVE TEXT_WIRED arms moved +83 B (clear.lines is real), and
+  # p3b, p3b_fault and p3b_flat did NOT -- the first links no text engine and the other two are
+  # -DTEXT_MODELLED, which takes vm_text_ops.s's `equ` branch. ★★★ The split falls exactly along
+  # TEXT_WIRED, which is the condition the implementation sits behind.
+  @{ n = "p3b_text";   f = $TEXT;                                         sz = 16715; sha = "2463C537" },
+  @{ n = "p3b_win3";   f = $TEXT + @("-DTEXT_WIN3");                      sz = 16715; sha = "ED4243EC" },
+  @{ n = "p3b_notick"; f = $TEXT + @("-DTEXT_FAULT_NOTICK");              sz = 16712; sha = "02BFEBD5" },
+  @{ n = "p3b_nomap";  f = $TEXT + @("-DP3B_VOCAB_NOMAP");                sz = 16712; sha = "B37C6E92" },
   @{ n = "p3b_fault";  f = $TEXT + @("-DTEXT_MODELLED");                  sz = 15747; sha = "AEBC7C44" },
   @{ n = "p3b_flat";   f = $TEXT + @("-DTEXT_MODELLED","-DTEXT_VOCAB_FLAT"); sz = 15732; sha = "DD0A2E91" },
   # ★★★★★ THE EIGHTH ARM, NEW AT T-P0-120: text AND cels in one binary, which no build had before.
@@ -144,7 +148,7 @@ $ARMS = @(
   # ★★★ It is NOT a variant of the text arms: P3B_NO_CEL keeps its own meaning and all seven arms
   # above are byte-identical. This adds a shape rather than changing one.
   # ★★ -DP3B_IRQ comes with it, as it does for every wired text build.
-  @{ n = "p3b_comb";   f = @("-DHAL_KEYBOARD","-DP3B_COMBINED","-DP3B_IRQ"); sz = 18611; sha = "7467F2BD" }
+  @{ n = "p3b_comb";   f = @("-DHAL_KEYBOARD","-DP3B_COMBINED","-DP3B_IRQ"); sz = 18694; sha = "062599B8" }
 )
 
 # ★★★ -DP3B_COVERAGE puts the two opcode counters back [p3b_probe.s]. It is a REAL byte change --

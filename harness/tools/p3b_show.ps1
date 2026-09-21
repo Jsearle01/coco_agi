@@ -109,6 +109,7 @@ param(
   # 'press a key to continue' line never goes, and the alligators never draw [P6.69, P6.70].
   # ★★★ Expect draw 0, set.view 0, clear.lines 0 and the room unchanged, against 4/3/1 with it in.
   [switch]$NoVarKey,
+  [switch]$NoClearLines,
   # ★★★★ -RoomDrive IS THE COMPARISON ARM, NOT A FAULT: it restores the retired p3_room_check
   # driver, so the picture is rendered and presented by room DETECTION as it was before this
   # task. **The claim "the game now drives the render" needs an arm where it does not** [§2W].
@@ -263,6 +264,11 @@ if ($NoCloseWindow) { $FLAGS += "-DP3B_FAULT_NOCLOSEWIN" }
 # after the assembly has already run changes nothing. **Same class as the banner P6.68 put inside
 # the headless branch: correct code, placed where it cannot take effect.**
 if ($NoVarKey) { $FLAGS += "-DP3B_FAULT_NOVARKEY" }
+# ★★★★★ -NoClearLines IS T-P0-125's FAULT ARM: vmop_clear_lines goes back to a bare rts. Today's
+# behaviour, and a known-good red in Jay's own words -- "the press a key to continue stays on the
+# title screen and transfers to the castle screen." ★★★ Expect the text strip to stay at 715
+# non-black bytes across the advance instead of dropping to its cleared value.
+if ($NoClearLines) { $FLAGS += "-DP3B_FAULT_NOCLEARLINES" }
 if ($RoomDrive) { $FLAGS += "-DP3B_ROOMDRIVE" }
 # ★★★ -Combined needs P3B_IRQ as the text arms do: the text engine's print path blocks on a key,
 # and the vector stubs at $FEF0 are what P3_REGIONB_END reserves for.
@@ -497,6 +503,17 @@ if ($effRoom -gt 0) {
   " pass -NoRoomJump."
 } else {
   "★ title sequence intact (no room jump): credits scroll from cycle 5, one line per 5 cycles"
+}
+# ★★★★★ SAY THAT THE RUN ENDS, BECAUSE A CYCLE BUDGET LOOKS LIKE A CRASH [T-P0-125's eye gate].
+# The probe executes exactly -Cycles cycles and then FREEZES the display for -Hold seconds so it
+# can be looked at. Jay, interacting with a 180-cycle run: **"graham started walking and then the
+# game froze."** The log recorded `cycle 180 ... err 0` and `holding the display` -- no stall, no
+# watchdog. **The run had simply finished.**
+# ★★★ Same class as the room-jump default: the operator is judging the GATE's shape and reading it
+# as the PROGRAM's behaviour, and only the gate can tell him which it is.
+if (-not $Headless) {
+  "★ this run executes $Cycles cycle(s) and then FREEZES for $Hold s so you can look at it --" +
+  " the stop at the end is the budget running out, not the game crashing"
 }
 
 if ($Headless) {
