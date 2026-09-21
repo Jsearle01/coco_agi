@@ -160,8 +160,8 @@ VMOP_TAB:
                 fdb     vmop_call               ; 16 call(n)
                 fdb     vmop_call_f             ; 17 call.v(v)
                 fdb     vmop_load_pic           ; 18 load.pic(v)
-                fdb     vm_op_modelled          ; 19 draw.pic(v)  [modelled]
-                fdb     vm_op_modelled          ; 1A show.pic()  [modelled]
+                fdb     vmop_draw_pic           ; 19 draw.pic(v)
+                fdb     vmop_show_pic           ; 1A show.pic()
                 fdb     vmop_discard_pic        ; 1B discard.pic(v)
                 fdb     vm_op_modelled          ; 1C overlay.pic(v)  [modelled]
                 fdb     vm_op_modelled          ; 1D show.pri.screen()  [modelled]
@@ -246,7 +246,7 @@ VMOP_TAB:
                 fdb     vmop_set_cursor_char    ; 6C set.cursor.char(s)
                 fdb     vmop_set_text_attribute ; 6D set.text.attribute(nn)
                 fdb     vm_op_modelled          ; 6E shake.screen(n)  [modelled]
-                fdb     vm_op_modelled          ; 6F configure.screen(nnn)  [modelled]
+                fdb     vmop_configure_screen   ; 6F configure.screen(nnn)
                 fdb     vmop_status_line_on     ; 70 status.line.on()
                 fdb     vmop_status_line_off    ; 71 status.line.off()
                 fdb     vmop_set_string         ; 72 set.string(ns)

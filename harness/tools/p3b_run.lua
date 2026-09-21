@@ -1204,6 +1204,67 @@ _G._n = emu.add_machine_frame_notifier(function()
               prog:read_u8(SYM.res_err or 0))
             w("    final room %d, sprites %d, err %d, status=$%02X",
               prog:read_u8(ROOM), prog:read_u8(NSPR), prog:read_u8(ERR), prog:read_u8(STATUS))
+            -- ★★★★★ THE PICTURE OPCODES' RECEIPT [T-P0-121]. draw.pic sets p3_drew and clears
+            -- p3_shown; show.pic sets p3_shown [op_cmd.cpp:1210,1218]. **drew=1 shown=1 means the
+            -- GAME ordered both halves**; drew=1 shown=0 is the -DP3B_FAULT_SHOWPIC arm, where the
+            -- room is rendered into the shadow and never revealed -- and it is the pair that makes
+            -- that fault a byte result instead of only something to look at [§2W].
+            -- ★★★ drew=0 is the loud one: the game issued no draw.pic at all, which after this
+            -- task means a BLACK SCREEN rather than a picture arriving late.
+            -- ★★ UNCONDITIONAL, matching the unconditional definition of both bytes.
+            -- ★★★★★ THE VERDICT IS COMPUTED FROM THE BYTES, NOT PRINTED BESIDE THEM. The first
+            -- version ended every line with "(1/1 = the game ordered both)" including the run
+            -- where it was 1/0 -- **a label that cannot be wrong is not a reading** [§2W.3], and
+            -- the fault arm's own red would have shipped wearing a green caption.
+            if SYM.p3_drew and SYM.p3_shown then
+                local drew, shown = prog:read_u8(SYM.p3_drew), prog:read_u8(SYM.p3_shown)
+                local verdict
+                if drew == 1 and shown == 1 then
+                    verdict = "rendered AND revealed"
+                elseif drew == 1 then
+                    verdict = "★★★ RENDERED, NEVER REVEALED -- show.pic did not run"
+                elseif shown == 1 then
+                    verdict = "★★★ REVEALED WITHOUT A RENDER -- impossible ordering"
+                else
+                    verdict = "★★★ NO PICTURE ORDERED AT ALL -- the screen should be black"
+                end
+                w("    picture: draw.pic drew=%d  show.pic shown=%d   %s", drew, shown, verdict)
+                -- ★★★★★ THE FETCH FAILURE'S CONTEXT [T-P0-121]. draw.pic runs INSIDE a running
+                -- logic, so the picture must fit the arena ON TOP of whatever the VM is holding.
+                -- res_depth at the failure is the number that says so.
+                -- ★★★★ THE MARGIN, on every run. The arena is $3000-$6000 (12 KB); a picture
+                -- needs room ABOVE whatever the VM is holding when draw.pic executes.
+                if SYM.p3_drawtop then
+                    local top = rd16(SYM.p3_drawtop)
+                    local ccur = SYM.p3_drawccur and rd16(SYM.p3_drawccur) or 0
+                    local nf = SYM.p3_nfall and rd16(SYM.p3_nfall) or 0
+                    -- ★★★★★ FREE = res_ccur - res_top. The stack rises from RES_ARENA and the
+                    -- cache descends toward it [res_core.s:281-285]; the arena's END bounds
+                    -- NEITHER. The first version of this line measured against the end and
+                    -- reported "0 bytes free" for an empty arena [§2W.3].
+                    w("    arena at draw.pic: res_top=$%04X cache floor=$%04X depth=%d"
+                      .. "  -> %d bytes free   deferred to depth 0: %d",
+                      top, ccur, prog:read_u8(SYM.p3_drawdepth), ccur - top, nf)
+                    -- ★★★★ A DEFERRED RENDER IS THE OLD ORDERING. Named here so a run that
+                    -- recovered does not read as a run that never needed to [§2W].
+                    if nf > 0 then
+                        w("    ★★ %d room(s) rendered AFTER the logic returned -- the arena was"
+                          .. " full at draw.pic, so those rooms have the PRE-TASK ordering", nf)
+                    end
+                end
+                if SYM.p3_errpic then
+                    local ep = prog:read_u8(SYM.p3_errpic)
+                    if ep ~= 0xFF then
+                        local et = rd16(SYM.p3_errtop)
+                        local ec = SYM.p3_errccur and rd16(SYM.p3_errccur) or 0
+                        w("    ★★★ picture %d was REFUSED at draw.pic: res_top=$%04X"
+                          .. " cache floor=$%04X depth=%d -> %d bytes free",
+                          ep, et, ec, prog:read_u8(SYM.p3_errdepth), ec - et)
+                        w("        (the LOGIC CACHE had taken the arena; res_open may only evict"
+                          .. " at depth 0 [res_core.s:309-314])")
+                    end
+                end
+            end
             -- ★★★ THE TRAJECTORY AND THE ERRORS, PRINTED TOGETHER so a room change and a failed
             -- fetch on the same cycle are visible as one event rather than two lines apart.
             -- ★★★★ ONCE. This whole block re-runs on every frame of the hold, and the log already

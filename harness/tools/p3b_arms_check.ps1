@@ -110,20 +110,27 @@ $ARMS = @(
   # moved out of region A to MAP_INPUT and vm_tables relocated to the seed-stack slack. Neither
   # changes how many bytes the image holds; both change where they sit. ★★★ A size-only check
   # would have called this unchanged, which is why the baseline is a HASH.
-  @{ n = "p3b";        f = @("-DHAL_KEYBOARD");                          sz = 15266; sha = "5AA65B69" },
-  @{ n = "p3b_text";   f = $TEXT;                                         sz = 16429; sha = "3250E5CF" },
-  @{ n = "p3b_win3";   f = $TEXT + @("-DTEXT_WIN3");                      sz = 16429; sha = "64113D30" },
-  @{ n = "p3b_notick"; f = $TEXT + @("-DTEXT_FAULT_NOTICK");              sz = 16426; sha = "A3FC78DD" },
-  @{ n = "p3b_nomap";  f = $TEXT + @("-DP3B_VOCAB_NOMAP");                sz = 16426; sha = "9DAFE0E3" },
-  @{ n = "p3b_fault";  f = $TEXT + @("-DTEXT_MODELLED");                  sz = 15553; sha = "99DDA1AF" },
-  @{ n = "p3b_flat";   f = $TEXT + @("-DTEXT_MODELLED","-DTEXT_VOCAB_FLAT"); sz = 15538; sha = "32C658EB" },
+  # ★★★★★ RE-BASELINED T-P0-121, AND ALL EIGHT MOVED BY EXACTLY +194 B. The uniformity is again
+  # the evidence it is ONE change: load.pic/draw.pic/show.pic/configure.screen became the GAME's
+  # to order, and vm_pic_ops.s plus p3_pic_draw/p3_pic_show/p3_pic_pending link in every arm.
+  # ★★★★ PIC_WIRED IS NOT INSIDE ANY ARM'S CONDITIONAL -- every p3b configuration links the
+  # renderer and owns both planes -- so scoping this to one arm was never available, and the
+  # opcodes matter in the text arms too: they are what puts the copyright and the picture in the
+  # game's own order. ★★★ Gates were run green against the moved arms before re-baselining.
+  @{ n = "p3b";        f = @("-DHAL_KEYBOARD");                          sz = 15460; sha = "69ED497B" },
+  @{ n = "p3b_text";   f = $TEXT;                                         sz = 16623; sha = "A4FB8EE7" },
+  @{ n = "p3b_win3";   f = $TEXT + @("-DTEXT_WIN3");                      sz = 16623; sha = "38B82078" },
+  @{ n = "p3b_notick"; f = $TEXT + @("-DTEXT_FAULT_NOTICK");              sz = 16620; sha = "A8F9246A" },
+  @{ n = "p3b_nomap";  f = $TEXT + @("-DP3B_VOCAB_NOMAP");                sz = 16620; sha = "AE9E5B59" },
+  @{ n = "p3b_fault";  f = $TEXT + @("-DTEXT_MODELLED");                  sz = 15747; sha = "008E4602" },
+  @{ n = "p3b_flat";   f = $TEXT + @("-DTEXT_MODELLED","-DTEXT_VOCAB_FLAT"); sz = 15732; sha = "491117C1" },
   # ★★★★★ THE EIGHTH ARM, NEW AT T-P0-120: text AND cels in one binary, which no build had before.
   # src/engine/text.s is `org`ed into slot 7's hole at $EBBA -- region A cannot hold both halves
   # (P6.64 measured 513 B over) and slot 7 is never remapped in either phase.
   # ★★★ It is NOT a variant of the text arms: P3B_NO_CEL keeps its own meaning and all seven arms
   # above are byte-identical. This adds a shape rather than changing one.
   # ★★ -DP3B_IRQ comes with it, as it does for every wired text build.
-  @{ n = "p3b_comb";   f = @("-DHAL_KEYBOARD","-DP3B_COMBINED","-DP3B_IRQ"); sz = 18393; sha = "89837FCA" }
+  @{ n = "p3b_comb";   f = @("-DHAL_KEYBOARD","-DP3B_COMBINED","-DP3B_IRQ"); sz = 18587; sha = "CCA49E6C" }
 )
 
 # ★★★ -DP3B_COVERAGE puts the two opcode counters back [p3b_probe.s]. It is a REAL byte change --
@@ -151,4 +158,7 @@ foreach ($a in $ARMS) {
   if (-not $ok) { $bad++ }
   "{0,-10} {1,6} B  {2}  {3}" -f $a.n, $sz, $h.Substring(0, 8), $(if ($ok) { "OK" } else { "MOVED -- expected $($a.sz) B $($a.sha)" })
 }
-if ($bad -eq 0) { "★ all 7 shipped arms byte-identical to the P6.47 baseline (SHA256)" } else { "★ $bad ARM(S) MOVED"; exit 1 }
+# ★★★ THE COUNT IS COUNTED, NOT TYPED. It read "all 7 shipped arms" while listing EIGHT -- stale
+# since p3b_comb was added at T-P0-120 -- so a passing run stated a falsehood about its own scope.
+# ★★ The baseline reference is likewise the CURRENT one: it said P6.47 through three re-baselines.
+if ($bad -eq 0) { "★ all $($ARMS.Count) arms byte-identical to the T-P0-121 baseline (SHA256)" } else { "★ $bad ARM(S) MOVED"; exit 1 }

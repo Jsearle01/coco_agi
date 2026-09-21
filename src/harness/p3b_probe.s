@@ -178,6 +178,19 @@ P3B_TEXT_LINK   equ     1               ; src/engine/text.s is linked
 P3B_TEXT_LINK   equ     1
                 endc
                 endc
+* ★★★★★ PIC_WIRED -- the game's own picture opcodes are REAL in this build [T-P0-121]. Every
+* p3b configuration links the renderer (pic_render_at) and owns both planes, so unlike
+* TEXT_WIRED this is not conditional on an arm: the thing it needs is always present.
+* ★★★ It is still a NAMED flag rather than an unconditional include, because vm_pic_ops.s is
+* shared with vm_probe -- which has no renderer -- and the name is what makes that build's
+* three `equ`s to vm_op_modelled a decision instead of an accident.
+* ★★★★★ AND -DP3B_ROOMDRIVE TURNS IT OFF, WHICH IS WHAT MAKES THAT ARM A REAL COMPARISON. With
+* PIC_WIRED still on, the room detector AND the opcodes would both render -- twice per room --
+* and the arm would measure a configuration nobody has ever shipped. **Off, it is exactly the
+* binary this task started from**: three modelled opcodes and a detector driving the screen.
+                ifndef  P3B_ROOMDRIVE
+PIC_WIRED       equ     1
+                endc
 HW_STACK        equ     MAP_HWSTACK
 
 * ── host handshake, in the status block ──────────────────────────────────────────
@@ -978,7 +991,20 @@ p3_do_cycle:
 * dead routine was the only structural saving available.
 * ★★ The P3_T_* equs are KEPT: they document that MAP_STATUS+8..+27 is reserved and unused, which
 * is worth more than the zero bytes deleting them would save.
-                jsr     phase_vm                ; ★ AC-7: no plane mapped
+                jsr     p3_enter_vm_phase       ; ★ AC-7: no plane mapped
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE BODY OF THIS MOVED TO p3_enter_vm_phase [T-P0-121] AND THE REASON IS §2F. draw.pic
+* and show.pic now run INSIDE p3_run_vm and both disturb slots 5 and 6, so each has to put the
+* VM phase back before the handler returns -- and the loop continues into p3_stage_sprites,
+* which reads the object table through slot 5. **Three callers of one sequence is one routine.**
+* ★★★★ THE ALTERNATIVE WAS A THIRD COPY OF "what slot 5 holds", and this file already carries
+* two -- ph_blk_slot5 in the text arms and the `#$3D` literal in the cel arm. mmu_phase.s:234-239
+* says what a second opinion costs: *"declaring a second would let the two restores disagree."*
+* The comments that explained each step moved with the code and are unchanged at the routine.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+                bra     p3_after_vm_phase
+p3_enter_vm_phase:
+                jsr     phase_vm
 * ★★★★ RESTORE SLOT 5 TO THE OBJECT TABLE, AND THIS IS A GAP IN THE ENGINE'S PHASE MODEL.
 * mmu_phase.s's phase_vm touches slot 6 ONLY, and says so deliberately: *"SLOT 5 IS LEFT ALONE,
 * NOT CLEARED... the VM phase is defined by what it does NOT touch."* That is correct for a VM
@@ -1008,6 +1034,11 @@ p3_do_cycle:
 * ★★ The two owners of $FFA6 have to agree, and the phase machinery is the one that moved it.
                 lda     #$FF
                 sta     res_curblk
+                rts
+* ★★ The `bra` above jumps this body; the routine sits inside the loop rather than beside
+* phase_draw_enter so its comments stay where they were written, and the whole change reads as
+* a factoring rather than a move [3 bytes: the bra and the rts].
+p3_after_vm_phase:
 * ★★★ AC-5's brackets. One `sta` per boundary; the host tap does the arithmetic. Placed around
 * the calls rather than inside them so a stage's cost includes its own call overhead, which is
 * what a budget consumer cares about.
@@ -1029,7 +1060,11 @@ p3_do_cycle:
                 sta     P3_PHASE
                 lda     #7
                 sta     P3_PHASE
-                jsr     p3_room_check           ; fetch in VM phase, render in draw phase
+                jsr     p3_room_check           ; ★ now a DIAGNOSTIC only -- see the routine
+* ★★★★★ DRAIN A DEFERRED draw.pic HERE AND NOWHERE ELSE. This is the first point in the cycle
+* where res_depth is 0, which is the only depth at which res_open may evict the logic cache
+* [res_core.s:309-314]. ★★ After p3_room_check so the published room is current if it renders.
+                jsr     p3_pic_pending
                 lda     #8
                 sta     P3_PHASE
                 jsr     phase_draw_enter        ; ★ AC-7: the pair, exactly two MMU writes
@@ -1354,6 +1389,25 @@ ppd_out:        rts
 * swapped. res_open needs the VOLUME window, which is slot 6; the renderer needs the FRAMEBUFFER
 * slice, which is also slot 6. **The bytes bridge the two because they land in the arena, which
 * is resident in both.** Getting this backwards is a remap per picture opcode.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ DEMOTED TO A DIAGNOSTIC [T-P0-121]. This routine used to own FIVE things: detect the
+* room change, fetch the PICTURE, clear and render it, present it, and shadow the priority
+* plane. **Four of those are the game's to order and are now draw.pic and show.pic.** What is
+* left is the one thing the GAME cannot tell the host: which room the VM believes it is in.
+*
+* ★★★★ THE RULING AND ITS EVIDENCE [§1.2]. The oracle renders at draw.pic into _gameScreen and
+* reveals at show.pic via render_Block into _displayScreen [op_cmd.cpp:1178,1212;
+* picture.cpp:834-864]. **Our shadow IS _gameScreen and our visible plane IS _displayScreen**,
+* so the split needed no new mechanism -- only a caller that is the game rather than a detector.
+* ★★★ Measured before it was believed [harness/tools/pic_order.py]: KQ1 cycle 1 issues
+* load.pic, configure.screen, draw.pic, two displays, then show.pic. A port driven by room
+* detection cannot place the text between the render and the reveal, which is where it goes.
+*
+* ★★★★★ -DP3B_ROOMDRIVE RESTORES THE OLD DRIVER, and it is the comparison arm rather than a
+* fallback: with it defined the detector renders and presents exactly as before, so the claim
+* "the game now drives the render" has an arm where it does not. **§2W -- an instrument must be
+* shown able to fail.** A build with ROOMDRIVE and the opcodes modelled is today's behaviour.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 p3_room_check:
 * ★★★★ VAR 0, NOT vm_roomnr. VAR_CURRENT_ROOM is the room; `vm_roomnr` is a port-side shadow
 * that only vm_new_room writes, and vm_new_room is only reached via the new.room COMMAND.
@@ -1366,22 +1420,66 @@ p3_room_check:
                 cmpa    p3_lastroom             ;   probe never wrote, and reported room 0
                 beq     prc_out                 ;   while the VM was elsewhere
                 sta     p3_lastroom
-* ── still in the VM phase: fetch the PICTURE by (type, index) ──
+                ifdef   P3B_ROOMDRIVE
+* ── the retired driver, kept as the comparison arm ──
+                lda     p3_lastroom
+                jsr     p3_pic_draw
+                jsr     p3_pic_show
+                endc
+prc_out:        rts
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ── p3_pic_draw -- draw.pic's half: FETCH, CLEAR, RENDER, SHADOW THE PRIORITY PLANE ──
+* ★★★★★ A = the picture number, already resolved from the variable by the handler.
+*
+* ★★★★★ THE FETCH IS FOLDED IN HERE AND load.pic DOES NOT DO IT -- a DECLARED DIVERGENCE under
+* §2I, not an oversight. The oracle's load.pic calls loadResource and its draw.pic decodes from
+* memory [op_cmd.cpp:1223,1178]. **Our arena is a STACK: res_close rewinds res_top**
+* [res_core.s:606-617], so a pointer held from load.pic to draw.pic either dangles at the close
+* or costs a permanently-held depth level that a game calling load.pic without draw.pic never
+* returns. ★★★ Folding the bracket makes the render read bytes it opened itself.
+* ★★ WHAT IT COSTS AND WHAT IT SAVES, stated as §2I requires: it moves a volume-window fetch
+* (milliseconds) from one opcode to the next one the game issues, and it removes a dangling
+* pointer and a depth leak. **The output is identical; the ordering this task exists to fix is
+* unaffected, because the ~2.8 s RENDER is what moved and it is still here.**
+*
+* ★★★ THE FETCH RUNS IN THE VM PHASE AND THE RENDER IN THE DRAW PHASE, and they cannot be
+* swapped -- res_open needs the VOLUME window in slot 6 and the renderer needs the FRAMEBUFFER
+* slice in the same slot. The bytes bridge the two because they land in the arena, resident in
+* both. ★★ That was true when this code lived in p3_room_check and it is unchanged by the move.
+p3_pic_draw:
+                sta     p3_picnum
+* ★★★★★ THE ARENA AS draw.pic FINDS IT, CAPTURED EVERY TIME AND NOT ONLY ON FAILURE. The whole
+* consequence of moving this call inside a running logic is that res_top is no longer wherever
+* the main loop left it, and a byte recorded only when the fetch FAILS cannot show the margin on
+* the runs that succeed [L-88's shape -- an instrument scoped to the interesting case measures
+* the case and not the question].
+                ldx     res_top
+                stx     p3_drawtop
+                lda     res_depth
+                sta     p3_drawdepth
+* ★★★★★ AND res_ccur, WHICH IS THE NUMBER THAT ACTUALLY BOUNDS THE FETCH. res_top is a bump
+* pointer rising from RES_ARENA ($6000 here) and res_ccur is the CACHE's floor descending from
+* the top: *"the stack's ceiling is the cache's floor... the two allocators grow toward each
+* other"* [res_core.s:281-285], and res_open sets res_ceil from res_ccur.
+* ★★★★★ THE FREE SPACE IS res_ccur - res_top AND NOTHING ELSE. My first version of this readout
+* computed it against the arena's END and printed "0 bytes free" for an EMPTY arena -- a
+* confident number about the wrong quantity, which is §2W.3's defect in the instrument added to
+* measure §2W's. **The cache had eaten the arena; the stack had not filled it.**
+                ldx     res_ccur
+                stx     p3_drawccur
                 lda     #RES_PICTURE
-                ldb     p3_lastroom
+                ldb     p3_picnum
                 jsr     res_open
                 lda     res_err
-                bne     prc_fail
+                bne     ppd_fail
                 ldx     res_base
                 stx     p3_picptr
-* ★ The step markers that localised the render hang lived here and are removed: they had done
-* their job, and keeping them put the image 5 bytes over the code region -- which would have
-* meant a fourth bite out of the parser/sound reservation to carry debug scaffolding.
-* ── now the draw phase, and only now ──
 * ★★★ RENDER INTO THE SHADOW. ph_blk_fb selects which four blocks every plane_win call and every
 * phase_draw_fb resolves against, so pointing it at the shadow redirects the WHOLE render --
-* clear, lines and fills -- with no change to pic_core. The visible plane keeps the previous
-* room on screen throughout, which is the point.
+* clear, lines and fills -- with no change to pic_core. **The visible plane keeps the previous
+* room on screen throughout, which is now the POINT rather than a side effect**: that is what
+* makes draw.pic invisible and show.pic the moment the room appears.
                 lda     #P3_BLK_SHADOW
                 sta     ph_blk_fb
                 jsr     phase_draw_enter
@@ -1389,23 +1487,112 @@ p3_room_check:
                 ldx     p3_picptr
                 stx     pic_ptr
                 jsr     pic_render_at
-* ★★★ AND NOW PRESENT IT: one copy per room, against a ~2.8 s render.
-                jsr     p3_present
-* ★★★★★ AND TAKE THE PRIORITY PLANE'S SHADOW, for the same reason and at the same moment
-* [T-P0-112]. pic_render_at has just written the room's priority data into the live plane; from
-* here until the next room change that data is the only record of what is underneath a sprite,
-* and every sprite that draws destroys some of it. This is the copy that gives the restore a
-* source. ★★ Once per room, against the same ~2.8 s render -- the same trade p3_present makes.
+* ★★★★★ THE PRIORITY SHADOW BELONGS TO draw.pic, NOT show.pic [§1.2's ruling, §2H's second
+* check -- the CALLER carries the scope]. pic_render_at has just written the room's priority
+* data into the live plane; from here until the next picture that data is the only record of
+* what is underneath a sprite, and every sprite that draws destroys some of it. **It must be
+* taken while the plane is still clean, which is before drawAllSpriteLists -- inside draw.pic.**
                 ifdef   P3B_CEL_LINK
                 jsr     p3_pri_shadow
                 endc
                 jsr     res_close
                 lda     #1
                 sta     p3_drew
-                rts
-prc_fail:       lda     res_err
+                clr     p3_shown                ; ★ state->pictureShown = false [op_cmd.cpp:1210]
+                jmp     p3_enter_vm_phase
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ RES_E_FULL ABOVE DEPTH 0 IS NOT A FAILURE, IT IS THE ARENA'S DOCUMENTED REFUSAL, AND
+* THIS IS THE ONE THING THE OWNERSHIP MOVE BROKE. res_open recovers from a full arena by EVICTING
+* a cached LOGIC and retrying -- **but only at depth 0**, because above it the cached bytes may be
+* the bytes currently executing [res_core.s:309-314]. The retired driver ran from the main loop at
+* depth 0 and could evict. **draw.pic runs inside a running logic and cannot.**
+*
+* ★★★★★ AND "EVICT ANYWAY" IS THE APPROACH THAT HALTED ALL NINE TITLES AT CYCLE 0 -- res_core.s
+* records it in as many words, as the first version that reset the arena inside new.room. §6: a
+* previously failed approach is not retried. **So the fetch is DEFERRED to the main loop, which is
+* at depth 0, where eviction is exactly as legal as it was before this task.**
+*
+* ★★★★ WHAT THAT COSTS, STATED PLAINLY: a deferred room renders AFTER the logic returns, which is
+* the OLD ordering -- the text first and the picture 2.8 s later. **The common case keeps the fix
+* and the full-arena case degrades to precisely the behaviour this task started from**, rather
+* than to a room that never draws. It is a fallback, not a solution.
+* ★★★ THE SOLUTION IS THAT A PICTURE SHOULD NOT LIVE IN THE LOGIC ARENA AT ALL. It is a
+* room-lifetime resource sharing a call-scoped stack, which is §2V.2's residency row exactly.
+* Reported as a follow-up; it is a memory-map decision and not a line here.
+* ★★ COUNTED, NEVER SILENT: p3_nfall is in the summary. A fallback nobody can see is a fallback
+* that becomes the behaviour [§2W].
+ppd_fail:       lda     res_err
+                cmpa    #RES_E_FULL
+                bne     ppd_hard
+                lda     res_depth
+                beq     ppd_hard                ; at depth 0 the eviction already ran and failed
+* ★★★★ RECORD THE REFUSAL'S CONTEXT BEFORE DEFERRING. The deferred retry SUCCEEDS at depth 0, so
+* p3_drawtop/p3_drawccur end the run describing the recovery rather than the refusal -- and the
+* refusal is the finding. **An instrument that only survives the successful call measures the
+* wrong call** [L-88].
+                lda     p3_picnum
+                sta     p3_errpic
+                ldx     res_top
+                stx     p3_errtop
+                ldx     res_ccur
+                stx     p3_errccur
+                lda     res_depth
+                sta     p3_errdepth
+                lda     p3_picnum
+                inca                            ; ★ +1 so that 0 means "nothing pending"
+                sta     p3_pend
+                ldd     p3_nfall
+                addd    #1
+                std     p3_nfall
+                jmp     p3_enter_vm_phase
+ppd_hard:       lda     res_err
                 sta     P3_ERR
-prc_out:        rts
+* ★★★★★ NAME WHAT FAILED AND WHERE THE ARENA WAS [§2W.3 -- a diagnostic that cannot be wrong does
+* not measure]. P3_ERR is STICKY and carries no context, so "err 5" alone cannot say which
+* picture, at what depth, with how much arena left. These three bytes are that context, captured
+* at the failure and nowhere else.
+                lda     p3_picnum
+                sta     p3_errpic
+                ldx     res_top
+                stx     p3_errtop
+                ldx     res_ccur
+                stx     p3_errccur
+                lda     res_depth
+                sta     p3_errdepth
+* ★ The failure path never entered a draw phase, so the restore is a no-op there -- called
+* anyway because a handler that returns in an unknown phase is the defect this routine exists
+* to prevent, and one `jmp` is cheaper than reasoning about which paths need it.
+                jmp     p3_enter_vm_phase
+
+* ── p3_pic_show -- show.pic's half: REVEAL what draw.pic rendered ────────────────
+* ★★★★★ AND RESTORE THE VM PHASE, WHICH IS NEW AND IS LOAD-BEARING. p3_present borrows the
+* VISIBLE plane into slot 5 and leaves it there [p3_present, above]. That was harmless while
+* this ran from the main loop -- phase_draw_enter followed immediately -- but show.pic returns
+* INTO A RUNNING LOGIC, and the loop then continues to p3_stage_sprites, **which reads the
+* object table through slot 5**. ★★★★ This is mmu_phase.s:193-205's recorded hazard arriving:
+* *"a parse inside an open text window leaves slot 5 wrong."* Same slot, same shape, new caller.
+p3_pic_show:
+                jsr     p3_present
+                lda     #1
+                sta     p3_shown                ; ★ state->pictureShown = true [op_cmd.cpp:1218]
+                jmp     p3_enter_vm_phase
+
+* ── p3_pic_pending -- drain a DEFERRED draw.pic, at depth 0 where eviction is legal ──
+* ★★★★★ CALLED FROM THE MAIN LOOP, WHICH IS THE ENTIRE POINT: the logic has returned, res_depth
+* is 0, and res_open may evict a cached LOGIC and retry exactly as it did before this task.
+* ★★★ It renders AND reveals, because a deferred picture has missed its show.pic -- the game
+* issued that opcode while the render was refused. **Not re-ordering the game: recovering a
+* frame the arena would otherwise have dropped.**
+* ★★ p3_pend holds the picture number PLUS ONE so that zero means nothing pending; picture 0 is
+* a legal resource number and a bare 0 sentinel would make it unrenderable.
+p3_pic_pending:
+                lda     p3_pend
+                beq     ppp_out
+                clr     p3_pend                 ; ★ clear FIRST: a failing retry must not loop
+                deca
+                jsr     p3_pic_draw
+                jsr     p3_pic_show
+ppp_out:        rts
 
 * ── p3_clear_planes — AGI's defaults: visual 15 (white), priority 4 (red) ────────
 * ★★ NOT the HAL's clear. HAL_gfx_set_mode clears to palette index 0, which is correct for the
@@ -2391,6 +2578,21 @@ p3_composite_all:
 p3_lastroom     fcb     $FF             ; ★ $FF: no room yet, so the first cycle always renders
 p3_picptr       fdb     0
 p3_drew         fcb     0
+p3_picnum       fcb     0               ; ★ the picture draw.pic was last given
+* ★★★ pictureShown, and it is the oracle's byte rather than ours: draw.pic clears it and
+* show.pic sets it [op_cmd.cpp:1210,1218]. Nothing in this probe READS it yet -- it is carried
+* because the two opcodes that write it are being implemented now and a half-implemented
+* opcode is the thing §2W's "declared, not stubbed" rule exists to avoid. The host prints it.
+p3_shown        fcb     0
+p3_errpic       fcb     $FF             ; ★ $FF = no fetch has failed
+p3_errtop       fdb     0               ; res_top when it did
+p3_errdepth     fcb     0               ; res_depth when it did -- the whole point
+p3_errccur      fdb     0               ; the cache floor when it did -- the number that explains it
+p3_drawtop      fdb     0               ; res_top as the LAST draw.pic found it
+p3_drawdepth    fcb     0               ; res_depth as the LAST draw.pic found it
+p3_drawccur     fdb     0               ; res_ccur (the cache floor) as draw.pic found it
+p3_pend         fcb     0               ; ★ deferred picture number PLUS ONE; 0 = none pending
+p3_nfall        fdb     0               ; how many draw.pic fetches had to be deferred
 p3_nspr         fcb     0
 p3_si           fcb     0
 p3_view         fcb     0
@@ -2546,6 +2748,11 @@ TEXT_WIRED      equ     1
 * ★★★ UNCONDITIONAL, because the generated table names the nine labels in every build [AD-176].
 * Under anything but TEXT_WIRED this emits nothing but nine `equ`s to vm_op_modelled.
                 include "src/harness/vm_text_ops.s"
+* ★★★ UNCONDITIONAL FOR THE SAME REASON AND WITH THE SAME SHAPE [AD-176]: gen_vm_tables.py
+* names vmop_draw_pic / vmop_show_pic / vmop_configure_screen in EVERY build once the labels
+* exist, so every client must define them. Without PIC_WIRED this emits three `equ`s to
+* vm_op_modelled and no bytes.
+                include "src/harness/vm_pic_ops.s"
 P3_CODE_END     equ     *
 * ★★★★★ -DP3B_ACCEPT_OVERRUN NOW SUPPRESSES THIS GUARD TOO, FOR THE SAME REASON IT SUPPRESSES THE
 * DRAW-PHASE ONE BELOW: **you cannot measure an overrun with a build that refuses to produce a
