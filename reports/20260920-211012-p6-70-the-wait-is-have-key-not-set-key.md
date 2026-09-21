@@ -198,4 +198,4 @@ None during this task. It descends from Jay's three observations recorded in P6.
 - `seeds/AGI/live/2026-09-20-the-reason-not-to-do-it-expired-before-the-code-did.md`
 
 ### 11 — Commit
-(recorded below; pushed to origin/wip before this report was surfaced)
+`9b290d7` — 2 files changed, 280 insertions(+). Pushed to origin/wip (`2b4131d..9b290d7`).
