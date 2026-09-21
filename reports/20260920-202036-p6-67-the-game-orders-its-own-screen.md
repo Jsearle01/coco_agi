@@ -211,4 +211,5 @@ Jay answered the §4A eye gate with five numbered answers: *"1. together, 2.yes,
 - `seeds/AGI/live/2026-09-20-the-instrument-built-to-catch-a-defect-carried-that-defect.md`
 
 ### 11 — Commit
-(see below — pushed to origin/wip before this report)
+`db181fc` — 8 files changed, 841 insertions(+), 34 deletions(-).
+Pushed to origin/wip (`2bde0c6..db181fc`) before this report was surfaced.
