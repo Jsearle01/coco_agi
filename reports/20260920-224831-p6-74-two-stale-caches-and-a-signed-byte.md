@@ -199,4 +199,5 @@ left for a reader to notice the AC and the artifact differ.**
 - `seeds/AGI/live/2026-09-20-the-cache-was-invalidated-everywhere-the-author-had-thought-of.md`
 
 ### 11 — Commit
-(recorded below; pushed to origin/wip before this report was surfaced)
+`cf27302` — 6 files changed, 417 insertions(+), 7 deletions(-).
+Pushed to origin/wip (`9df8cd0..cf27302`).
