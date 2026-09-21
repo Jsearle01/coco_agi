@@ -1266,9 +1266,25 @@ p3_feed         equ     p3_parse_line
 * set ENTERED_CLI for a line the game refused to accept.
 * ★★★ P3_KEY publishes what was seen, so the host can assert that a posted key ARRIVED rather than
 * inferring it from the screen. Without it a dead matrix and a dead editor look identical [§2W.3].
-* ★★ VM_VAR_KEY is NOT written here. cycle.cpp does set var 19, but the opcodes that read it are
-* not wired and writing it would be a side effect with no reader -- the shape mmu_phase.s's
-* phase_vm note refuses for the same reason.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ VM_VAR_KEY IS STILL NOT WRITTEN HERE, AND THE REASON HAS CHANGED [T-P0-124]. The old text
+* is kept because it was TRUE WHEN WRITTEN and the next reader needs to see why:
+*
+*     "VM_VAR_KEY is NOT written here. cycle.cpp does set var 19, but the opcodes that read it
+*      are not wired and writing it would be a side effect with no reader."
+*
+* ★★★★★ THE READER WAS WIRED AFTERWARDS, IN ANOTHER FILE, BY A TASK ABOUT SOMETHING ELSE.
+* vmtest_have_key reads VAR 19 [vm_tests.s:154-159] and the table dispatches to it
+* [vm_tables.s:324]. **So the justification expired and nothing anywhere re-checked it**, and the
+* title screen waited on a flag that was cleared every cycle and set never [P6.70's measurement].
+* ★★★ That is the AD-28 / X-33 class -- a note describing how the port ARRIVED, read ever after as
+* describing how it IS. **Dated now, so the same thing cannot happen silently twice.**
+*
+* ★★★★ WHAT IS TRUE TODAY, and it is a different statement: the publish belongs on the UNGATED
+* scan, and this routine is the GATED one. cycle.cpp sets VAR 19 regardless of the prompt and
+* hands the key to the editor only when the prompt is enabled [cycle.cpp:347-352] -- so the
+* publish lives in p3_poll_dir's "not a direction" branch, which runs every cycle, and this
+* routine keeps its txt_penab guard because that guard is about the EDITOR.
 * ★★★ GUARDED, AND THE FIRST DRAFT GUARDED ONLY THE CALL. The cel configuration links neither
 * text.s nor the keyboard HAL, so an unguarded body here is three undefined symbols -- and lwasm
 * then reported the CP_CEL collision guard as well, from a pass that had already failed. **The
@@ -1344,6 +1360,14 @@ ppk_out:        rts
                 ifdef   HAL_KEYBOARD
 p3_newdir       fcb     0               ; the direction the last accepted key produced
 p3_ndirs        fcb     0               ; direction keys accepted, for the host
+* ★★★★★ A STICKY COPY OF WHAT WAS PUBLISHED, AND IT EXISTS BECAUSE VAR 19 IS NOT OBSERVABLE.
+* vm_post_cycle clears VAR 19 at the foot of every interpreted cycle [vm_cycle.s:347,
+* cycle.cpp:577], so a host that samples at the park -- which is where every other readout in this
+* probe is taken -- sees zero on every cycle no matter what was published. **The first run of this
+* change proved the title screen advanced and could not show the value that advanced it.**
+* ★★★ These two bytes are the measurement AC-1 asks for: WHAT was published and HOW OFTEN.
+p3_varkey       fcb     0               ; the last key published into VAR 19
+p3_nvarkey      fcb     0               ; how many keys have been published
 p3_poll_dir:
                 ifdef   P3B_FAULT_NOJOIN
                 rts                     ; ★ AC-7's arm: the join removed, which is "i can't move him"
@@ -1363,7 +1387,45 @@ p3_poll_dir:
                 ldb     #7
                 cmpa    #HAL_KEY_LEFT
                 beq     ppd_have
-                rts                     ; a key, but not a direction key -- not ours
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ NOT A DIRECTION -> PUBLISH VAR 19. THIS IS cycle.cpp:347-349 AND IT IS THE WHOLE FIX.
+*     if (!handleController(key)) {
+*         // Only set VAR_KEY, when no controller/direction was detected
+*         setVar(VM_VAR_KEY, key & 0xFF);
+*         if (_text->promptIsEnabled()) _text->promptKeyPress(key);
+*     }
+* ★★★★★ THE `rts` THAT WAS HERE WAS THE ORACLE'S `return true` FROM handleController AND NOTHING
+* ELSE. The routine already computes exactly the predicate cycle.cpp branches on -- "was this key
+* consumed as a direction?" -- and then threw the answer away. **One branch, four instructions.**
+*
+* ★★★★★ WHY THE TITLE SCREEN COULD NEVER ADVANCE [P6.70]. `have.key` is true iff VAR 19 is
+* non-zero [op_test.cpp:121-137, vm_tests.s:154-159]; vm_post_cycle clears VAR 19 after every
+* interpreted cycle [cycle.cpp:574-577, vm_cycle.s:347]; and nothing wrote it. **A flag cleared
+* every cycle and set never is a test that is false forever**, so the script's wait had no exit.
+*
+* ★★★★ THE PUBLISH RIDES THIS ROUTINE AND NOT p3_poll_key, WHICH IS THE POINT. p3_poll_key is
+* gated on txt_penab -- correctly, and that guard is NOT touched by this change -- and the title
+* screen calls prevent.input, so nothing on the prompt path ever scans. **This routine is already
+* ungated: it is called every cycle whenever the keyboard HAL is linked.** The dispatch expected a
+* scan/consume split; none was needed, because the ungated scan already existed here.
+*
+* ★★★ ORDER, with the oracle's citation and the gap named [§4D]. cycle.cpp is
+*     handleController(key)  =  controller bindings, THEN direction keys   [keyboard.cpp:527-535]
+*     then, only if unconsumed:  setVar(VAR_KEY)  then the editor if the prompt is enabled.
+* ★★★★ CONTROLLER BINDINGS ARE NOT IMPLEMENTED [P6.70: set.key binds a 16-bit keycode and
+* HAL_key_scan returns 8 bits], so the port's order today is DIRECTION -> publish -> editor.
+* **When set.key lands it goes in FRONT of the direction test, inside this routine, and its
+* "consumed" answer joins this same branch.**
+*
+* ★★ `key & 0xFF` is implicit: HAL_key_scan returns one byte [hal_globals.s:249].
+                ifndef  P3B_FAULT_NOVARKEY
+                sta     p3_varkey               ; ★ sticky copy -- see below
+                inc     p3_nvarkey
+                tfr     a,b                     ; B = the key -> the value
+                lda     #VAR_KEY
+                jsr     vm_setvar
+                endc
+                rts
 ppd_have:
                 stb     p3_newdir
 * ---- the same-direction-stops rule, read off the ego's CURRENT direction ----------

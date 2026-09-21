@@ -524,6 +524,11 @@ local jumped, jump_seen_clear = false, false
 local TYPE_TEXT = os.getenv("P3B_TYPE")
 local TYPE_AT   = tonumber(os.getenv("P3B_TYPE_AT") or "20")
 local typed, type_report = false, nil
+-- ★★★★★ P3B_KEY_AT -- post ONE key at the title screen and watch VAR 19 [T-P0-124]. Distinct
+-- from P3B_TYPE, which drives the EDITOR and keys on a counter the prompt gate controls; this
+-- drives the SCAN and keys on VAR 19, which is what have.key reads.
+local KEY_AT = tonumber(os.getenv("P3B_KEY_AT") or "0")
+local KEY_CH = os.getenv("P3B_KEY_CH") or "\r"
 
 -- ═══════════════════════════════════════════════════════════════════════════════════════════
 -- ★★★★★ P3B_INJECT -- A KEY AT THE EDITOR's OWN ENTRY POINT, ONE PER PARK [T-P0-093 AC-3].
@@ -1050,6 +1055,28 @@ _G._n = emu.add_machine_frame_notifier(function()
             -- ★★★ Narrow on purpose: columns 12-23 only, which is where display.v writes, and
             -- only every 5th cycle, which is the measured scroll cadence. A full-band census per
             -- cycle would remap slot 6 tens of thousands of times and change what it measures.
+            -- ═══════════════════════════════════════════════════════════════════════════
+            -- ★★★★★ POST A REAL KEY AT THE TITLE SCREEN [T-P0-124 §4C]. P6.70 posted VAR 19
+            -- directly into the offline reference; this posts a KEY into the matrix and lets the
+            -- guest's own scan publish it. **If the two do not produce the same outcome, the
+            -- publish and the post are not equivalent and that difference is the finding.**
+            -- ★★★★ IT CANNOT KEY ON P3_NKEY the way the typing loop does: that counter is
+            -- incremented inside p3_poll_key, which is gated on txt_penab, and the title screen
+            -- has called prevent.input. **The completion signal is VAR 19 itself.**
+            -- ★★★ Re-posted while natkeyboard's queue is drained, for the reason the typing loop
+            -- records: the guest looks once per CYCLE and a single post holds the key for a frame
+            -- or two, so one post is about a one-in-five chance of being seen.
+            if KEY_AT > 0 and n >= KEY_AT and not _G._key_done then
+                local v19 = prog:read_u8(0x0800 + 19)
+                if v19 ~= 0 then
+                    _G._key_done = true
+                    w("  ★ VAR 19 = $%02X at cycle %d, after %d post(s) -- the guest's own scan "
+                      .. "published it", v19, n, _G._key_posts or 0)
+                elseif m.natkeyboard.empty then
+                    m.natkeyboard:post(KEY_CH)
+                    _G._key_posts = (_G._key_posts or 0) + 1
+                end
+            end
             if os.getenv("P3B_SCROLL_TRACE") and n % 5 == 0 then
                 local rows = {}
                 for crow = 0, 20 do
@@ -1297,6 +1324,14 @@ _G._n = emu.add_machine_frame_notifier(function()
             -- version ended every line with "(1/1 = the game ordered both)" including the run
             -- where it was 1/0 -- **a label that cannot be wrong is not a reading** [§2W.3], and
             -- the fault arm's own red would have shipped wearing a green caption.
+            -- ★★★★★ WHAT THE SCAN PUBLISHED INTO VAR 19 [T-P0-124 AC-1]. Read from the guest's
+            -- sticky copy, not from VAR 19 itself: vm_post_cycle clears VAR 19 every cycle, so
+            -- sampling the variable at the park reports zero however many keys were published.
+            if SYM.p3_varkey and SYM.p3_nvarkey then
+                local k, nk = prog:read_u8(SYM.p3_varkey), prog:read_u8(SYM.p3_nvarkey)
+                w("    VAR 19 publishes: %d key(s), last $%02X%s", nk, k,
+                  nk == 0 and "   ★★★ NONE -- have.key can never fire" or "")
+            end
             if SYM.p3_drew and SYM.p3_shown then
                 local drew, shown = prog:read_u8(SYM.p3_drew), prog:read_u8(SYM.p3_shown)
                 local verdict

@@ -538,6 +538,20 @@ vmop_accept_input       equ     vm_op_modelled
 vmop_prevent_input      equ     vm_op_modelled
                 endc
 
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THIS STUB IS NOW KNOWN TO BE VISIBLE, AND JAY SAW IT [T-P0-124's eye gate]. Once the
+* title screen advances, the script issues clear.lines EXACTLY ONCE -- it is the opcode that
+* removes the title's text -- and this `rts` means it never happens. **Jay, pressing a key at the
+* title screen: "the press a key to continue stays on the title screen and transfers to the
+* castle screen."** The line survives the room change because the text area is outside the
+* picture that draw.pic/show.pic replace, so nothing else overwrites it either.
+* ★★★★ AND THE MEASUREMENT I QUOTED DID NOT SAY WHAT I SAID IT SAID: the text area went 715 ->
+* 266 non-black bytes across the advance, and I read a CHANGE as a CLEAR and told Jay to expect
+* the text to go. 266 is not zero. **A number that moved in the right direction is not evidence
+* that it reached the right value** [§2W.3].
+* ★★★ Implementing it is a text-engine task, not a line here: it needs the oracle's row range and
+* txt_boxfill, and it lands in the six P3B_NO_CEL gate rows. Named as the next task, not slipped
+* into one about VAR 19.
 vmop_clear_lines:
                 rts
 * ★★★★★ STILL A STUB, AND NOW WITH THE EVIDENCE RATHER THAN THE INTENTION [T-P0-092 §4A(4)].

@@ -126,7 +126,12 @@ $ARMS = @(
   # have called this unchanged, which is why the baseline is a HASH."* Second instance, same file.
   # ★★★ The non-TEXT_WIRED arms take NO txt_close bytes, which is the guard being right: the call
   # is conditioned on the flag that DEFINES tx_window_enter, not on "text.s is linked".
-  @{ n = "p3b";        f = @("-DHAL_KEYBOARD");                          sz = 15460; sha = "115F6772" },
+  # ★★★★★ RE-BASELINED T-P0-124, AND ONLY THE TWO CEL-LINKED ARMS MOVED (+15 B each). p3_poll_dir
+  # publishes VAR 19 on a non-direction key [cycle.cpp:347-349], and it lives inside
+  # `ifdef P3B_CEL_LINK` AND `ifdef HAL_KEYBOARD` -- so the five P3B_NO_CEL arms are byte-identical
+  # and their six gate rows are untouched. ★★★ That split is a FINDING as well as a convenience:
+  # **a text-only arm cannot publish VAR 19, so have.key can never fire in one.**
+  @{ n = "p3b";        f = @("-DHAL_KEYBOARD");                          sz = 15475; sha = "475064B0" },
   @{ n = "p3b_text";   f = $TEXT;                                         sz = 16632; sha = "1C81FDB6" },
   @{ n = "p3b_win3";   f = $TEXT + @("-DTEXT_WIN3");                      sz = 16632; sha = "5FAD7359" },
   @{ n = "p3b_notick"; f = $TEXT + @("-DTEXT_FAULT_NOTICK");              sz = 16629; sha = "0CE2F408" },
@@ -139,7 +144,7 @@ $ARMS = @(
   # ★★★ It is NOT a variant of the text arms: P3B_NO_CEL keeps its own meaning and all seven arms
   # above are byte-identical. This adds a shape rather than changing one.
   # ★★ -DP3B_IRQ comes with it, as it does for every wired text build.
-  @{ n = "p3b_comb";   f = @("-DHAL_KEYBOARD","-DP3B_COMBINED","-DP3B_IRQ"); sz = 18596; sha = "B93EAD6B" }
+  @{ n = "p3b_comb";   f = @("-DHAL_KEYBOARD","-DP3B_COMBINED","-DP3B_IRQ"); sz = 18611; sha = "7467F2BD" }
 )
 
 # ★★★ -DP3B_COVERAGE puts the two opcode counters back [p3b_probe.s]. It is a REAL byte change --

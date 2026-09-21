@@ -103,6 +103,12 @@ param(
   # tasks' worth of "the text doesn't scroll" were reports about a run that had left the title
   # screen. ★★★ It sets P3B_ROOM=0, which p3b_run.lua already understands as "no jump".
   [switch]$NoRoomJump,
+  # ★★★★★ -NoVarKey IS T-P0-124's FAULT ARM: p3_poll_dir stops publishing VAR 19 on a
+  # non-direction key, and nothing else changes. That is EVERY BUILD BEFORE THIS TASK, and its red
+  # is one Jay has already described three times -- the title screen never advances, the
+  # 'press a key to continue' line never goes, and the alligators never draw [P6.69, P6.70].
+  # ★★★ Expect draw 0, set.view 0, clear.lines 0 and the room unchanged, against 4/3/1 with it in.
+  [switch]$NoVarKey,
   # ★★★★ -RoomDrive IS THE COMPARISON ARM, NOT A FAULT: it restores the retired p3_room_check
   # driver, so the picture is rendered and presented by room DETECTION as it was before this
   # task. **The claim "the game now drives the render" needs an arm where it does not** [§2W].
@@ -252,6 +258,11 @@ if ($NoJoin) { $FLAGS += "-DP3B_FAULT_NOJOIN" }
 if ($PresentAll) { $FLAGS += "-DP3B_FAULT_PRESENT_ALL" }
 if ($NoShowPic) { $FLAGS += "-DP3B_FAULT_SHOWPIC" }
 if ($NoCloseWindow) { $FLAGS += "-DP3B_FAULT_NOCLOSEWIN" }
+# ★★★ HERE, not beside -NoRoomJump. $FLAGS is consumed by the assemble step a few lines below;
+# -NoRoomJump sets an ENVIRONMENT variable read at run time and can be set late, but a -D added
+# after the assembly has already run changes nothing. **Same class as the banner P6.68 put inside
+# the headless branch: correct code, placed where it cannot take effect.**
+if ($NoVarKey) { $FLAGS += "-DP3B_FAULT_NOVARKEY" }
 if ($RoomDrive) { $FLAGS += "-DP3B_ROOMDRIVE" }
 # ★★★ -Combined needs P3B_IRQ as the text arms do: the text engine's print path blocks on a key,
 # and the vector stubs at $FEF0 are what P3_REGIONB_END reserves for.
@@ -351,6 +362,13 @@ if ($IfDiag) { $WANT += @("vm_if_at","vm_if_logic","vm_if_n","vm_if_buf","vm_if_
 $CelLink = ($FLAGS -notcontains "-DP3B_NO_CEL")
 if ($CelLink) { $WANT += @("vc_err","vc_w","vc_h","vc_src","vc_srcend","vc_view","co_tested",
                                "p3_spr","p3_nspr","co_written","co_rejkey","co_rejpri",
+# ★★★★★ T-P0-124's two bytes belong HERE and not on the shared line. p3_poll_dir is nested inside
+# `ifdef P3B_CEL_LINK` AND `ifdef HAL_KEYBOARD` [p3b_probe.s:1359-1360], so p3_varkey/p3_nvarkey do
+# not exist in the five P3B_NO_CEL arms and asking for them there fails the whole run.
+# ★★★ THE RULE, for the third task running: the want-line's condition must be the SAME condition
+# as the symbol's DEFINITION. I put these on the shared line first and caught it by reading the
+# nesting rather than by a failed build.
+                               "p3_varkey","p3_nvarkey",
 # ★★★★ T-P0-113: the restore's two observables. CEL ARM ONLY, on this line and not the shared
 # one, for the reason the comment above gives -- vm_symbols.py fails the whole run on a missing
 # name, and p3_restbytes/p3_prevn live inside `ifndef P3B_NO_CEL`. Putting them on the shared
@@ -543,7 +561,7 @@ if ($Headless) {
   # ★★★★ `restore \d+ bytes` ADDED T-P0-114, and this comment is the reason the line above warns
   # about allowlists: the restore figure was owed by two tasks, was being computed correctly by
   # the guest the whole time, and was invisible because no pattern here named it.
-  Select-String -Path $log -Pattern 'OK prompt|program \d+ bytes|vocabulary |window discrimination|par_vocab written|COMMAND TYPED|parse at cycle|TYPING |TYPED LINE|prompt: enabled|row 22|NO KEYS REACHED|NEVER REACHED|STUCK|cycles in|final room|restore \d+ bytes|ego: x=|text area rows|picture: draw\.pic|REFUSED at draw\.pic|LOGIC CACHE had taken|arena at draw\.pic|rendered AFTER the logic|scroll band|char row|TOTAL \d+ bytes drawn|NEVER WRITTEN|P3_PBUF' |
+  Select-String -Path $log -Pattern 'OK prompt|program \d+ bytes|vocabulary |window discrimination|par_vocab written|COMMAND TYPED|parse at cycle|TYPING |TYPED LINE|prompt: enabled|row 22|NO KEYS REACHED|NEVER REACHED|STUCK|cycles in|final room|restore \d+ bytes|ego: x=|text area rows|picture: draw\.pic|REFUSED at draw\.pic|LOGIC CACHE had taken|arena at draw\.pic|rendered AFTER the logic|VAR 19|scroll band|char row|TOTAL \d+ bytes drawn|NEVER WRITTEN|P3_PBUF' |
     ForEach-Object { $_.Line }
   if ($stuck) { "★★★ p3b FAILED -- the watchdog fired"; exit 1 }
   if ($nowords) { "★★★ p3b FAILED -- a fed command matched no dictionary words"; exit 1 }
