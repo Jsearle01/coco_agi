@@ -1040,6 +1040,39 @@ _G._n = emu.add_machine_frame_notifier(function()
             local now = m.time:as_double()
             per[#per+1] = now - tprev
             tprev = now
+            -- ═══════════════════════════════════════════════════════════════════════════
+            -- ★★★★★ DOES THE PLANE ANIMATE WITHIN ONE RUN? [T-P0-122, after Jay's "no"]
+            -- The end-of-run census proved the credit glyphs are IN the visible plane, and
+            -- comparing a 20-cycle run against a 60-cycle run showed them at different rows.
+            -- **But two runs are not motion.** Jay watches ONE run, and answered "no". So the
+            -- question this samples is the one actually in dispute: within a single run, do the
+            -- rows holding credit text CHANGE from cycle to cycle?
+            -- ★★★ Narrow on purpose: columns 12-23 only, which is where display.v writes, and
+            -- only every 5th cycle, which is the measured scroll cadence. A full-band census per
+            -- cycle would remap slot 6 tens of thousands of times and change what it measures.
+            if os.getenv("P3B_SCROLL_TRACE") and n % 5 == 0 then
+                local rows = {}
+                for crow = 0, 20 do
+                    local hit = false
+                    for pr = crow * 8, crow * 8 + 7 do
+                        for c = 48, 95 do
+                            local off = pr * 160 + c
+                            if off < 26880 then
+                                local sl, wi = off >> 13, off & 0x1FFF
+                                prog:write_u8(0xFFA6, 2 + sl)          -- shadow
+                                local s = prog:read_u8(0xC000 + wi)
+                                prog:write_u8(0xFFA6, 40 + sl)         -- visible
+                                if prog:read_u8(0xC000 + wi) ~= s then hit = true break end
+                            end
+                        end
+                        if hit then break end
+                    end
+                    if hit then rows[#rows+1] = crow end
+                end
+                w("  [scroll] cycle %3d: credit rows = %s", n,
+                  #rows > 0 and table.concat(rows, ",") or "(none)")
+            end
+            -- ═══════════════════════════════════════════════════════════════════════════
             -- ★★★★ THE GAME CLOCK'S PER-CYCLE DELTA [AC-4]. Keyed on the same "a new cycle
             -- completed" event as the timing above, for the same reason: sampled per FRAME it
             -- would report zero on most frames and mean nothing.
@@ -1137,6 +1170,54 @@ _G._n = emu.add_machine_frame_notifier(function()
                 w("    text area rows 168-199: %d of 5120 bytes non-black%s",
                   nonzero,
                   first and string.format("   first at +%d = $%02X", first, firstv) or "  ★ ALL BLACK")
+            end
+            -- ═══════════════════════════════════════════════════════════════════════════
+            -- ★★★★★ THE SCROLL BAND [T-P0-122 §4C]. The title credits are drawn by display.v
+            -- at CHARACTER ROWS 6-18, COLUMN 12 -- measured, not assumed [pic_order.py over 80
+            -- cycles]. Those rows are INSIDE the 21-row picture, so a "non-black" census like
+            -- the one above is meaningless here: the picture fills them with colour.
+            -- ★★★★★ THE DISCRIMINATOR IS VISIBLE vs SHADOW. The shadow holds the picture exactly
+            -- as pic_render_at drew it and is never written again after cycle 1 [draw.pic runs
+            -- once -- measured]. **So every byte where visible differs from shadow is something
+            -- drawn ON TOP: a glyph, or a sprite.** That is the same comparison the restore
+            -- check makes, against the same two block numbers -- one producer [§2O.1].
+            -- ★★★ PER CHARACTER ROW, because "how many" cannot tell a scrolling list from a
+            -- sprite and a per-row profile can: the credits occupy one row each, at a fixed
+            -- column, and a sprite is a compact block.
+            -- ★★ Gated: it remaps slot 6 several thousand times and is a diagnostic, not a gate.
+            if os.getenv("P3B_SCROLL") then
+                local BLK_VIS, BLK_SHA = 40, 2
+                local C0 = 12 * 4          -- column 12, TXT_VW = 4 bytes per character cell
+                w("    scroll band, visible vs shadow (cols 12-39, = drawn ON TOP of the picture):")
+                local total = 0
+                for crow = 0, 20 do
+                    local n, firstc = 0, nil
+                    for pr = crow * 8, crow * 8 + 7 do
+                        for c = C0, 159 do
+                            local off = pr * 160 + c
+                            if off < 26880 then
+                                local sl, wi = off >> 13, off & 0x1FFF
+                                prog:write_u8(0xFFA6, BLK_SHA + sl)
+                                local s = prog:read_u8(0xC000 + wi)
+                                prog:write_u8(0xFFA6, BLK_VIS + sl)
+                                if prog:read_u8(0xC000 + wi) ~= s then
+                                    n = n + 1
+                                    if not firstc then firstc = c end
+                                end
+                            end
+                        end
+                    end
+                    total = total + n
+                    if n > 0 then
+                        w("       char row %2d: %4d bytes differ   first at byte %d (col %d)",
+                          crow, n, firstc, math.floor(firstc / 4))
+                    end
+                end
+                w("       TOTAL %d bytes drawn over the picture in rows 0-20", total)
+                if total == 0 then
+                    w("       ★★★ NOTHING is drawn over the picture -- the glyphs were NEVER"
+                      .. " WRITTEN, so the loss is on the WRITE path, not an overwrite")
+                end
             end
             -- ★★★★★ THE EGO'S LOOP, AS A NUMBER [T-P0-115 §4C(2)]. "He faces the other way" is an
             -- eye-gate answer; this is the same fact as a loop index, and the oracle's own tables

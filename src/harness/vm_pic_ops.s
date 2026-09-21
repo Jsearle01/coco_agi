@@ -86,14 +86,43 @@ vmop_draw_pic:
 * ★★★★ MEASURED, NOT ASSUMED: over KQ1's first 30 cycles the one show.pic executes with flag 15
 * ALREADY CLEAR, so the clear is inert there [pic_order.py §6]. That is evidence about ONE
 * execution of ONE title [L-86] and is recorded as such, not as a licence to skip the write.
-* ★★★ closeWindow() is the third half of the oracle's show.pic and is NOT ported here -- this
-* probe has no open-window state for it to close. Declared, not silently omitted.
+* ★★★★★ closeWindow() IS PORTED AS OF T-P0-122 -- see the call below. This note previously read
+* "NOT ported here -- this probe has no open-window state for it to close", which was wrong on
+* both halves: `txt_close` has existed since P6.19 and the text arms very much have window state.
+* ★★★ Corrected rather than deleted, because the claim was cited in P6.67's report and a reader
+* arriving from there needs to find it superseded rather than absent [§2D's superset discipline].
+* ★★★★★ THE ORACLE'S ORDER, AND IT IS NOT THE ORDER THIS FILE SHIPPED AT P6.67 [op_cmd.cpp:1215-
+* 1218]: setFlag, THEN closeWindow, THEN the reveal. P6.67 revealed first and cleared the flag
+* afterwards, which is observationally the same only while no window is open -- **and closing a
+* window AFTER presenting would repaint the restore rectangle over the picture just revealed.**
                 ifndef  P3B_FAULT_SHOWPIC
 vmop_show_pic:
-                jsr     p3_pic_show
                 lda     #15                     ; VM_FLAG_OUTPUT_MODE
                 clrb                            ; B = 0 -> clear
-                jmp     vm_setflag
+                jsr     vm_setflag
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ closeWindow() IS NOW PORTED, AND THIS FILE'S OWN NOTE SAYING IT IS NOT WAS THE THING TO
+* CORRECT [T-P0-122 §1.3]. `txt_close` has been in the engine since P6.19 [text.s:1024, from
+* text.cpp:549]; what was missing was the CALL, not the routine.
+* ★★★★ IT IS SAFE WHEN NO BOX IS UP, BY THE ORACLE'S OWN GUARD: `if (_messageState.window_Active)`
+* [text.cpp:550] is `tst txt_winactive / beq tc_out` [text.s:1030-1031], so a show.pic with no
+* window open falls straight through. **The guard is the oracle's, not one this port invented.**
+* ★★★ TEXT_WIRED, NOT P3B_TEXT_LINK, AND THE DIFFERENCE IS LOAD-BEARING. tx_window_enter lives in
+* vm_text_ops.s's WIRED branch [ifndef TEXT_WIRED at :24, else at :40]; -DTEXT_MODELLED links
+* text.s and leaves TEXT_WIRED undefined, so guarding on "text.s is linked" would name a symbol
+* that does not exist in the fault arm. **The condition must be the one that DEFINES the symbol**
+* [P6.66's rule, and the third time this file's family has had to apply it].
+* ★★ The window must be entered: txt_close's restore writes the framebuffer through txt_restore,
+* and every other caller in this file brackets its text work the same way.
+                ifdef   TEXT_WIRED
+                ifndef  P3B_FAULT_NOCLOSEWIN
+                jsr     tx_window_enter
+                jsr     txt_close
+                jsr     tx_window_exit
+                endc
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+                jmp     p3_pic_show
                 endc
 
 * ── configure.screen(n,n,n) -- gameRow, promptRow, statusRow ─────────────────────

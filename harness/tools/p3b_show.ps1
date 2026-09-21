@@ -90,6 +90,19 @@ param(
   # is the arm that proves §1.2's ruling: if the picture still appears, something other than
   # show.pic is presenting it. ★★★ Expect `draw.pic drew=1  show.pic shown=0` in the summary.
   [switch]$NoShowPic,
+  # ★★★★★ -NoCloseWindow IS T-P0-122's FAULT ARM AND IT IS A KNOWN-GOOD RED: it removes the single
+  # `jsr txt_close` from show.pic and nothing else, which is EVERY BUILD BEFORE THIS TASK. ★★★★ Jay
+  # has already reported its red, in his own words: "i see a 'press a key to continue' in the text
+  # area which doesn't appear in the oracle". ★★★ A fault whose red the operator has already
+  # described is the strongest kind there is [the -NoRestore precedent, same reasoning].
+  [switch]$NoCloseWindow,
+  # ★★★★★ -NoRoomJump TURNS OFF THE EYE GATE'S DEFAULT ROOM JUMP [T-P0-122]. p3b_room.lua reads
+  # `os.getenv("P3B_ROOM") or "1"`, so the LIVE path jumps to room 1 at cycle 8 unless told not
+  # to, while the HEADLESS path defaults to no jump at all. **Without this switch there was no way
+  # to show Jay the title screen past cycle 8**, which is where the credits scroll, and three
+  # tasks' worth of "the text doesn't scroll" were reports about a run that had left the title
+  # screen. ★★★ It sets P3B_ROOM=0, which p3b_run.lua already understands as "no jump".
+  [switch]$NoRoomJump,
   # ★★★★ -RoomDrive IS THE COMPARISON ARM, NOT A FAULT: it restores the retired p3_room_check
   # driver, so the picture is rendered and presented by room DETECTION as it was before this
   # task. **The claim "the game now drives the render" needs an arm where it does not** [§2W].
@@ -238,6 +251,7 @@ if ($AlwaysRestore) { $FLAGS += "-DP3B_FAULT_ALWAYSRESTORE" }
 if ($NoJoin) { $FLAGS += "-DP3B_FAULT_NOJOIN" }
 if ($PresentAll) { $FLAGS += "-DP3B_FAULT_PRESENT_ALL" }
 if ($NoShowPic) { $FLAGS += "-DP3B_FAULT_SHOWPIC" }
+if ($NoCloseWindow) { $FLAGS += "-DP3B_FAULT_NOCLOSEWIN" }
 if ($RoomDrive) { $FLAGS += "-DP3B_ROOMDRIVE" }
 # ★★★ -Combined needs P3B_IRQ as the text arms do: the text engine's print path blocks on a key,
 # and the vector stubs at $FEF0 are what P3_REGIONB_END reserves for.
@@ -433,6 +447,39 @@ $env:P3B_SYMBOLS = "build\p3b\symbols.txt"
 $env:P3B_CYCLES = "$Cycles"
 $env:P3B_HOLD = "$Hold"
 $env:P3B_OUT = if ($Headless) { "build\p3b_headless" } else { "build\p3b_eye" }
+# ★★★ Set BEFORE the verdict below reads it, so the banner describes the run that will happen.
+if ($NoRoomJump) { $env:P3B_ROOM = "0" }
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ SAY WHETHER THE TITLE SEQUENCE SURVIVED -- BEFORE THE RUN, AND FOR EVERY RUN [T-P0-122].
+# A room jump ENDS the title screen, and the title screen is where the credits scroll, the
+# copyright draws and the picture is revealed. P6.67's eye gate ran with a jump inherited from an
+# earlier run's staging; the runner reported it as a trace line, I read it, and I filed it as a
+# caveat. **Jay then answered "no scroll" about a run in which the scroll never happened.**
+#
+# ★★★★★ AND THE FIRST VERSION OF THIS WARNING WAS WRONG TWICE, IN ONE TASK, IN THE SAME GUARD.
+#   (1) It was inside `if ($Headless)`. An eye gate is never headless, so it could not fire on the
+#       run it exists to protect -- P6.3's defect exactly [§2W].
+#   (2) It keyed on $env:P3B_ROOM being SET. ★★★★★ THE EYE GATE JUMPS WHEN IT IS UNSET:
+#       p3b_room.lua:25 is `tonumber(os.getenv("P3B_ROOM") or "1")` -- **the default is 1, not
+#       none** -- and p3b_room.lua:59-61 says so in as many words, handing that default to
+#       p3b_run.lua, "whose own default is 0, meaning no jump". **So the two gates run DIFFERENT
+#       PROGRAMS by default**, and the guard printed "title sequence intact" for precisely the
+#       runs that cut it.
+# ★★★★ THAT IS THE DEFECT THIS WHOLE TASK CHASED: every eye gate in this arc jumped to room 1 at
+# cycle 8, the first credit appears at cycle 5, and Jay has therefore never seen more than one.
+# **"The text doesn't scroll", reported three times, was an accurate report of the run he was shown.**
+$effRoom = if ($env:P3B_ROOM) { [int]$env:P3B_ROOM } elseif ($Headless) { 0 } else { 1 }
+$effAt   = if ($env:P3B_ROOM_AT) { [int]$env:P3B_ROOM_AT } else { 8 }
+if ($effRoom -gt 0) {
+  "★★★ TITLE SEQUENCE CUT: a room jump to $effRoom fires at cycle $effAt" +
+  $(if (-not $env:P3B_ROOM) { " (the EYE GATE's DEFAULT -- p3b_room.lua:25)" } else { "" }) +
+  ". The credits scroll from cycle 5 at one line per 5 cycles, so this run shows at most" +
+  " $([math]::Floor($effAt / 5)) of them. Do NOT judge the title screen from this run;" +
+  " pass -NoRoomJump."
+} else {
+  "★ title sequence intact (no room jump): credits scroll from cycle 5, one line per 5 cycles"
+}
 
 if ($Headless) {
   # ═══════════════════════════════════════════════════════════════════════════════════════
@@ -496,7 +543,7 @@ if ($Headless) {
   # ★★★★ `restore \d+ bytes` ADDED T-P0-114, and this comment is the reason the line above warns
   # about allowlists: the restore figure was owed by two tasks, was being computed correctly by
   # the guest the whole time, and was invisible because no pattern here named it.
-  Select-String -Path $log -Pattern 'OK prompt|program \d+ bytes|vocabulary |window discrimination|par_vocab written|COMMAND TYPED|parse at cycle|TYPING |TYPED LINE|prompt: enabled|row 22|NO KEYS REACHED|NEVER REACHED|STUCK|cycles in|final room|restore \d+ bytes|ego: x=|text area rows|picture: draw\.pic|REFUSED at draw\.pic|LOGIC CACHE had taken|arena at draw\.pic|rendered AFTER the logic|P3_PBUF' |
+  Select-String -Path $log -Pattern 'OK prompt|program \d+ bytes|vocabulary |window discrimination|par_vocab written|COMMAND TYPED|parse at cycle|TYPING |TYPED LINE|prompt: enabled|row 22|NO KEYS REACHED|NEVER REACHED|STUCK|cycles in|final room|restore \d+ bytes|ego: x=|text area rows|picture: draw\.pic|REFUSED at draw\.pic|LOGIC CACHE had taken|arena at draw\.pic|rendered AFTER the logic|scroll band|char row|TOTAL \d+ bytes drawn|NEVER WRITTEN|P3_PBUF' |
     ForEach-Object { $_.Line }
   if ($stuck) { "★★★ p3b FAILED -- the watchdog fired"; exit 1 }
   if ($nowords) { "★★★ p3b FAILED -- a fed command matched no dictionary words"; exit 1 }
