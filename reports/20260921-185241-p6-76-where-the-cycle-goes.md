@@ -464,7 +464,7 @@ cel unpacking. Those need restructuring rather than switching off, and they are 
 None. (The dispatch was received; no questions were asked.)
 
 ### 10 — Candidate(s) captured this task
-- `2026-09-21-a-whole-run-average-is-not-a-rate` — pool commit in §11.
+- `2026-09-21-a-whole-run-average-is-not-a-rate` — pool `9ea25ea` (main, pushed).
 
 ### 11 — Commit
-(filled in by the follow-up commit)
+`168e6d2` (pushed to origin/wip before this report)
