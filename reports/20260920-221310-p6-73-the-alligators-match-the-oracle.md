@@ -169,4 +169,5 @@ AC-2 rather than left for a reader to notice.**
 - `seeds/AGI/live/2026-09-20-the-last-frame-of-a-run-is-not-the-steady-state.md`
 
 ### 11 — Commit
-(recorded below; pushed to origin/wip before this report was surfaced)
+`a9ec29d` — 3 files changed, 206 insertions(+), 2 deletions(-).
+Pushed to origin/wip (`a44036a..a9ec29d`).
