@@ -1314,6 +1314,29 @@ _G._n = emu.add_machine_frame_notifier(function()
             -- it for the read and puts it back from the guest's own ph_blk_slot5 -- the byte that
             -- exists precisely because a client may hold something there [mmu_phase.s:63-72].
             -- ★★★ Host-side only: no guest byte changes and the arms cannot move.
+            -- ═══════════════════════════════════════════════════════════════════════════
+            -- ★★★★★ P3B_RESSTATS -- THE CACHE'S OWN COUNTERS, PER CYCLE [T-P0-133 §4A(3)].
+            -- res_core.s has counted hits, misses and starvation evictions since the cache landed
+            -- and no host has ever published them. P6.79 put the resource layer at 62% of a castle
+            -- cycle; these say which of the three things it is.
+            -- ★★★ DELTAS, not totals: the question is what ONE cycle costs. The cumulative figures
+            -- are printed at the end for a cross-check.
+            -- ★★ Host-side reads of plain memory in fixed slots: the guest cannot tell, so the
+            -- measurement does not change the behaviour it measures [§6's last trigger].
+            if os.getenv("P3B_RESSTATS") and SYM.res_chits then
+                local h, m = rd16(SYM.res_chits), rd16(SYM.res_cmiss)
+                local ev = SYM.res_cevict and rd16(SYM.res_cevict) or 0
+                local p = _G._rs_prev
+                if p then
+                    _G._rs = _G._rs or {}
+                    _G._rs[#_G._rs + 1] = string.format(
+                        "c%d h%d m%d ev%d cn%d top$%04X ccur$%04X free%d",
+                        n, h - p[1], m - p[2], ev - p[3], prog:read_u8(SYM.res_cn),
+                        rd16(SYM.res_top), rd16(SYM.res_ccur),
+                        rd16(SYM.res_ccur) - rd16(SYM.res_top))
+                end
+                _G._rs_prev = { h, m, ev }
+            end
             if os.getenv("P3B_OBJTRACE") and SYM.ph_blk_slot5 then
                 local every = tonumber(os.getenv("P3B_OBJTRACE")) or 10
                 if n % every == 0 then
@@ -1631,6 +1654,27 @@ _G._n = emu.add_machine_frame_notifier(function()
             if _G._tr then
                 w("    RANGETAP %s values %s: %s", os.getenv("P3B_TAPRANGE"),
                   os.getenv("P3B_TAPVALUES") or "", table.concat(_G._tr, " "))
+            end
+            if _G._rs then
+                w("    RESSTATS totals: hits %d, misses %d, starvation evictions %d, cache entries"
+                  .. " %d, arena free %d B (res_top $%04X, res_ccur $%04X)",
+                  rd16(SYM.res_chits), rd16(SYM.res_cmiss),
+                  SYM.res_cevict and rd16(SYM.res_cevict) or -1,
+                  prog:read_u8(SYM.res_cn), rd16(SYM.res_ccur) - rd16(SYM.res_top),
+                  rd16(SYM.res_top), rd16(SYM.res_ccur))
+                -- ★★★ WHAT IS IN THE CACHE AT THE END, by LOGIC number and length: the working set
+                -- the policy actually holds, against the one the game asks for [§4A(1)].
+                if SYM.res_ckey and SYM.res_clen then
+                    local cn, parts, tot = prog:read_u8(SYM.res_cn), {}, 0
+                    for i = 0, cn - 1 do
+                        local len = rd16(SYM.res_clen + i * 2)
+                        tot = tot + len
+                        parts[#parts + 1] = string.format("L%d:%dB", prog:read_u8(SYM.res_ckey + i), len)
+                    end
+                    w("    RESSTATS cache holds %d entr(ies), %d B: %s", cn, tot,
+                      table.concat(parts, " "))
+                end
+                for i = 1, #_G._rs do w("      %s", _G._rs[i]) end
             end
             if _G._vt then
                 w("    VARTAP %s writes (P3_CYCLE:value@PC): %s",

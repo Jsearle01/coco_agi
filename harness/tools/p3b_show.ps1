@@ -344,6 +344,12 @@ $WANT = @("res_volbase","res_slicebase","res_curblk","vm_quit","vm_badop","vm_cy
           # [T-P0-104 §3(3)]. res_top was already read by vm_run.ps1 and not by this one, and
           # res_ccur by nothing at all -- so arena occupancy had no producer.
           "res_top","res_ccur",
+          # ★★★★★ THE CACHE'S OWN COUNTERS, WHICH NOTHING HAS EVER READ [T-P0-133]. res_core.s has
+          # kept hits, misses and starvation evictions since the cache landed -- res_chits was added
+          # as "AC-5 evidence the cache is actually hitting" -- and no host has published them. P6.79
+          # measured the resource layer at 62% of a castle cycle; these six bytes say whether that is
+          # the cache missing, the table filling, or the arena starving.
+          "res_cn","res_chits","res_cmiss","res_cevict","res_ckey","res_clen",
           # ★★★★★ vc_err IS PUBLISHED BECAUSE NOTHING HAS EVER READ IT IN THIS PROBE [T-P0-105].
           # p3_composite_all skips a sprite whenever the decode sets it, silently -- and CP_BLITS
           # measured ZERO composites across 60 cycles with four sprites staged, so every one of

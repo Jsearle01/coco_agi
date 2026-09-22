@@ -165,7 +165,15 @@ res_ceil        fdb     RES_ARENA_END   ; the byte res_fetch must not write at o
 *       MISS -> fetch at res_top as usual, advance res_top, then mark = the NEW res_top
 * **So res_close is untouched and there is no second allocator.** The only change is which value
 * the mark records for a LOGIC frame.
-RES_CACHE_MAX   equ     8               ; measured distinct LOGICs in use is 3-4
+* ★★★★★ "3-4" WAS MEASURED BEFORE THE ROOM RAN [T-P0-133]. It comes from AD-87's LOGIC-cache work,
+* on a VM-only probe with no sprites, no VIEW fetches and a title screen. **Re-measured in KQ1's
+* castle with the game actually running: 4 distinct LOGICs and 3 VIEWs per cycle, every cycle.**
+* ★★★★ THE TABLE IS NOT THE BINDING LIMIT -- 4 entries of 8 are used. **The BYTES are**: the four
+* LOGICs are 15,376 B (L0 8,999 · L102 3,817 · L1 1,631 · L101 929) in a 16,384 B arena, which
+* leaves 1,008 B for transients, and the compositor's largest VIEW is 2,413 B. So every cycle the
+* VIEW fetch starves, res_cache_evict drops the WHOLE cache, and the next cycle re-fetches and
+* re-decodes all four: **0 hits, 4 misses and 1 starvation eviction per cycle, measured.**
+RES_CACHE_MAX   equ     8               ; ★ 4 of 8 used in the castle [T-P0-133]; bytes bind first
 res_cn          fcb     0               ; entries live
 res_ckey        rmb     RES_CACHE_MAX           ; LOGIC index
 res_caddr       rmb     2*RES_CACHE_MAX         ; where its bytes are
@@ -482,6 +490,11 @@ res_cache_stash:
 * they overlap depends entirely on how big the arena is:
 *     vm_probe.s  arena 21,760 B ($6B00-$C000): logic0's scratch ends $8E27, its cache
 *                 destination starts $9CD9 -- **no overlap, so the nine-title gate passes**
+* ★★★★★ AND THE SAME 5,376-BYTE DIFFERENCE HIDES THE CACHE'S BEHAVIOUR FROM THAT GATE [T-P0-133
+* §4D]. In 21,760 B the castle's 15,376 B of LOGICs leave 6,384 B free, so a 2,413-byte VIEW fetch
+* never starves -- and vm_probe links no compositor, so it never makes one. **The nine-title gate
+* cannot exercise arena pressure at all**; its green is a coverage fact here, not evidence about
+* the cache [the §2T lesson, third instance].
 *     p3b_probe.s arena 16,384 B ($6000-$A000): scratch ends $8327, destination starts $7CD9
 *                 -- **~1.4 KB of overlap**
 * ★★★ Copying FORWARD into an overlapping region that sits ABOVE the source overwrites bytes the
@@ -587,6 +600,17 @@ res_cache_reset:
 * Both do the same two stores, and having them written twice is how the two paths would drift.
 * ★★ No victim choice, no timestamps: the working set is 3-4 entries and a starving fetch needs
 * the whole region, not a slot.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ AND THAT JUSTIFICATION RESTS ON THE STALE FIGURE [T-P0-133]. "The working set is 3-4
+* entries and a starving fetch needs the whole region" is true of the probe it was measured on and
+* false of the castle: there the four entries are 15,376 B and the starving fetch is a 2,413-byte
+* VIEW that needs **1,405 B more than is free** -- so dropping the whole region throws away 15,376 B
+* to make room for 2,413, every cycle. ★★★★ Measured cost: the resource layer is 62% of a castle
+* cycle [P6.79's profile: res_cache_stash 24%, res_fetch 19%, res_decode 19%].
+* ★★★ PER-ENTRY EVICTION WOULD NEED NO MORE MEMORY: evicting the smallest entry that frees enough
+* (L1, 1,631 B) leaves three cached, so one LOGIC is re-fetched per cycle instead of four --
+* 1,631 B against 15,376. **Priced, not built** [T-P0-133 §4C; §6 forbids the fix in that task].
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 res_cache_evict:
                 clr     res_cn
                 ldd     #RES_ARENA_END
