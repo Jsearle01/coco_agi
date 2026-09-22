@@ -229,11 +229,26 @@ P3B_TEXT_LINK   equ     1
 *      latch's CONSUMER SHAPE now ships in every arm -- p3_poll_dir dispatches, p3_poll_key drains,
 *      tx_wait_dismiss takes edges. **What remains parked here is only the 60 Hz CAPTURE**: an edge
 *      that starts and ends between two scans is still lost, and catching it needs the interrupt.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ UNPARKED AND SHIPPED AT T-P0-132, AND BULLET 2 WAS RIGHT: IT WAS STATE CORRUPTION.
+* P6.78 found the compositor writing sprite pixels into KQ1's staged volume through slot 6, which
+* corrupted LOGIC 1 and sent it into the alligator-death block -- program.control, stop.motion,
+* follow.ego on both alligators, print(1). **That is "everything animating, but nothing moving just
+* flashing including graham", and it stopped the alligators too, which bounce never could.**
+* ★★★★★ THE LATCH WAS JUDGED ON A BUILD THAT WAS CORRUPTING ITS OWN GAME DATA. Re-tested on
+* P6.78's base [T-P0-132 Part A]: 20 of 20 presses delivered against 1 of 20 for the per-cycle
+* scan; 420 castle cycles with everything moving exactly as the oracle-gated reference does, ego
+* and both alligators, with NO latch-specific difference; logic 1's resident copy 0 of 256 bytes
+* differing at the end. Jay, playing it: taps register without holding, and **"3. yes"** to
+* "does everything keep moving".
+* ★★★ THE BOUNCE SUSPICION IS RETIRED, NOT DISPROVEN: ~5 captured edges per coded post was real,
+* but it was measured through natkeyboard's synthetic posts, not a finger, and the symptom it was
+* invoked to explain is now accounted for. **If a real key ever bounces, the queue is where a
+* debounce goes.**
+* ★★ -DP3B_FAULT_NOVBLKEYS is the fault arm: the per-cycle scan, which measures 1 of 20.
                 ifdef   P3B_COMBINED
-                ifdef   P3B_VBLKEYS_OPT
                 ifndef  P3B_FAULT_NOVBLKEYS
 P3B_VBL_KEYS    equ     1
-                endc
                 endc
                 endc
 * ═══════════════════════════════════════════════════════════════════════════════════════════

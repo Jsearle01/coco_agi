@@ -118,9 +118,9 @@ param(
   # per interpreter cycle, at LEVELS. That is every build before this task and a known-good red in
   # Jay's own words: "i was not able to control graham reliably."
   [switch]$NoVblKeys,
-  # ★★★★★ -VblKeys OPTS IN to the VBL key latch [T-P0-128]. It FAILED its eye gate -- Jay saw the
-  # game loop with everything animating and nothing moving -- so it is off by default and the
-  # combined arm ships the per-cycle scan. Leading suspect: edge bounce (~5 edges per press).
+  # ★★★★★ -VblKeys IS NOW A NO-OP, KEPT SO OLD COMMAND LINES STILL RUN [T-P0-132]. The latch SHIPS
+  # in the combined arm: what it was judged on at T-P0-128 was P6.78's data corruption, not the
+  # latch [p3b_probe.s's note]. -NoVblKeys is the fault arm.
   [switch]$VblKeys,
   # ★★★★ -RoomDrive IS THE COMPARISON ARM, NOT A FAULT: it restores the retired p3_room_check
   # driver, so the picture is rendered and presented by room DETECTION as it was before this
@@ -305,7 +305,7 @@ if ($NoVarKey) { $FLAGS += "-DP3B_FAULT_NOVARKEY" }
 if ($NoClearLines) { $FLAGS += "-DP3B_FAULT_NOCLEARLINES" }
 if ($SprStats) { $FLAGS += "-DP3B_SPRSTATS" }
 if ($NoVblKeys) { $FLAGS += "-DP3B_FAULT_NOVBLKEYS" }
-if ($VblKeys) { $FLAGS += "-DP3B_VBLKEYS_OPT" }
+if ($VblKeys) { "  ★ -VblKeys is the default since T-P0-132; the switch is a no-op" }
 if ($RoomDrive) { $FLAGS += "-DP3B_ROOMDRIVE" }
 # ★★★ -Combined needs P3B_IRQ as the text arms do: the text engine's print path blocks on a key,
 # and the vector stubs at $FEF0 are what P3_REGIONB_END reserves for.
@@ -439,7 +439,7 @@ if ($CelLink) { $WANT += @("vc_err","vc_w","vc_h","vc_src","vc_srcend","vc_view"
                                $(if ($SprStats) { "p3_droperr","p3_dropview","p3_ndrop" }),
 # ★★★★ The VBL key queue exists exactly when P3B_VBL_KEYS does: -Combined and NOT -NoVblKeys
 # [p3b_probe.s, the flag block]. The SAME condition as the definition, spelled from the switches.
-                               $(if ($Combined -and $VblKeys -and -not $NoVblKeys) {
+                               $(if ($Combined -and -not $NoVblKeys) {
                                    "P3_KQ_NIN","P3_KQ_NDROP","P3_KQ_NOUT","P3_KQ_LAST" }),
 # ★★ T-P0-115's two: also cel-arm only, and also inside `ifdef HAL_KEYBOARD` -- but the cel arm
 # is the only arm that gets both, so this line is still the right home for them.

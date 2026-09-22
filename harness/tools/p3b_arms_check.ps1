@@ -165,6 +165,14 @@ $ARMS = @(
   # data, corrupting logic 1. **The six text arms link no compositor and are byte-identical.**
   # RETIRED within T-P0-131 (part 1, 156b7ae): p3b 15,629 F3C36B7E | p3b_comb 18,815 32F9D982 |
   #   p3b_comb_count 18,850 131A3EB6
+  # ★★★★★ RE-BASELINED T-P0-132, THE TWO COMBINED ARMS ONLY, +51 B: THE 60 Hz KEY LATCH SHIPS.
+  # It was parked at T-P0-128 on an eye gate it failed; P6.78 then found that what it was judged on
+  # was the compositor corrupting the game's own data [p3b_probe.s's note]. Re-tested on that base:
+  # 20 of 20 presses delivered (1 of 20 without), 420 castle cycles with everything moving exactly
+  # as the reference does, logic 1 intact 0 of 256, and Jay: taps register, everything keeps moving.
+  # ★★★ -DP3B_VBLKEYS_OPT is retired; the arm is the default and -DP3B_FAULT_NOVBLKEYS is the fault.
+  # **p3b_comb is now byte-identical to the arm those measurements were taken on** (18,869 30AEF5F9).
+  # RETIRED at T-P0-132: p3b_comb 18,818 BD28251C | p3b_comb_count 18,853 80A33A39
   @{ n = "p3b";        f = @("-DHAL_KEYBOARD");                          sz = 15632; sha = "0B7B0D00" },
   # ★★★★★ RE-BASELINED T-P0-125: the FIVE TEXT_WIRED arms moved +83 B (clear.lines is real), and
   # p3b, p3b_fault and p3b_flat did NOT -- the first links no text engine and the other two are
@@ -185,9 +193,9 @@ $ARMS = @(
   # ★★★★ T-P0-128's VBL key latch is OPT-IN (-DP3B_VBLKEYS_OPT) after it failed its eye gate, so
   # the shipped combined arm is back to its P6.74 bytes. Built with the latch it was 18782 B /
   # B9F06823 (+79); that figure is recorded here so the next task re-enabling it has a reference.
-  @{ n = "p3b_comb";   f = @("-DHAL_KEYBOARD","-DP3B_COMBINED","-DP3B_IRQ"); sz = 18818; sha = "BD28251C" },
+  @{ n = "p3b_comb";   f = @("-DHAL_KEYBOARD","-DP3B_COMBINED","-DP3B_IRQ"); sz = 18869; sha = "30AEF5F9" },
   # ★★★★ T-P0-130's COUNTING ARM (-Count in p3b_show.ps1): the combined arm with the pixel counters.
-  @{ n = "p3b_comb_count"; f = @("-DHAL_KEYBOARD","-DP3B_COMBINED","-DP3B_IRQ","-DP3B_COUNT"); sz = 18853; sha = "80A33A39" }
+  @{ n = "p3b_comb_count"; f = @("-DHAL_KEYBOARD","-DP3B_COMBINED","-DP3B_IRQ","-DP3B_COUNT"); sz = 18904; sha = "5A6B5DE1" }
 )
 
 # ★★★ -DP3B_COVERAGE puts the two opcode counters back [p3b_probe.s]. It is a REAL byte change --

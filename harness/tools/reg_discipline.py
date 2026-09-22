@@ -109,12 +109,42 @@ SCAN_LO, SCAN_HI = 0xFF80, 0xFFDF
 HAL_OWNED = ((0xFF90, 0xFF9F), (0xFFB0, 0xFFBF))
 
 # ★ ALLOWLIST -- BY EXPLICIT FILENAME, NEVER BY PATTERN.
-# EMPTY ON PURPOSE: coco_agi has no harness probes yet. When the first one is written, its
-# repo-relative posix path goes here as its own line, in the same commit as the probe. One
-# reviewable line per exemption is the entire mechanism.
-ALLOWLIST = frozenset()
+# ★★★★★ NO LONGER EMPTY [T-P0-132]. The roots now include src/harness, which holds BOTH the
+# port's own subsystems (the VM, the resource layer, the compositor, the picture renderer) and
+# the PROBES that drive them. A probe's job is to poke hardware, so each one is exempted here by
+# its own reviewable line -- and a file NOT on this list is port code, whose register accesses
+# are the census's subject.
+ALLOWLIST = frozenset({
+    "src/harness/cel_probe.s",
+    "src/harness/comp_probe.s",
+    "src/harness/gs_probe.s",
+    "src/harness/hal_build.s",
+    "src/harness/input_probe.s",
+    "src/harness/mode2_probe.s",
+    "src/harness/p3b_boot_test.s",
+    "src/harness/p3b_probe.s",
+    "src/harness/parser_probe.s",
+    "src/harness/pic_probe.s",
+    "src/harness/res_probe.s",
+    "src/harness/reserved_fit.s",
+    "src/harness/text_probe.s",
+    "src/harness/text_show.s",
+    "src/harness/vbl_probe.s",
+    "src/harness/vm_probe.s",
+})
 
-DEFAULT_ROOTS = ("src/engine",)
+# ★★★★★ THE ROOTS, AND WHY THEY ARE NO LONGER src/engine ALONE [T-P0-132 §1.2].
+# **The narrow root hid a register writer TWICE.**
+#   P6.38: vm_text_ops.s -- five MMU writes outside the census's root.
+#   P6.79: res_core.s's res_map_block writes $FFA6 on every block change, and res_core.s's own
+#          header claimed *"storage takes $FFA6 and this is the ONLY routine that writes it"*.
+#          mmu_phase.s writes it too. **Two writers, two caches of what slot 6 holds, and the
+#          census could not see one of them** -- which is how P6.74 and P6.78 both happened.
+# ★★★★ src/harness holds shipped subsystems, not only probes: res_core.s IS the storage layer
+# [design §4.2a] and plane_win.s IS the plane windowing. They live there because the engine tree
+# is not populated yet, so a root that trusts the DIRECTORY misses the port's own code.
+# ★★★ Probes are exempted BY NAME above, which keeps "adding a probe is a visible act" true.
+DEFAULT_ROOTS = ("src/engine", "src/harness")
 
 
 # ---------------------------------------------------------------- the four-part rule

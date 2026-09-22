@@ -34,6 +34,11 @@ def main():
     ap.add_argument("--dir", type=int, default=3)
     ap.add_argument("--at", type=int, default=15, help="the press lands before cycle AT+1")
     ap.add_argument("--to", type=int, default=30)
+    ap.add_argument("--dir0", action="store_true",
+                    help="give NO press (direction stays 0) -- a no-input run to compare against")
+    ap.add_argument("--watch", default="",
+                    help="comma-separated object numbers: print how often each one's position changed "
+                         "per 50-cycle window, and where it ended (T-P0-132's 'does everything keep moving')")
     ap.add_argument("--dump", default="",
                     help="write the 288-byte state row (flags+vars) of every cycle to DIR/ref_NNN.bin, "
                          "the same format vm_stage.py's Recorder and P3B_STATEDUMP use")
@@ -55,17 +60,32 @@ def main():
     vm.run(max_cycles=a.at)
     ego = vm.state.screen_objs[0]
     # handleController: same direction again -> 0, else the new one; motion normal under control.
-    new = 0 if ego.direction == a.dir else a.dir
-    vm.set_var(VM_VAR_EGO_DIRECTION, new)
-    if getattr(vm.state, "player_control", True):
-        ego.motionType = 0
-    print("press: VAR %d <- %d before cycle %d (ego x=%d y=%d dir=%d)"
-          % (VM_VAR_EGO_DIRECTION, new, a.at + 1, ego.x, ego.y, ego.direction))
+    if not a.dir0:
+        new = 0 if ego.direction == a.dir else a.dir
+        vm.set_var(VM_VAR_EGO_DIRECTION, new)
+        if getattr(vm.state, "player_control", True):
+            ego.motionType = 0
+        print("press: VAR %d <- %d before cycle %d (ego x=%d y=%d dir=%d)"
+              % (VM_VAR_EGO_DIRECTION, new, a.at + 1, ego.x, ego.y, ego.direction))
+    watch = [int(s) for s in a.watch.split(",") if s.strip()]
+    seen = {o: {} for o in watch}
     row = []
     for c in range(a.at + 1, a.to + 1):
         vm.run(max_cycles=c)
         row.append("%d:%d/%d" % (c, ego.x, ego.direction))
-    print("reference ego (cycle:x/dir): " + " ".join(row))
+        for o in watch:
+            so = vm.state.screen_objs[o]
+            seen[o][c] = (so.x, so.y)
+    if not watch:
+        print("reference ego (cycle:x/dir): " + " ".join(row))
+    for o in watch:
+        wins = []
+        for w in range(a.at + 1, a.to + 1, 50):
+            n = sum(1 for c in range(w + 1, min(w + 50, a.to + 1))
+                    if c - 1 in seen[o] and seen[o][c] != seen[o][c - 1])
+            wins.append("%d-%d:%d" % (w, w + 49, n))
+        print("reference obj %2d moved per window: %s   (last %s)"
+              % (o, " ".join(wins), "%d,%d" % seen[o][a.to]))
     if a.dump:
         d = pathlib.Path(a.dump)
         d.mkdir(parents=True, exist_ok=True)

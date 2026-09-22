@@ -623,8 +623,27 @@ rc_out:         rts
 * $FF90-$FF9F and $FFB0-$FFBF; the MMU task slots at $FFA0-$FFAF are in the SCAN window and
 * owned by nobody, and §2N notes that is exactly where the siblings' real contention lives.
 * ★★ There is no HAL mapping API -- HAL_gfx_set_mode remaps $FFA4-$FFA7 for the framebuffer and
-* nothing else exists. So storage takes $FFA6 and this is the ONLY routine that writes it.
-* ★ When §2N.1's owner ratchet is built, "storage owns $FFA6" is the row to add.
+* nothing else exists. So storage takes $FFA6.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ AND THE REST OF THAT SENTENCE WAS FALSE, FOR AS LONG AS IT STOOD [T-P0-132 §1.2].
+* It read: *"and this is the ONLY routine that writes it."* **src/engine/mmu_phase.s writes $FFA6
+* too** -- phase_vm, phase_draw, phase_draw_fb, phase_draw_pri_slot6 and phase_vol -- and it is the
+* file §2N names as the sanctioned owner of $FFA5/$FFA6.
+* ★★★★★ THE COST OF THAT SENTENCE IS TWO SHIPPED DEFECTS. Each writer keeps its own record of what
+* slot 6 holds -- res_curblk here, pl_vis_cur/pl_pri_cur in plane_win.s -- and each was invalidated
+* only where its author remembered the other:
+*     P6.74  the compositor wrote slot 6; res_curblk went stale; two of four sprites were fetched
+*            out of the framebuffer and refused with RES_E_SIG -- the alligators.
+*     P6.78  res_open wrote slot 6; pl_vis_cur went stale; co_put_visual wrote sprite pixels into
+*            the STAGED GAME DATA, corrupting logic 1 and killing the ego every castle run.
+* ★★★★ AND THE CENSUS COULD NOT SEE THIS WRITE: reg_discipline.py's roots were src/engine alone,
+* and this file is in src/harness. Widened at T-P0-132, it reports $FFA6 with TWO owners.
+* ★★★ THE FIX IS NOT HERE YET, AND WHY IS RECORDED RATHER THAN LEFT TO BE REDISCOVERED: routing
+* this through mmu_phase.s would make res_probe and vm_probe -- the `res` and `vm` gates' producers,
+* which include res_core.s and NOT mmu_phase.s -- link it, and memmap.inc:470 refuses to assemble
+* it without PLANE_WINDOWED. **Those two gates would have to move to the windowed memory map to
+* give storage a mapping call.** [T-P0-132 §6 stop; the design is in that report's §7.]
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 *
 * ★ Skips the write when the block is already mapped: the counter then measures REAL remaps,
 * which is what AC-7 is about. A counter that ticks on every fetch would report the call rate.
