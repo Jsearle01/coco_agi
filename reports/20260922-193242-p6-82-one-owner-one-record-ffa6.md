@@ -372,4 +372,5 @@ four questions. Jay's answers are quoted in AC-13 and adjudicated there.
 `seeds/AGI/live/2026-09-22-a-guard-that-fires-on-builds-it-cannot-be-about.md`
 
 ### 11 — Commit
-`<hash>`  (pushed to origin/wip before this report)
+`fc1513e`  (pushed to origin/wip before this report)
+Pool candidate `d1cdd9b` (methodology-candidate-pool, main).
