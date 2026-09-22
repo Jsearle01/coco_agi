@@ -246,7 +246,7 @@ thing I would attack now, ahead of the compositor work that was queued.
 2. Jay: *"are you stuck"* / *"continue"* — I had gone quiet mid-measurement; no scope change.
 
 ### 10 — Candidate(s) captured this task
-- `2026-09-22-a-performance-figure-taken-on-a-broken-build-measures-the-breakage` — pool commit in §11.
+- `2026-09-22-a-performance-figure-taken-on-a-broken-build-measures-the-breakage` — pool `9937b81`.
 
 ### 11 — Commit
-(filled in by the follow-up commit)
+`75b601c`  (pushed to origin/wip before this report)
