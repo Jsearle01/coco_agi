@@ -145,6 +145,14 @@ param(
   # ★★★★ -LevelKeys IS T-P0-131's FAULT ARM: p3_key_edge returns the matrix LEVEL again, which is
   # every build before this task. A known-good red in Jay's words: "the new build didnt move him".
   [switch]$LevelKeys,
+  # ★★★★ -IfRec: the `if` recorder (-DVM_IFDIAG -DVM_SAIDDIAG) added to WHATEVER configuration is
+  # being built, not only -IfDiag's text arm [T-P0-131]. The combined arm diverges from the reference
+  # where the text arm does not, so the recorder is needed where the divergence is.
+  [switch]$IfRec,
+  # ★★★★★ -NoPlaneReset IS T-P0-131's SECOND FAULT ARM: p3_composite_all stops invalidating
+  # plane_win's slice cache after the VIEW fetch, so co_put_visual writes sprite pixels into the
+  # staged volume. Every build before this task; a known-good red (logic 1 corrupted by cycle 18).
+  [switch]$NoPlaneReset,
   [switch]$ViewFaultOneMap,
   [switch]$NoIrq,
   [double]$Hold   = 3.0
@@ -305,6 +313,8 @@ if ($Combined) { $FLAGS += @("-DP3B_COMBINED") + $IRQ }
 if ($Count) { $FLAGS += "-DP3B_COUNT" }
 if ($ViewHdrTest) { $FLAGS += "-DP3B_VIEWHDR_TEST" }
 if ($LevelKeys) { $FLAGS += "-DP3B_FAULT_LEVELKEYS" }
+if ($IfRec) { $FLAGS += @("-DVM_IFDIAG","-DVM_SAIDDIAG") }
+if ($NoPlaneReset) { $FLAGS += "-DP3B_FAULT_NOPLANERESET" }
 if ($ViewFaultOneMap) { $FLAGS += "-DVM_VIEW_FAULT_ONEMAP" }
 # ★★★★★ THE CEL ARM GETS THE KEYBOARD TOO [T-P0-115]. Tested on the absence of -DP3B_NO_CEL rather
 # than on a list of the twelve text switches, because that list is the thing this file has already
@@ -375,7 +385,8 @@ $WANT = @("res_volbase","res_slicebase","res_curblk","vm_quit","vm_badop","vm_cy
 $Wired  = $Text -or $DecodeFault -or $NoTick -or $Diag -or $NoMap -or $Win3 -or $Combined
 $Linked = $Wired -or $Fault -or $FlatVocab -or $SaidDiag -or $Var0Diag -or $IfDiag -or $ResCheck
 # ★★ Each diagnostic's own symbols, only where its flag defines them.
-if ($SaidDiag -or $IfDiag) { $WANT += @("vm_sd_at","vm_sd_n","vm_sd_buf") }
+if ($SaidDiag -or $IfDiag -or $IfRec) { $WANT += @("vm_sd_at","vm_sd_n","vm_sd_buf") }
+if ($IfRec) { $WANT += @("vm_if_at","vm_if_logic","vm_if_n","vm_if_buf","vm_if_code","vm_if_clen","vm_if_snap") }
 if ($Var0Diag) { $WANT += @("vm_v0_at","vm_v0_n","vm_v0_buf") }
 if ($IfDiag) { $WANT += @("vm_if_at","vm_if_logic","vm_if_n","vm_if_buf","vm_if_code","vm_if_clen","vm_if_snap") }
 # ★★ rck_seen and rck_noted are NOT optional extras: they are what tells a green run from a run

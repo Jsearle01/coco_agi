@@ -34,9 +34,20 @@ def main():
     ap.add_argument("--dir", type=int, default=3)
     ap.add_argument("--at", type=int, default=15, help="the press lands before cycle AT+1")
     ap.add_argument("--to", type=int, default=30)
+    ap.add_argument("--dump", default="",
+                    help="write the 288-byte state row (flags+vars) of every cycle to DIR/ref_NNN.bin, "
+                         "the same format vm_stage.py's Recorder and P3B_STATEDUMP use")
     a = ap.parse_args()
 
-    vm = Vm(resource.load_from_files(a.game), 0x2917, seed=12345)
+    rows = {}
+
+    class Rec:
+        # ★★ vm_stage.py's Recorder, keyed by cycle: the reference emits at the START of a cycle's
+        # body [cycle.py], so row N is the state p3b dumps at the park AFTER cycle N-1.
+        def emit(self, cycle_nr, flags, vars_):
+            rows[cycle_nr] = bytes(flags) + bytes(vars_)
+
+    vm = Vm(resource.load_from_files(a.game), 0x2917, seed=12345, trace=Rec())
     vm.start()
     vm.run(max_cycles=a.room_at)
     vm.set_var(0, a.room)
@@ -55,6 +66,12 @@ def main():
         vm.run(max_cycles=c)
         row.append("%d:%d/%d" % (c, ego.x, ego.direction))
     print("reference ego (cycle:x/dir): " + " ".join(row))
+    if a.dump:
+        d = pathlib.Path(a.dump)
+        d.mkdir(parents=True, exist_ok=True)
+        for c, b in sorted(rows.items()):
+            (d / ("ref_%03d.bin" % c)).write_bytes(b)
+        print("wrote %d reference rows to %s (cycles %d-%d)" % (len(rows), d, min(rows), max(rows)))
 
 
 if __name__ == "__main__":

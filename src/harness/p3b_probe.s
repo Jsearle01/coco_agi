@@ -2993,6 +2993,28 @@ pca_gotview:
                 jsr     vc_decode_begin
                 lda     vc_err
                 bne     pca_close
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ AND THE PLANE LAYER'S CACHE OF THE SAME REGISTER, WHICH P6.74 DID NOT INVALIDATE [T-P0-131].
+* res_open(VIEW) above maps a VOLUME block into slot 6. plane_win.s records which FRAMEBUFFER slice
+* it believes slot 6 holds (pl_vis_cur) and SKIPS the remap when the slice matches -- so from the
+* second sprite on, co_put_visual was handed an address in the VOLUME WINDOW and wrote sprite
+* pixels into the staged game data.
+* ★★★★★ MEASURED, END TO END: a write tap on $A000-$DFFF filtered to block $0E (KQ1 vol.1's first
+* block) caught co_put_visual storing $BB/$33 -- doubled pixels -- there from the first castle
+* cycle. LOGIC 1 is re-fetched from that volume every cycle, so its bytecode acquired the pixels;
+* at cycle 18 the corrupted `if` at $0269 fell into the block that sets flag 63 -- the alligator
+* death sequence: program.control + stop.motion (Jay: "graham doesn't respond"), follow.ego on both
+* alligators ("not contained to the moat"), print(1) (the `"` box). **The text arm, which has no
+* compositor, matched the reference exactly; the combined arm did not, with no key at all.**
+* ★★★★ P6.74's own words, the rule this completes: *"a cache of a register's contents is wrong the
+* moment anyone else writes that register."* Two caches of $FFA6 exist -- res_curblk and
+* pl_vis_cur -- and each owner has to be told when the other moves it.
+* ★★★ -DP3B_FAULT_NOPLANERESET drops this: today's behaviour, a known-good red.
+                ifdef   PLANE_WINDOWED
+                ifndef  P3B_FAULT_NOPLANERESET
+                jsr     plane_reset
+                endc
+                endc
                 jsr     cp_composite
 * ★★★★★ RECORD THE RECTANGLE FOR NEXT FRAME'S RESTORE [T-P0-112]. Here and not in p3_stage_sprites
 * because the cel's GEOMETRY is what the restore needs, and vc_w/vc_h are only known once

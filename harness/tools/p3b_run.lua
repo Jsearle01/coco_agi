@@ -442,21 +442,76 @@ local function stage()
     -- VAR 6 went to 0 and nothing on the key path wrote it. RECORDS, never logs [idioms 43c]; the
     -- first 24 writes, printed at the end. ★ MAME's tap covers the containing region, so this is
     -- slow on the VM's variable page -- a diagnostic run, never a gate.
-    if os.getenv("P3B_VARTAP") then
-        local vn = tonumber(os.getenv("P3B_VARTAP"))
+    -- ★★ P3B_TAPADDR=<hex> taps any single address the same way -- the flag BYTES at $0900
+    -- included, since a flag has no variable number [T-P0-131: flag 0 was set by nothing that
+    -- names it].
+    if os.getenv("P3B_VARTAP") or os.getenv("P3B_TAPADDR") then
+        local addr = os.getenv("P3B_TAPADDR") and tonumber(os.getenv("P3B_TAPADDR"), 16)
+                     or (0x0800 + tonumber(os.getenv("P3B_VARTAP")))
         _G._vt = {}
-        _G._vttap = prog:install_write_tap(0x0800 + vn, 0x0800 + vn, "vartap",
+        -- ★ P3B_TAPMASK=<hex>: record only writes that CHANGE a bit under the mask -- one flag's
+        -- transitions in a byte eight flags share. The tap fires before the store, so the byte
+        -- read here is still the old value.
+        local tmask = tonumber(os.getenv("P3B_TAPMASK") or "FF", 16)
+        -- ★ P3B_TAPCYCLE=<n>: only writes while P3_CYCLE reads n (i.e. during cycle n+1's body).
+        -- For a register written hundreds of times a cycle, the 24 records must be the right 24.
+        local tcyc = tonumber(os.getenv("P3B_TAPCYCLE") or "")
+        _G._vttap = prog:install_write_tap(addr, addr, "vartap",
             function(offset, data, mask)
-                if offset == 0x0800 + vn and #_G._vt < 24 then
+                if offset == addr and #_G._vt < 24
+                        and (not tcyc or prog:read_u8(ST + 4) * 256 + prog:read_u8(ST + 5) == tcyc)
+                        and (addr >= 0xFF00 or ((prog:read_u8(addr) ~ data) & tmask) ~= 0) then
                     -- ★★ + the top three stack words: the writer is usually vm_setvar, so the
                     -- CALLER is what names the cause.
                     -- ★ inline reads: rd16 is declared BELOW stage(), so a closure here would
                     -- capture a nil global -- the trap P3_CYCLE's note above records for `n`.
                     local s = cpu.state["S"].value
                     local function w16(a) return prog:read_u8(a) * 256 + prog:read_u8(a + 1) end
-                    _G._vt[#_G._vt + 1] = string.format("c%d:$%02X@$%04X[%04X %04X %04X]",
+                    -- ★★★ AND THE BLOCK BEHIND THE ADDRESS: a CPU-address tap fires whatever the
+                    -- slot maps, so a write into a FRAMEBUFFER slice and a write into the ARENA at
+                    -- the same address are different events [idioms §22a: mask the top two bits].
+                    _G._vt[#_G._vt + 1] = string.format("c%d:$%02X@$%04X[%04X %04X %04X]L%s/blk$%02X/rc$%02X",
                         prog:read_u8(ST + 4) * 256 + prog:read_u8(ST + 5), data % 256,
-                        cpu.state["CURPC"].value, w16(s), w16(s + 2), w16(s + 4))
+                        cpu.state["CURPC"].value, w16(s), w16(s + 2), w16(s + 4),
+                        SYM.vm_curlogic and tostring(prog:read_u8(SYM.vm_curlogic)) or "?",
+                        prog:read_u8(0xFFA0 + (addr >> 13)) & 0x3F,
+                        SYM.res_curblk and prog:read_u8(SYM.res_curblk) or 0)
+                end
+            end)
+    end
+    -- ★★★★ P3B_TAPRANGE="lo-hi" + P3B_TAPVALUES="BB,33": who stores THESE values anywhere in a
+    -- range [T-P0-131: doubled sprite pixels were found inside the LOGIC cache]. Records PC, the
+    -- target address, the block behind it and the stack; the first 24.
+    if os.getenv("P3B_TAPRANGE") then
+        local lo, hi = os.getenv("P3B_TAPRANGE"):match("^(%x+)%-(%x+)$")
+        lo, hi = tonumber(lo, 16), tonumber(hi, 16)
+        local want = {}
+        for v in (os.getenv("P3B_TAPVALUES") or ""):gmatch("%x+") do want[tonumber(v, 16)] = true end
+        _G._tr = {}
+        -- ★ P3B_TAPSKIP="a-b,c-d": PC ranges NOT to record -- the resource copy loops, which store
+        -- bytecode into the arena legitimately and would otherwise fill all 24 records.
+        local skip = {}
+        for a, b in (os.getenv("P3B_TAPSKIP") or ""):gmatch("(%x+)%-(%x+)") do
+            skip[#skip + 1] = { tonumber(a, 16), tonumber(b, 16) }
+        end
+        _G._trtap = prog:install_write_tap(lo, hi, "rangetap",
+            function(offset, data, mask)
+                local v = data % 256
+                local pc = cpu.state["CURPC"].value
+                for _, r in ipairs(skip) do if pc >= r[1] and pc <= r[2] then return end end
+                -- ★ P3B_TAPBLK=<hex>: only stores whose target slot maps THIS physical block --
+                -- a write into staged volume data through a draw window, not the window's plane.
+                local tb = os.getenv("P3B_TAPBLK")
+                if tb and (prog:read_u8(0xFFA0 + (offset >> 13)) & 0x3F) ~= tonumber(tb, 16) then
+                    return
+                end
+                if offset >= lo and offset <= hi and want[v] and #_G._tr < 24 then
+                    local s = cpu.state["S"].value
+                    local function w16(a) return prog:read_u8(a) * 256 + prog:read_u8(a + 1) end
+                    _G._tr[#_G._tr + 1] = string.format("c%d:$%02X->$%04X@$%04X[%04X %04X %04X]/blk$%02X",
+                        prog:read_u8(ST + 4) * 256 + prog:read_u8(ST + 5), v, offset,
+                        cpu.state["CURPC"].value, w16(s), w16(s + 2), w16(s + 4),
+                        prog:read_u8(0xFFA0 + (offset >> 13)) & 0x3F)
                 end
             end)
     end
@@ -1573,8 +1628,14 @@ _G._n = emu.add_machine_frame_notifier(function()
               prog:read_u8(SYM.res_err or 0))
             w("    final room %d, sprites %d, err %d, status=$%02X",
               prog:read_u8(ROOM), prog:read_u8(NSPR), prog:read_u8(ERR), prog:read_u8(STATUS))
+            if _G._tr then
+                w("    RANGETAP %s values %s: %s", os.getenv("P3B_TAPRANGE"),
+                  os.getenv("P3B_TAPVALUES") or "", table.concat(_G._tr, " "))
+            end
             if _G._vt then
-                w("    VARTAP var %s writes (P3_CYCLE:value@PC): %s", os.getenv("P3B_VARTAP"),
+                w("    VARTAP %s writes (P3_CYCLE:value@PC): %s",
+                  os.getenv("P3B_TAPADDR") and ("$" .. os.getenv("P3B_TAPADDR"))
+                                           or ("var " .. os.getenv("P3B_VARTAP")),
                   table.concat(_G._vt, " "))
             end
             if _G._hk then
@@ -2666,6 +2727,20 @@ _G._n = emu.add_machine_frame_notifier(function()
             end
         end
 
+        -- ★★★★ P3B_SETVAR_AT="cycle:var=val[,var=val]" -- a variable written at a CHOSEN park,
+        -- the seam the key dispatcher's own write lands on [T-P0-131]. Written when n == cycle,
+        -- i.e. before cycle+1 is released. Exists so an arm with no key dispatcher (the text-only
+        -- -IfDiag arm) can be given exactly what one RIGHT press gives the combined arm: VAR 6 = 3.
+        if os.getenv("P3B_SETVAR_AT") and not _G._sva_done then
+            local at, list = os.getenv("P3B_SETVAR_AT"):match("^(%d+):(.+)$")
+            if at and n == tonumber(at) then
+                _G._sva_done = true
+                for k, v in list:gmatch("(%d+)%s*=%s*(%d+)") do
+                    prog:write_u8(VM_VARS + tonumber(k), tonumber(v))
+                    w("  ★ var %s <- %s at the park after cycle %d", k, v, n)
+                end
+            end
+        end
         -- ★★★ THE JUMP, one release before the cycle that should dispatch it -- the same seam the
         -- feed and the var-21 arm use, for the same reason: the guest reads this state inside the
         -- cycle this write releases.
