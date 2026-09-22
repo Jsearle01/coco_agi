@@ -225,6 +225,10 @@ P3B_TEXT_LINK   equ     1
 *   4. ★★★★ A SHIPPED DEFECT THIS DOES NOT DEPEND ON: p3_poll_dir samples the key LEVEL once per
 *      cycle where the oracle delivers one EDGE per press [keyboard.cpp:226-242], so a held arrow
 *      reads set, stop, set. That is live in the combined arm today, latch or no latch.
+*      ★★★★★ FIXED AT T-P0-131, WITHOUT THE INTERRUPT: p3_key_edge is one edge detector, and this
+*      latch's CONSUMER SHAPE now ships in every arm -- p3_poll_dir dispatches, p3_poll_key drains,
+*      tx_wait_dismiss takes edges. **What remains parked here is only the 60 Hz CAPTURE**: an edge
+*      that starts and ends between two scans is still lost, and catching it needs the interrupt.
                 ifdef   P3B_COMBINED
                 ifdef   P3B_VBLKEYS_OPT
                 ifndef  P3B_FAULT_NOVBLKEYS
@@ -250,6 +254,13 @@ P3B_VBL_KEYS    equ     1
                 ifdef   P3B_COMBINED
                 ifndef  P3B_COUNT
 COMP_NOCOUNT    equ     1
+                endc
+                endc
+* ★★★★ P3B_KEY_DISPATCH -- p3_poll_dir is linked, so IT is the per-cycle key dispatcher and
+* p3_poll_key only drains what it forwards [T-P0-131]. Same nesting as p3_poll_dir's definition.
+                ifdef   P3B_CEL_LINK
+                ifdef   HAL_KEYBOARD
+P3B_KEY_DISPATCH equ    1
                 endc
                 endc
 * ★★★★★ PIC_WIRED -- the game's own picture opcodes are REAL in this build [T-P0-121]. Every
@@ -1419,6 +1430,60 @@ p3_feed         equ     p3_parse_line
 * then reported the CP_CEL collision guard as well, from a pass that had already failed. **The
 * second error named a region that was fine** (P3_CODE_END $52F8 against CP_CEL $5300, eight bytes
 * spare, exactly as always), which is how a cascade sends the reading to the wrong place.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ p3_key_edge -- ONE PRESS, ONE EVENT [T-P0-131]. THE ONLY SCANNER OF THE MATRIX OUTSIDE
+* THE VBL ARM.
+* ★★★★★ THE ORACLE DELIVERS ONE EVENT PER PRESS. Keys are enqueued on EVENT_KEYDOWN only, and
+* platform auto-repeat is discarded for the direction keys [keyboard.cpp:224-262, `if
+* (_allowSynthetic || !event.kbdRepeat)`, and :333-334]. **Every former reader here sampled the
+* LEVEL**: p3_poll_dir once per cycle, p3_poll_key's fallback once per cycle, p3_key_latch on every
+* pass of the park loop, and tx_wait_dismiss on every pass of the box's wait.
+* ★★★★★ AND A LEVEL POLL GETS WORSE AS THE CYCLE GETS FASTER. A held arrow is sampled once per
+* cycle, and the second sample of the same arrow is "the same direction again", which STOPS the ego
+* [keyboard.cpp:603-604] -- so it read set, stop, set. A faster cycle takes more samples of the same
+* hold. Jay, after P6.77's 18% speed-up: *"the old build took about 3 or 4 to start him moving left.
+* the new build didnt move him at all."* **Every speed task would have made it worse.**
+* ★★★★ So there is ONE edge detector and every reader goes through it: a key counts only when the
+* scan DIFFERS from the last scan and is non-zero. A release (key -> 0) is a change too, and it is
+* what resets p3_klast -- so the same key pressed, released and pressed again is two events.
+* ★★★ LETTERS AND ENTER ARE EDGES TOO, AND THAT IS A NAMED GAP. The oracle repeats them: the
+* `key <= 0xFF` branch at keyboard.cpp:208 has no kbdRepeat test, so ScummVM's platform repeat
+* (400 ms, then every 100 ms [common/events.cpp:278-279]) reaches the editor. **That rate is
+* ScummVM's, not AGI's**; a port with no OS would have to invent one, and a once-per-cycle poll at
+* ~4 Hz could not deliver 100 ms anyway. Edges only, gap stated [T-P0-131 §4A(1)].
+* ★★★ -DP3B_FAULT_LEVELKEYS restores the level read: today's behaviour, a known-good red.
+                ifdef   HAL_KEYBOARD
+                ifndef  P3B_VBL_KEYS
+p3_klast        fcb     0               ; what the matrix showed at the last scan; 0 = nothing
+* ★★★ ONE EDGE CAUGHT IN THE HARNESS PARK, held for the next cycle's dispatcher. The park is a
+* harness construct [p3_wait]; scanning it for edges only catches a tap that falls between two
+* cycles. **It shares p3_klast**, so a press seen in the park is not seen again by the cycle.
+p3_kpend        fcb     0
+* p3_key_edge: A = a newly pressed key, or 0 (Z set). Updates p3_klast either way.
+p3_key_edge:
+                jsr     HAL_key_scan
+                ifdef   P3B_FAULT_LEVELKEYS
+                tsta                            ; ★ INJECTED: the level, every call
+                rts
+                else
+                cmpa    p3_klast
+                beq     pke_none                ; unchanged: still held, or still nothing
+                sta     p3_klast
+                tsta                            ; a release is 0: remembered, not an event
+                rts
+pke_none:       clra
+                rts
+                endc
+* p3_key_event: the pending park edge if there is one, else a scan. A = key or 0 (Z set).
+p3_key_event:
+                lda     p3_kpend
+                beq     p3_key_edge
+                clr     p3_kpend
+                tsta
+                rts
+                endc
+                endc
+
                 ifdef   TEXT_PROMPT
 * ★★★★ THE LATCH IS ONE BYTE DEEP AND IT DOES NOT OVERWRITE. A second key arriving before the
 * cycle consumes the first is DROPPED rather than replacing it, which is the same thing a
@@ -1434,41 +1499,61 @@ p3_key_latch:
                 ifdef   P3B_VBL_KEYS
                 rts
                 else
-                lda     txt_penab
+* ★★★★★ AN EDGE INTO THE PENDING SLOT, NOT A LEVEL INTO THE EDITOR'S BUFFER [T-P0-131]. This
+* latched the matrix LEVEL into p3_keybuf on every pass of the park while the buffer was empty, so a
+* held letter reached the editor once per cycle for as long as it was held. It now records only a
+* NEW press, for any key and whatever the prompt state -- the dispatcher decides what a key is for.
+                lda     p3_kpend
+                bne     pkl_out                 ; one deep: do not overwrite an unread edge
+                jsr     p3_key_edge
                 beq     pkl_out
-                lda     p3_keybuf
-                bne     pkl_out                 ; one deep: do not overwrite an unread key
-                jsr     HAL_key_scan
-                tsta
-                beq     pkl_out
-                sta     p3_keybuf
+                sta     p3_kpend
 pkl_out:        rts
                 endc
 
-* ★★ p3_poll_key takes the latched key first and falls back to a live scan, so a key held across
-* the cycle boundary is still seen on a build where the park loop did not run (the first cycle).
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ p3_poll_key -- DRAINS, IT DOES NOT SCAN, WHERE p3_poll_dir IS THE DISPATCHER [T-P0-131].
+* It took the latched key and FELL BACK TO A LIVE SCAN, which made it the second per-cycle reader
+* of the matrix beside p3_poll_dir -- two level reads a cycle, and a held letter reached the editor
+* repeatedly. **One scanner, one dispatcher** [cycle.cpp:347-351]: p3_poll_dir takes the edge, runs
+* the direction test, publishes VAR 19, and forwards to p3_keybuf if the prompt is enabled; this
+* drains p3_keybuf. That is the VBL arm's consumer shape, shipped without its interrupt.
+* ★★★ In a TEXT-ONLY arm there is no p3_poll_dir, so this is the dispatcher there and takes the
+* edge itself -- still the one detector, still one read a cycle. It reads EVERY cycle, prompt or
+* not, so p3_klast tracks releases; with the prompt disabled the event is dropped, as
+* promptKeyPress is not called [cycle.cpp:350-351].
+* ★★ p3_keybuf is still drained first: it is where p3_poll_dir forwards AND where P3B_INJECT writes
+* [p3b_run.lua], so p3b_row22's path is unchanged.
 p3_poll_key:
                 lda     txt_penab
-                beq     ppk_out
+                beq     ppk_track
                 lda     p3_keybuf
                 beq     ppk_scan
                 clr     p3_keybuf
                 bra     ppk_have
 ppk_scan:
-* ★★★★★ NO FALLBACK SCAN IN THE VBL ARM [T-P0-128]. The editor's keys arrive through p3_keybuf,
-* forwarded by p3_poll_dir from the VBL queue. Scanning here would make this a second owner of
-* the PIA and reintroduce §1.2's hazard, intermittently -- only when the IRQ lands mid-scan.
                 ifdef   P3B_VBL_KEYS
-                bra     ppk_out
+                bra     ppk_out                 ; the IRQ owns the PIA [T-P0-128]
                 else
-                jsr     HAL_key_scan
-                tsta
+                ifdef   P3B_KEY_DISPATCH
+                bra     ppk_out                 ; p3_poll_dir already took this cycle's edge
+                else
+                jsr     p3_key_event
                 beq     ppk_out
+                endc
                 endc
 ppk_have:
                 sta     P3_KEY
                 inc     P3_NKEY
                 jmp     txt_pkey
+ppk_track:
+* ★★ Prompt disabled. In a text-only arm this is still the cycle's one read, so it is taken and
+* discarded rather than skipped -- skipping would let a key held across accept.input fire late.
+                ifndef  P3B_VBL_KEYS
+                ifndef  P3B_KEY_DISPATCH
+                jsr     p3_key_event
+                endc
+                endc
 ppk_out:        rts
                 endc
 
@@ -1578,8 +1663,11 @@ p3_poll_dir:
                 ifdef   P3B_VBL_KEYS
                 jsr     p3_kq_get
                 else
-                jsr     HAL_key_scan
-                tsta
+* ★★★★★ AN EDGE, NOT A LEVEL [T-P0-131]. This was `jsr HAL_key_scan`: a held arrow re-read every
+* cycle, and the second read is "same direction again" = stop. Now a key reaches the tests below
+* once per PRESS, so a second press stops the ego -- the oracle's rule [keyboard.cpp:603-604] --
+* and a held key does nothing further. The result no longer depends on the cycle rate.
+                jsr     p3_key_event
                 endc
                 beq     ppd_out
                 ldb     #1
@@ -1631,7 +1719,8 @@ p3_poll_dir:
 * guard is about the CONSUME and it survives exactly as P6.71 left it.
 * ★★★ Placed before the publish only because `tst` and `sta` leave A intact and vm_setvar does
 * not; both land before p3_run_vm, so the order the logic observes is the oracle's.
-                ifdef   P3B_VBL_KEYS
+* ★★★★ AND NOW IN EVERY ARM, NOT ONLY THE VBL ONE [T-P0-131]: p3_poll_key drains instead of
+* scanning, so this forward is the editor's only source of typed keys.
                 ifdef   TEXT_PROMPT
                 tst     txt_penab
                 beq     ppd_nofwd
@@ -1639,7 +1728,6 @@ p3_poll_dir:
                 bne     ppd_nofwd               ; one deep: do not overwrite an unread key
                 sta     p3_keybuf
 ppd_nofwd:
-                endc
                 endc
                 ifndef  P3B_FAULT_NOVARKEY
                 sta     p3_varkey               ; ★ sticky copy -- see below

@@ -142,6 +142,9 @@ param(
   # view once, in the VM phase, and publishes what the in-place header read produced; the second
   # makes that read's two-byte fields map the window ONCE, which is wrong exactly at a straddle.
   [switch]$ViewHdrTest,
+  # ★★★★ -LevelKeys IS T-P0-131's FAULT ARM: p3_key_edge returns the matrix LEVEL again, which is
+  # every build before this task. A known-good red in Jay's words: "the new build didnt move him".
+  [switch]$LevelKeys,
   [switch]$ViewFaultOneMap,
   [switch]$NoIrq,
   [double]$Hold   = 3.0
@@ -301,6 +304,7 @@ if ($RoomDrive) { $FLAGS += "-DP3B_ROOMDRIVE" }
 if ($Combined) { $FLAGS += @("-DP3B_COMBINED") + $IRQ }
 if ($Count) { $FLAGS += "-DP3B_COUNT" }
 if ($ViewHdrTest) { $FLAGS += "-DP3B_VIEWHDR_TEST" }
+if ($LevelKeys) { $FLAGS += "-DP3B_FAULT_LEVELKEYS" }
 if ($ViewFaultOneMap) { $FLAGS += "-DVM_VIEW_FAULT_ONEMAP" }
 # ★★★★★ THE CEL ARM GETS THE KEYBOARD TOO [T-P0-115]. Tested on the absence of -DP3B_NO_CEL rather
 # than on a list of the twelve text switches, because that list is the thing this file has already

@@ -471,8 +471,12 @@ tx_wt_loop:
                 ifdef   P3B_VBL_KEYS
                 jsr     p3_kq_get
                 else
-                jsr     HAL_key_scan
-                tsta
+* ★★★★★ AN EDGE HERE TOO [T-P0-131]. A level scan dismissed a box the instant it opened if ENTER
+* was still down -- the ENTER that submitted the line, or the one that closed the previous box --
+* which is the text-side twin of the arrow defect. p3_key_event shares p3_klast with the cycle's
+* dispatcher, so an ENTER already counted there is not counted again here: the box waits for a
+* NEW press, as the oracle's KEYDOWN-only delivery does [keyboard.cpp:333-334].
+                jsr     p3_key_event
                 endc
                 beq     tx_wt_tick
                 cmpa    #HAL_KEY_ENTER

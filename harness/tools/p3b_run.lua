@@ -437,6 +437,29 @@ local function stage()
                 end
             end)
     end
+    -- ★★★★ P3B_VARTAP=<n>: WHO WRITES VM VARIABLE n, WITH WHAT, IN WHICH CYCLE [T-P0-131]. Found
+    -- because the ego stopped after three steps with one key event and the reference kept walking:
+    -- VAR 6 went to 0 and nothing on the key path wrote it. RECORDS, never logs [idioms 43c]; the
+    -- first 24 writes, printed at the end. ★ MAME's tap covers the containing region, so this is
+    -- slow on the VM's variable page -- a diagnostic run, never a gate.
+    if os.getenv("P3B_VARTAP") then
+        local vn = tonumber(os.getenv("P3B_VARTAP"))
+        _G._vt = {}
+        _G._vttap = prog:install_write_tap(0x0800 + vn, 0x0800 + vn, "vartap",
+            function(offset, data, mask)
+                if offset == 0x0800 + vn and #_G._vt < 24 then
+                    -- ★★ + the top three stack words: the writer is usually vm_setvar, so the
+                    -- CALLER is what names the cause.
+                    -- ★ inline reads: rd16 is declared BELOW stage(), so a closure here would
+                    -- capture a nil global -- the trap P3_CYCLE's note above records for `n`.
+                    local s = cpu.state["S"].value
+                    local function w16(a) return prog:read_u8(a) * 256 + prog:read_u8(a + 1) end
+                    _G._vt[#_G._vt + 1] = string.format("c%d:$%02X@$%04X[%04X %04X %04X]",
+                        prog:read_u8(ST + 4) * 256 + prog:read_u8(ST + 5), data % 256,
+                        cpu.state["CURPC"].value, w16(s), w16(s + 2), w16(s + 4))
+                end
+            end)
+    end
     -- ★★★★ T-P0-130 AC-8: the view the -ViewHdrTest arm runs set.view on, once, in the VM phase.
     if SYM.p3_vh_view then
         local v, l, c = (os.getenv("P3B_VIEWTEST") or ""):match("^(%d+),?(%d*),?(%d*)$")
@@ -659,7 +682,8 @@ _G._n = emu.add_machine_frame_notifier(function()
     -- ★★ Field names match exactly, case-insensitively [keymatrix_probe.lua's rule].
     if state == "cycle" and os.getenv("P3B_HOLDKEY") then
         if not _G._hk then
-            local f, c, fr, t, g = os.getenv("P3B_HOLDKEY"):match("^(%w+):(%d+):(%d+):?(%d*):?(%d*)$")
+            -- ★ `(.-)`, not `(%w+)`: letter fields are named "k  K" [keymatrix_probe.lua:46-52].
+            local f, c, fr, t, g = os.getenv("P3B_HOLDKEY"):match("^(.-):(%d+):(%d+):?(%d*):?(%d*)$")
             local fld
             for _, port in pairs(m.ioport.ports) do
                 for name, fl in pairs(port.fields) do
@@ -1549,6 +1573,10 @@ _G._n = emu.add_machine_frame_notifier(function()
               prog:read_u8(SYM.res_err or 0))
             w("    final room %d, sprites %d, err %d, status=$%02X",
               prog:read_u8(ROOM), prog:read_u8(NSPR), prog:read_u8(ERR), prog:read_u8(STATUS))
+            if _G._vt then
+                w("    VARTAP var %s writes (P3_CYCLE:value@PC): %s", os.getenv("P3B_VARTAP"),
+                  table.concat(_G._vt, " "))
+            end
             if _G._hk then
                 w("    HOLDKEY %s: %s;  p3_ndirs=%s p3_newdir=%s", os.getenv("P3B_HOLDKEY"),
                   table.concat(_G._hk.log, ", "),
