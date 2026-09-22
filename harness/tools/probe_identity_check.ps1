@@ -36,7 +36,17 @@ $PROBES = @(
   # change to res_core.s alone. ★★★ The vm gate ran green on the moved probe before this was
   # re-pinned -- 9/9, 0 divergent cycles of 600 each -- and its arena is 21,760 B, so it exercises
   # the trim path under a pressure the castle never reaches [§2T's lesson, fourth instance].
-  @{ n = "vm";   s = "src/harness/vm_probe.s";   f = @("-DHAL_GFX_MODE_SERVICE","-DHAL_SYS_FAST_CLOCK"); sz = 10057; sha = "90832641" },
+  # ★★★★★ RE-PINNED T-P0-135: 10,057 -> 10,140 B (+83), and the res probe moved by EXACTLY THE
+  # SAME +83 (2,129 C96D1F68 -> 2,212 3826E5C0). Both now link src/engine/mmu_phase.s, so storage
+  # maps slot 6 through the file that owns the register instead of writing it itself.
+  # ★★★★ THE IDENTICAL DELTA ON BOTH IS THE EVIDENCE IT IS ONE FILE AND NOTHING ELSE: the two
+  # probes share res_core.s and mmu_phase.s and no other changed file.
+  # ★★★★★ NEITHER PROBE'S MEMORY MODEL MOVED, which the ruling had priced as this task's cost.
+  # memmap.inc's plane-reach assertion was firing on builds that address no plane; scoped to the
+  # ones that do, both probes keep their own map and simply gain the mapping call [§4A].
+  # ★★★ Their gates were run green on the moved binaries BEFORE this re-pin: res 1,264/1,264 and
+  # vm 9/9 with 0 divergent cycles of 600 each.
+  @{ n = "vm";   s = "src/harness/vm_probe.s";   f = @("-DHAL_GFX_MODE_SERVICE","-DHAL_SYS_FAST_CLOCK"); sz = 10140; sha = "67987995" },
   @{ n = "pic";  s = "src/harness/pic_probe.s";  f = @("-DHAL_GFX_MODE_SERVICE");                        sz = 0;    sha = "" },
   @{ n = "res";  s = "src/harness/res_probe.s";  f = @("-DHAL_GFX_MODE_SERVICE");                        sz = 0;    sha = "" },
   # ★★★★ PINNED AT T-P0-105, because this one MOVED and an on-disk baseline cannot notice that.

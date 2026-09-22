@@ -268,7 +268,6 @@ ps_hold:        bra     ps_hold
                 sta     ph_blk_fb
                 clra
                 jsr     phase_draw_fb
-                jsr     plane_reset
                 endc
                 jsr     vis_clear               ; visual plane = 15 (white)
                 jsr     pri_clear               ; priority plane = 4 (red)
@@ -567,7 +566,8 @@ vc_lp:          std     ,x++
                 lda     vc_slice_n
                 cmpa    #4
                 blo     vc_slice
-                jsr     plane_reset             ; the caches no longer describe the register
+* ★★★ No invalidation needed since T-P0-135: this walk maps its slices through phase_draw_fb,
+* which records each one in ph_cur6 -- the byte plane_vis tests.
                 rts
                 else
 vis_clear:

@@ -61,7 +61,10 @@ RES_SLOT_END    equ     RES_ARENA_END
 RES_MAXDEPTH    equ     8               ; ★ against a MEASURED maximum LOGIC call depth of 3
 RES_WINDOW      equ     $C000           ; ★ THE VOLUME WINDOW: MMU slot 6, remapped per block
 RES_WINDOW_SIZE equ     $2000           ; 8 KB, one MMU block
-RES_MMU_SLOT    equ     $FFA6           ; the register that maps $C000-$DFFF
+* ★★★★ RES_MMU_SLOT IS GONE [T-P0-135]. This file no longer names an MMU register at all:
+* mmu_phase.s is the one owner, and storage maps through phase_vol. The `equ` is removed rather
+* than left unused, because reg_discipline.py skips `equ` definitions -- so a dormant alias here
+* would be an invisible invitation to write the register again.
 
 RES_LOGIC       equ     0
 RES_PICTURE     equ     1
@@ -87,7 +90,16 @@ res_vol         fcb     0               ; volume the last fetch came from
 res_off         fdb     0               ; low 16 bits of its offset
 res_offhi       fcb     0               ; high 4 bits -- the offset is 20 BITS, not 16
 res_err         fcb     0               ; 0 = ok; see RES_E_* below
-res_curblk      fcb     $FF             ; which physical block is mapped ($FF = none)
+* ★★★★★ NOT A BYTE ANY MORE -- A NAME FOR mmu_phase.s's ph_cur6 [T-P0-135]. The storage layer and
+* the phase layer each used to keep their own record of what slot 6 holds, and each was correct
+* only while the other remembered to invalidate it [see res_map_block for the two defects that
+* cost]. **There is now one byte, owned by the file that owns the register.**
+* ★★★ THE NAME SURVIVES BECAUSE SIX HOST TOOLS READ IT and two of them WRITE $FF to it when the
+* host moves the MMU itself [res_sweep.lua, vm_sweep.lua] -- which is exactly the right thing to
+* do to the single record. vm_symbols.py carries it in its DEFAULT want-list, so renaming it would
+* have moved the `res` gate's symbol map in the same task that moves the mapping call. ★★ An `equ`
+* is a second SPELLING, not a second opinion: there is one storage location and §2F is satisfied.
+res_curblk      equ     ph_cur6
 res_remaps      fdb     0               ; ★ AC-7: MMU remaps performed, counted not estimated
 
 res_top         fdb     RES_ARENA       ; bump pointer: the arena's first free byte
@@ -789,21 +801,28 @@ rc_out:         rts
 *            the STAGED GAME DATA, corrupting logic 1 and killing the ego every castle run.
 * ★★★★ AND THE CENSUS COULD NOT SEE THIS WRITE: reg_discipline.py's roots were src/engine alone,
 * and this file is in src/harness. Widened at T-P0-132, it reports $FFA6 with TWO owners.
-* ★★★ THE FIX IS NOT HERE YET, AND WHY IS RECORDED RATHER THAN LEFT TO BE REDISCOVERED: routing
-* this through mmu_phase.s would make res_probe and vm_probe -- the `res` and `vm` gates' producers,
-* which include res_core.s and NOT mmu_phase.s -- link it, and memmap.inc:470 refuses to assemble
-* it without PLANE_WINDOWED. **Those two gates would have to move to the windowed memory map to
-* give storage a mapping call.** [T-P0-132 §6 stop; the design is in that report's §7.]
+* ★★★★★ FIXED AT T-P0-135, AND THE BLOCKER WAS NOT REAL. The note that stood here said routing
+* this through mmu_phase.s would force res_probe and vm_probe onto the windowed memory map,
+* because memmap.inc:470 refuses to assemble without PLANE_WINDOWED. ★★★★ **The assertion was
+* firing on builds it is meaningless for**: its own sentence is "a build that addresses a plane
+* FLAT must have a plane that fits its window", and neither probe references one plane symbol.
+* Scoped to builds that address a plane (PLANE_ABSENT, checked by the three plane subsystems
+* rather than trusted), **both gates keep their memory model exactly** and storage gets its call.
+* ★★★ So the cost the ruling priced was an artifact of a guard that was too wide, and one read of
+* what the guard actually claimed removed it.
 * ═══════════════════════════════════════════════════════════════════════════════════════════
-*
-* ★ Skips the write when the block is already mapped: the counter then measures REAL remaps,
-* which is what AC-7 is about. A counter that ticks on every fetch would report the call rate.
+* ★★★★★ THIS ROUTINE NO LONGER WRITES $FFA6 AND NO LONGER KEEPS A CACHE. mmu_phase.s owns both:
+* phase_vol writes the register through phase_slot6, which records it in ph_cur6 in the same
+* breath. **res_curblk IS ph_cur6** -- one byte, under the name six host tools already read
+* (vm_symbols.py's default want-list among them), so the record moved homes without the gates'
+* symbol maps moving with it.
+* ★ The skip survives, on the single record: res_remaps still counts REAL remaps, which is what
+* AC-7 was about. A counter that ticked on every fetch would report the call rate.
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 res_map_block:
                 cmpa    res_curblk
                 beq     res_mb_out              ; already mapped -- no register write, no count
-                sta     res_curblk
-                sta     RES_MMU_SLOT
+                jsr     phase_vol
                 ldd     res_remaps
                 addd    #1
                 std     res_remaps

@@ -2176,9 +2176,8 @@ p3_cv_tail:     std     ,x++
                 ldd     P3_REMAPS
                 addd    #8
                 std     P3_REMAPS
-                ifdef   PLANE_WINDOWED
-                jsr     plane_reset
-                endc
+* ★★★ The plane_reset was removed at T-P0-135: mmu_phase.s records every slot-5/6 write, so the
+* slices this routine mapped behind plane_vis's back are already in ph_cur5/ph_cur6.
                 rts
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -2213,9 +2212,7 @@ p3_bv:          std     ,x++
                 ldd     P3_REMAPS
                 addd    #5                      ; four slice maps plus the restoring pair's fb half
                 std     P3_REMAPS
-                ifdef   PLANE_WINDOWED
-                jsr     plane_reset
-                endc
+* ★★★ plane_reset removed at T-P0-135; the record is kept by the register's only writer.
                 rts
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 
@@ -2395,9 +2392,6 @@ p3rb_done:
                 sta     ph_blk_fb
                 clra
                 jsr     phase_draw
-                ifdef   PLANE_WINDOWED
-                jsr     plane_reset
-                endc
 p3rb_out:       rts
 
 * p3rb_map: A = slice. Visible into slot 5 ($A000), shadow into slot 6 ($C000) -- p3_present's pair.
@@ -2518,9 +2512,6 @@ p3p_cp:         ldd     ,x++
                 ldd     P3_REMAPS
                 addd    #10
                 std     P3_REMAPS
-                ifdef   PLANE_WINDOWED
-                jsr     plane_reset
-                endc
                 rts
 
 * ── p3_stage_sprites — VM PHASE ONLY. Copy out what the compositor will need ─────
@@ -3024,12 +3015,17 @@ pca_gotview:
 * ★★★★ P6.74's own words, the rule this completes: *"a cache of a register's contents is wrong the
 * moment anyone else writes that register."* Two caches of $FFA6 exist -- res_curblk and
 * pl_vis_cur -- and each owner has to be told when the other moves it.
-* ★★★ -DP3B_FAULT_NOPLANERESET drops this: today's behaviour, a known-good red.
-                ifdef   PLANE_WINDOWED
-                ifndef  P3B_FAULT_NOPLANERESET
-                jsr     plane_reset
-                endc
-                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ AND THE INVALIDATION IS GONE AT T-P0-135, BECAUSE THE SENTENCE ABOVE IS NOW FALSE.
+* "Two caches of $FFA6 exist -- res_curblk and pl_vis_cur -- and each owner has to be told when
+* the other moves it." **There is one record now**, mmu_phase.s's ph_cur6, written by the only
+* instruction in the tree that writes the register. plane_vis tests it directly, so a VIEW fetch
+* between two composite writes is seen rather than announced.
+* ★★★★ -DP3B_FAULT_NOPLANERESET IS RETIRED AND REPLACED BY -DPLANE_FAULT_PRIVCACHE, which gives
+* plane_vis its private cache back. **That is P6.78's defect itself rather than the absence of
+* its workaround** -- and it is the same red Jay described: Graham marching in place, the
+* alligators chasing, a stray message box [§2W; plane_win.s carries the arm].
+* ═══════════════════════════════════════════════════════════════════════════════════════════
                 jsr     cp_composite
 * ★★★★★ RECORD THE RECTANGLE FOR NEXT FRAME'S RESTORE [T-P0-112]. Here and not in p3_stage_sprites
 * because the cel's GEOMETRY is what the restore needs, and vc_w/vc_h are only known once
@@ -3151,9 +3147,10 @@ phase_draw_enter:
 * ★★★ This is the same class as the res_curblk invalidation twenty lines up, which this probe
 * already learned the hard way: **a cache of a register's contents is wrong the moment anyone
 * else writes that register**, and the phase pair is exactly that moment [§2R.1].
-                ifdef   PLANE_WINDOWED
-                jsr     plane_reset
-                endc
+* ★★★★ THE INVALIDATION IS GONE [T-P0-135]. The paragraph above is the design's own statement of
+* the defect -- "a cache of a register's contents is wrong the moment anyone else writes that
+* register, and the phase pair is exactly that moment" -- and phase_draw now records both slots
+* as it writes them, so the phase pair no longer needs announcing.
                 ldd     P3_REMAPS
                 addd    #2
                 std     P3_REMAPS

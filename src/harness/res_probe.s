@@ -155,6 +155,20 @@ rp_report:
                 std     RP_REMAPS
                 lbra    rp_loop
 
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THIS PROBE ADDRESSES NO PLANE, AND SAYING SO IS WHAT LETS STORAGE HAVE A MAPPING CALL
+* [T-P0-135]. res_core.s used to write $FFA6 itself and keep its own record of what slot 6 held;
+* mmu_phase.s kept another, and each was correct only while the other remembered to invalidate it
+* [P6.74, P6.78]. Routing storage through mmu_phase.s means linking it, which means linking
+* memmap.inc -- whose plane-reach assertion refused any build without PLANE_WINDOWED.
+* ★★★★ **That assertion is about builds that ADDRESS A PLANE FLAT**, and this one addresses no
+* plane at all: it fetches resources into an arena and reports bytes. So it declares PLANE_ABSENT
+* rather than pretending to be windowed, and **the gate's memory model does not move one byte**.
+* ★★★ The claim is not trusted: composite.s, pic_core.s and plane_win.s each refuse to assemble
+* when PLANE_ABSENT is defined, so it cannot survive this probe growing a plane.
+* ★★ mmu_phase.s FIRST -- res_core.s's res_curblk is an `equ` onto its ph_cur6.
+PLANE_ABSENT    equ     1
+                include "src/engine/mmu_phase.s"
                 include "src/harness/res_core.s"
 
 * ★ The HAL, included exactly as pic_probe.s includes it (§2M: including a shared file is not

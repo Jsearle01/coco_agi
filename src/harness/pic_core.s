@@ -7,6 +7,12 @@
 * else. Integration is what exposed it: p3b_probe.s named 33 undefined symbols, and a third of
 * them were this file.
 *
+* ★★★★ THE PLANE-LESS CLAIM IS CHECKED HERE [T-P0-135]. This file renders into both planes; a
+* build that links it and defines PLANE_ABSENT has told memmap.inc something untrue.
+                ifdef   PLANE_ABSENT
+                error   "pic_core.s addresses both planes -- PLANE_ABSENT is false in this build"
+                endc
+*
 * ★★ THE MOVE IS PURE. Content and order are unchanged, and nothing between the old regions
 * emitted bytes (comments and two equs), so pic_probe.bin is byte-identical across the change
 * -- verified, not assumed. §2F: one home per fact, and put_pixel now has one.

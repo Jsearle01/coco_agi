@@ -59,7 +59,55 @@ MMU_SLOT6       equ     $FFA6           ; $C000-$DFFF -- framebuffer slice / vol
 * is the P3.10 defect -- fine on 512 KB, fatal on 128 KB.
 ph_blk_pri      fcb     0               ; first block of the priority plane
 ph_blk_fb       fcb     0               ; first block of the framebuffer
-ph_blk_vol      fcb     0               ; the block currently holding the VOL window
+ph_blk_vol      fcb     0               ; ★ the block slot 6 holds IN THE VM PHASE -- an INTENT
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE SINGLE RECORD OF WHAT THE TWO MOVING SLOTS ACTUALLY HOLD [T-P0-135].
+*
+* ★★★★★ TWO SUBSYSTEMS USED TO KEEP PRIVATE CACHES OF THIS AND EACH WAS CORRECT ONLY WHILE THE
+* OTHER REMEMBERED TO INVALIDATE IT -- res_curblk in res_core.s, pl_vis_cur/pl_pri_cur in
+* plane_win.s. **It failed twice, in opposite directions**: P6.74, where res_open read framebuffer
+* bytes as a resource header and silently refused two sprites; P6.78, where the compositor wrote
+* sprite pixels into Kingquest1's volume 1 and the re-fetched logic 1 fell into the alligator-death
+* block. ★★★★ Both fixes were a THIRD invalidation rather than an owner, which is why there is now
+* a record instead.
+*
+* ★★★★★ ph_blk_vol IS AN INTENT AND THESE ARE THE FACT, AND CONFLATING THEM IS THE OLD DEFECT IN
+* MINIATURE. phase_vm restores slot 6 from ph_blk_vol -- "what the VM phase wants there". ph_cur6
+* is "what is there now", which a draw phase changes without changing the intent. **Two questions,
+* two bytes**; one byte answering both is what res_curblk tried to be.
+*
+* ★★★ $FF IS "UNKNOWN", AND IT IS SAFE BECAUSE A GIME BLOCK NUMBER IS SIX BITS ($00-$3F). Never
+* initialise these to 0: block 0 is legal, and a zero-initialised record would skip the first map
+* and address whatever the window happened to hold [plane_win.s made exactly this point].
+* ★★ A HOST THAT MOVES THE MMU ITSELF WRITES $FF HERE. res_sweep.lua and vm_sweep.lua already do
+* that to res_curblk, which is this byte under its old name.
+ph_cur5         fcb     $FF             ; what slot 5 holds NOW ($FF = unknown)
+ph_cur6         fcb     $FF             ; what slot 6 holds NOW ($FF = unknown)
+
+* ── phase_slot5 / phase_slot6 — A = an ABSOLUTE block number. THE ONLY WRITERS. ──
+* ★★★★★ THE ANSWER TO "CAN A CACHE DISAGREE WITH THE REGISTER?" IS STRUCTURAL, NOT DILIGENT
+* [§4B's test of the design]. After this change there is **exactly one `sta MMU_SLOT5` and exactly
+* one `sta MMU_SLOT6` in the whole tree**, and each is immediately preceded by the store that
+* records it. A writer cannot forget the record, because reaching the register means coming
+* through here. ★★★★ Every other routine in this file -- and plane_win.s, and res_core.s -- now
+* calls one of these two.
+* ★★★ THE RECORD IS WRITTEN FIRST. If an interrupt could observe the pair mid-update, a record
+* that is stale-pessimistic (says the OLD block while the register already holds the new one) would
+* cause a redundant remap; one that is stale-optimistic would cause a MISSED remap, which is the
+* defect class this exists to end. **Neither is reachable today** -- every caller runs with
+* interrupts masked or outside the IRQ's reach -- and the safe order is used anyway.
+* ★ A is preserved, because callers chain these (phase_text_in's inca walk) and because the
+* B-clobber class of defect has been found three times in this project [T-P0-027/030].
+phase_slot5:
+                sta     ph_cur5
+                sta     MMU_SLOT5
+                rts
+
+phase_slot6:
+                sta     ph_cur6
+                sta     MMU_SLOT6
+                rts
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ WORDS.TOK's BLOCK, AND WHAT SLOT 5 HOLDS WHEN IT IS NOT MAPPED [T-P0-091].
 * ★★★★ ph_blk_slot5 EXISTS BECAUSE A CLIENT MAY PUT SOMETHING IN SLOT 5 DURING THE VM PHASE AND
 * THE ENGINE'S OWN MODEL DOES NOT. memmap.inc's phase table reads "-- nothing mapped --" for slot
@@ -87,20 +135,20 @@ ph_blk_slot5    fcb     0               ; what slot 5 holds outside that window
 * writing a sentinel. Clearing it to a dummy block would be a write with no reader.
 phase_vm:
                 lda     ph_blk_vol
-                sta     MMU_SLOT6
-                rts
+                jmp     phase_slot6
 
 * ── phase_draw -- the pair: priority in slot 5, framebuffer slice in slot 6 ──────
 * ★ A = the framebuffer slice index (0..3), because the visual plane is 26,880 B and the
 * aperture is 8,192. B is preserved: callers hold the object index across this call, and
 * T-P0-027/030 found that class of defect three times in three different registers.
+* ★★ A IS CLOBBERED HERE AS IT ALWAYS WAS (it held ph_blk_pri on exit before this change too);
+* only B's preservation was ever contractual.
 phase_draw:
                 pshs    b
-                tfr     a,b
-                addb    ph_blk_fb
-                stb     MMU_SLOT6
+                adda    ph_blk_fb
+                jsr     phase_slot6
                 lda     ph_blk_pri
-                sta     MMU_SLOT5
+                jsr     phase_slot5
                 puls    b,pc
 
 * ── phase_draw_pri -- select which priority slice is visible ─────────────────────
@@ -111,7 +159,7 @@ phase_draw:
 phase_draw_pri:
                 pshs    a
                 adda    ph_blk_pri
-                sta     MMU_SLOT5
+                jsr     phase_slot5
                 puls    a,pc
 
 * ── phase_draw_fb — A = framebuffer SLICE index. Map it into slot 6. ──
@@ -127,7 +175,7 @@ phase_draw_pri:
 phase_draw_fb:
                 pshs    a
                 adda    ph_blk_fb
-                sta     MMU_SLOT6
+                jsr     phase_slot6
                 puls    a,pc
 
 * ── the CROSS-SLOT pair: a plane's slice into the OTHER plane's slot ──
@@ -142,13 +190,13 @@ phase_draw_fb:
 phase_draw_fb_slot5:
                 pshs    a
                 adda    ph_blk_fb
-                sta     MMU_SLOT5
+                jsr     phase_slot5
                 puls    a,pc
 
 phase_draw_pri_slot6:
                 pshs    a
                 adda    ph_blk_pri
-                sta     MMU_SLOT6
+                jsr     phase_slot6
                 puls    a,pc
 
 * ── phase_vol -- point the volume window at a block, VM phase only ───────────────
@@ -156,10 +204,19 @@ phase_draw_pri_slot6:
 * silently unmap the framebuffer slice. The guarantee is structural -- a fetch never happens
 * while drawing (§3.4) -- and a runtime check here would cost cycles on the hot path to
 * re-verify a property the phase discipline already provides.
+* ★★★★ ITS STRUCTURAL GUARANTEE NOW HAS A SECOND CUSTOMER, AND IT STILL HOLDS [T-P0-135 §1.3].
+* res_map_block calls here instead of writing the register itself, so storage is now a client of
+* the phase discipline rather than a second owner of it. **The guarantee being relied on is
+* unchanged** -- a fetch never happens while drawing (§3.4) -- and storage was ALREADY relying on
+* it: res_core.s wrote $FFA6 directly from exactly the same call sites. ★★★ What changes is that
+* a violation is now visible rather than silent: if a fetch ever did run mid-draw, ph_cur6 would
+* record the volume block and plane_vis would remap on its next access, instead of the two caches
+* disagreeing and one of them writing into the other's memory.
+* ★★ Still no runtime assertion, for the reason above: a check here costs cycles on the fetch path
+* to re-verify a property the phase discipline provides.
 phase_vol:
                 sta     ph_blk_vol
-                sta     MMU_SLOT6
-                rts
+                jmp     phase_slot6
 
 * ── phase_vocab_in / phase_vocab_out -- the VOCABULARY window, TOKENISE only ─────
 * ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -186,8 +243,7 @@ phase_vol:
                 ifdef   PHASE_VOCAB
 phase_vocab_in:
                 lda     ph_blk_vocab
-                sta     MMU_SLOT5
-                rts
+                jmp     phase_slot5
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ HAZARD, RECORDED BEFORE IT IS DISCOVERED: THESE TWO DO NOT NEST [T-P0-095 §1.2].
@@ -205,8 +261,7 @@ phase_vocab_in:
 * slot-5 intent into a byte -- which is a design change and not a line.
 phase_vocab_out:
                 lda     ph_blk_slot5
-                sta     MMU_SLOT5
-                rts
+                jmp     phase_slot5
                 endc
 
 * ── phase_text_in / phase_text_out -- the TEXT WINDOW, four slots, $6000-$DFFF ───
@@ -241,16 +296,18 @@ ph_blk_text     fcb     0               ; first of FOUR contiguous framebuffer b
 ph_blk_slot3    fcb     0               ; what slot 3 holds otherwise (the arena's low half)
 ph_blk_slot4    fcb     0               ; what slot 4 holds otherwise (the arena's high half)
 
+* ★★ SLOTS 3 AND 4 ARE WRITTEN DIRECTLY AND 5/6 GO THROUGH THE ENTRIES. The record exists for the
+* two CONTENDED slots; 3 and 4 have exactly one client (this routine and its partner) and no
+* second cache ever existed for them. ★ phase_slot5/6 preserve A, so the inca chain is unbroken.
 phase_text_in:
                 lda     ph_blk_text
                 sta     MMU_SLOT3
                 inca
                 sta     MMU_SLOT4
                 inca
-                sta     MMU_SLOT5
+                jsr     phase_slot5
                 inca
-                sta     MMU_SLOT6
-                rts
+                jmp     phase_slot6
 
 * ★★★ SLOT 6 GOES BACK THROUGH phase_vm, NOT BY A FOURTH LITERAL. That slot's VM-phase content is
 * ph_blk_vol and the phase machinery already owns the question; a literal here would be a second
@@ -262,6 +319,6 @@ phase_text_out:
                 lda     ph_blk_slot4
                 sta     MMU_SLOT4
                 lda     ph_blk_slot5
-                sta     MMU_SLOT5
+                jsr     phase_slot5
                 jmp     phase_vm
                 endc

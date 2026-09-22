@@ -33,11 +33,31 @@ Set-Location C:\Projects\coco_agi
 # ★★ So an ablated build announces itself in the filename and never occupies the clean path.
 $RESOUT = "build\res_probe.bin"
 if ($env:RES_ASMFLAGS) { $RESOUT = "build\res_probe_abl.bin" }
-$RESASM = @("--raw","-I.","-DHAL_GFX_MODE_SERVICE","--output=$RESOUT")
+$RESASM = @("--raw","-I.","-DHAL_GFX_MODE_SERVICE","--map=build\res_probe.map","--output=$RESOUT")
 if ($env:RES_ASMFLAGS) { $RESASM += $env:RES_ASMFLAGS.Split(" ") ; "ABLATION: $env:RES_ASMFLAGS -> $RESOUT" }
 & C:\WIN_LWTools\lwasm.exe @RESASM src\harness\res_probe.s
 if ($LASTEXITCODE -ne 0) { throw "res_probe assemble failed" }
 "res_probe: $((Get-Item $RESOUT).Length) bytes (assembled by this script) -> $RESOUT"
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ THE SYMBOL MAP NOW HAS A PRODUCER, AND UNTIL T-P0-135 IT HAD NONE.
+# build\res_stage\symbols.txt was a hand-made file dated 2026-08-28 that NOTHING regenerated, and
+# res_sweep.lua pokes res_volbase / res_slicebase / res_curblk at the addresses it names. ★★★★ So
+# the `res` gate was correct only for as long as res_probe's layout never moved -- and this task
+# moved it, by including mmu_phase.s. **The gate reported 1 fetch of 1,264 and a guest failure**,
+# which is what a correct program looks like when the host pokes the wrong addresses.
+# ★★★★★ THE FILE TWELVE LINES DOWN ALREADY WARNED ABOUT THIS, IN THESE WORDS: "A per-stage copy
+# went stale the moment the probe was rebuilt and poked res_volbase at the wrong address, which
+# presents as bad-signature on every fetch rather than as a stale file." **It diagnosed the copy
+# and not the original**, which had the same defect and no producer at all [L-45: an artifact
+# nobody can regenerate is not evidence; AD-119: a symbol on a command line is a fact nobody can
+# see from the source].
+# ★★★ Generated from THIS build's map, so it can never describe a different program than the one
+# that runs. vm_symbols.py fails the whole run on a name it cannot find, which is the loud failure
+# a silent mis-poke was not.
+python harness\tools\vm_symbols.py build\res_probe.map --out build\res_stage\symbols.txt `
+    --want res_volbase res_slicebase res_curblk res_hdrlen res_remaps res_probe_entry
+if ($LASTEXITCODE -ne 0) { throw "res symbol extraction failed" }
+# ═══════════════════════════════════════════════════════════════════════════════════════════
 # ★★★ AC-3's STAMP. A size is a weak identity -- two different programs assemble to the same
 # length routinely. The hash covers the source's whole transitive include set, so a result
 # carries the identity of the CODE that produced it and a future staleness announces itself in

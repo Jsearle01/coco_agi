@@ -465,7 +465,31 @@ MAP_ARENA_BYTES equ     24576           ; ★ 3 blocks, CHOSEN FROM THE EVICTION
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★ Precedent AD-78: an overlap claim checked by a human reading a table is the state these
 * assertions exist to end -- four probes each had a coherent table and two of them overlapped.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ AIMED AT T-P0-135, NOT WEAKENED: IT WAS FIRING ON BUILDS THAT HAVE NO PLANE.
+* ★★★★ The assertion's own sentence four paragraphs up is "**a build that addresses a plane
+* FLAT** must have a plane that fits its window" -- and the condition tested only whether
+* PLANE_WINDOWED was absent, which is also true of a build that addresses no plane at all.
+* ★★★★★ MEASURED: res_probe and vm_probe reference not one plane symbol, and including
+* mmu_phase.s in either produced exactly these two errors and no other complaint from this file.
+* **So the two oldest gates could not be given a mapping call**, and res_core.s carried a comment
+* saying the $FFA6 ownership fix was blocked for that reason [T-P0-132 §6].
+*
+* ★★★★★ PLANE_ABSENT IS CLAIMED BY THE CLIENT AND CHECKED BY THE SUBSYSTEMS, which is the
+* COMP_PLANE_SAFE pattern used in the direction that works. The exemption three paragraphs up
+* decayed because it was an assertion ABOUT CODE THAT WAS NOT IN THE EXPRESSION; this one is not
+* trusted -- composite.s, pic_core.s and plane_win.s each refuse to assemble when PLANE_ABSENT is
+* defined, so a build that claims it and then links a plane subsystem fails loudly.
+* ★★★ FAIL-CLOSED: the default is unchanged. A build that says nothing still gets both checks, so
+* a new flat plane client is caught exactly as before; only a client that names itself plane-less
+* is exempt, and naming itself is a visible act in its own source [§2N's allowlist discipline].
+                ifdef   PLANE_ABSENT
+                ifdef   PLANE_WINDOWED
+                error   "PLANE_ABSENT and PLANE_WINDOWED are contradictory: a build either addresses a plane or it does not"
+                endc
+                endc
                 ifndef  PLANE_WINDOWED
+                ifndef  PLANE_ABSENT
                 ifgt    MAP_VIS_BYTES-(MAP_PHASE_WIN_E-MAP_PHASE_WIN)
                 error   "visual plane cannot be REACHED flat: it exceeds MAP_PHASE_WIN. Define PLANE_WINDOWED."
                 endc
@@ -473,6 +497,8 @@ MAP_ARENA_BYTES equ     24576           ; ★ 3 blocks, CHOSEN FROM THE EVICTION
                 error   "priority plane cannot be REACHED flat: it exceeds MAP_PRI_SLICE. Define PLANE_WINDOWED."
                 endc
                 endc
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 
                 endc

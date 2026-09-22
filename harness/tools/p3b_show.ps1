@@ -163,10 +163,16 @@ param(
   # being built, not only -IfDiag's text arm [T-P0-131]. The combined arm diverges from the reference
   # where the text arm does not, so the recorder is needed where the divergence is.
   [switch]$IfRec,
-  # ★★★★★ -NoPlaneReset IS T-P0-131's SECOND FAULT ARM: p3_composite_all stops invalidating
-  # plane_win's slice cache after the VIEW fetch, so co_put_visual writes sprite pixels into the
-  # staged volume. Every build before this task; a known-good red (logic 1 corrupted by cycle 18).
-  [switch]$NoPlaneReset,
+  # ★★★★★ -PrivCache REPLACES -NoPlaneReset AT T-P0-135, AND IT IS THE BETTER ARM.
+  # -NoPlaneReset removed P6.78's workaround: p3_composite_all stopped invalidating plane_win's
+  # slice cache after the VIEW fetch, so co_put_visual wrote sprite pixels into the staged volume.
+  # ★★★★ That workaround no longer exists -- mmu_phase.s keeps the single record and plane_vis
+  # reads it -- so the arm that removes it cannot exist either. -PrivCache
+  # (-DPLANE_FAULT_PRIVCACHE) gives plane_vis its PRIVATE CACHE back instead, which is **the
+  # defect itself rather than the absence of its patch**.
+  # ★★★ A KNOWN-GOOD RED in Jay's own words [P6.78]: "graham didn't move... the alligators do not
+  # stay in the moat", plus the stray `"` box. Expect logic 1 corrupted by cycle 18.
+  [switch]$PrivCache,
   [switch]$ViewFaultOneMap,
   [switch]$NoIrq,
   [double]$Hold   = 3.0
@@ -330,7 +336,7 @@ if ($TrimAll) { $FLAGS += "-DRES_TEST_TRIMALL" }
 if ($ViewHdrTest) { $FLAGS += "-DP3B_VIEWHDR_TEST" }
 if ($LevelKeys) { $FLAGS += "-DP3B_FAULT_LEVELKEYS" }
 if ($IfRec) { $FLAGS += @("-DVM_IFDIAG","-DVM_SAIDDIAG") }
-if ($NoPlaneReset) { $FLAGS += "-DP3B_FAULT_NOPLANERESET" }
+if ($PrivCache) { $FLAGS += "-DPLANE_FAULT_PRIVCACHE" }
 if ($ViewFaultOneMap) { $FLAGS += "-DVM_VIEW_FAULT_ONEMAP" }
 # ★★★★★ THE CEL ARM GETS THE KEYBOARD TOO [T-P0-115]. Tested on the absence of -DP3B_NO_CEL rather
 # than on a list of the twelve text switches, because that list is the thing this file has already

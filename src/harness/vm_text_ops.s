@@ -115,14 +115,13 @@ tx_window_enter:
 * ★★ res_core caches which block it believes is in slot 6 and SKIPS the write when it matches, so
 * after anyone else moves that register the cache has to be invalidated or the next fetch reads
 * the wrong block while being certain it is right [p3b_probe.s's own note at the cycle body].
+* ★★★★★ BOTH INVALIDATIONS REMOVED AT T-P0-135, AND THE PARAGRAPH ABOVE IS WHY THEY EXISTED:
+* "res_core caches which block it believes is in slot 6 and SKIPS the write when it matches, so
+* after anyone else moves that register the cache has to be invalidated." **phase_text_out is now
+* one of the writers that keeps the record**, so the block it restores is what ph_cur6 says, and
+* res_curblk IS ph_cur6. Storing $FF here would only force a needless remap on the next fetch.
 tx_window_exit:
-                jsr     phase_text_out
-                lda     #$FF
-                sta     res_curblk
-                ifdef   PLANE_WINDOWED
-                jsr     plane_reset
-                endc
-                rts
+                jmp     phase_text_out
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★ tx_msgptr -- A = message number (1-based) -> X = the message text, Z set if out of range.

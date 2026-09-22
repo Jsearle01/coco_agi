@@ -531,6 +531,16 @@ vp_feed_nonf:
                 inc     vm_fedn
                 rts
 
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THIS PROBE ADDRESSES NO PLANE [T-P0-135]. It runs the interpreter against the oracle's
+* per-cycle state and links no renderer and no compositor -- vm_pic_ops.s models the picture
+* opcodes, it does not draw. So memmap.inc's plane-reach assertion, which is about builds that
+* address a plane FLAT, has nothing to check here, and declaring PLANE_ABSENT is what lets
+* res_core.s route its mapping through mmu_phase.s without this probe's memory model moving.
+* ★★★ Checked rather than trusted: the three plane subsystems refuse to assemble under it.
+* ★★ mmu_phase.s FIRST -- res_core.s's res_curblk is an `equ` onto its ph_cur6.
+PLANE_ABSENT    equ     1
+                include "src/engine/mmu_phase.s"
                 include "src/harness/vm_tables.s"
                 include "src/harness/vm_state.s"
                 include "src/harness/vm_core.s"

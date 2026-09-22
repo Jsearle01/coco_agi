@@ -75,6 +75,12 @@
 * ★★★★ It cost a full sweep to find, and the split was diagnostic: **45 of 45 VISUAL planes
 * byte-identical, 43 of 45 PRIORITY planes wrong.** One plane perfect and the other uniformly
 * broken is a configuration fault, not an algorithm fault.
+* ★★★★ THE PLANE-LESS CLAIM IS CHECKED HERE [T-P0-135]. This file exists to address planes; a
+* build that links it and defines PLANE_ABSENT has told memmap.inc something untrue.
+                ifdef   PLANE_ABSENT
+                error   "plane_win.s addresses planes -- PLANE_ABSENT is false in this build"
+                endc
+
                 ifndef  PLANE_PRI_FLAT
 PLANE_PRI_WIN   equ     1
                 endc
@@ -89,21 +95,68 @@ PLANE_SLICE_SH  equ     5
 * ★★ -1 = nothing mapped, so the first access always maps. **Never initialise these to 0**:
 * slice 0 is a legal slice, and a zero-initialised cache would skip the first map and address
 * whatever the window happened to hold.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THESE TWO CACHES EXIST ONLY IN THE FLAT-BACKED BUILD NOW [T-P0-135].
+* ★★★★ THE NAMESPACE POINT, WHICH IS THIS DESIGN'S HARDEST DETAIL. pl_vis_cur held a SLICE
+* (0..3) and res_curblk held a BLOCK (0..$3F): the same register, described in two units, which
+* is part of why nobody noticed they were the same fact. **And pl_pri_cur is not even the same
+* REGISTER** -- plane_pri maps through phase_draw_pri into SLOT 5, while the contention that
+* caused P6.74 and P6.78 is in slot 6. So a single $FFA6 record cannot serve it, and the answer
+* is one record per CONTENDED SLOT, in BLOCK units, which is the unit the register takes.
+* ★★★ Under PLANE_WIN_MMU the caches are replaced by mmu_phase.s's ph_cur6 / ph_cur5 and the
+* conversion is one `adda`: slice n of a plane is block ph_blk_fb+n (or ph_blk_pri+n), because
+* the planes are consecutive blocks by construction -- which is the identity pl_map_vis already
+* relied on when it called phase_draw_fb.
+* ★★ THE FLAT-BACKED BUILD KEEPS THEM, and that is not a second cache: with no MMU there is no
+* register to disagree with. pl_vis_cur is a memo for pl_vis_base, nothing else writes
+* pl_vis_base, and pic_probe's 45/45 gate runs this path.
+                ifndef  PLANE_WIN_MMU
 pl_vis_cur      fcb     $FF
 pl_pri_cur      fcb     $FF
+                endc
+* ★★★ THE FAULT ARM'S PRIVATE CACHES, WHICH ARE THE DEFECT AND ARE NAMED SO [T-P0-135 §4C].
+                ifdef   PLANE_WIN_MMU
+                ifdef   PLANE_FAULT_PRIVCACHE
+pl_fault_cur    fcb     $FF
+pl_fault_pcur   fcb     $FF
+                endc
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ UNDER PLANE_WIN_MMU THESE ARE CONSTANTS AND THEY ARE INITIALISED HERE, WHICH THE FIRST
+* VERSION OF THIS CHANGE DID NOT DO -- AND IT WAS THE ONE DEFECT THE CHANGE INTRODUCED.
+* pl_map_vis assigns MAP_PHASE_WIN every time, so the value never varies; but it only RUNS when a
+* remap is needed. ★★★★ With a private cache starting at $FF the first access always remapped, so
+* the assignment was guaranteed as a SIDE EFFECT. **Testing the shared record removes that
+* guarantee**: if slot 6 already holds the wanted block, plane_vis skips the remap, pl_vis_base is
+* still 0, and every visual write lands at `offset & $1FFF` -- in the direct page and the code.
+* ★★★★★ IT PRESENTED AS A FOURFOLD SPEEDUP. The castle ran 0.183 s/cycle against 0.757 with
+* **sprites 0** and the compositor doing nothing, which is the shape §2W exists to catch: an
+* instrument-free "improvement" that is the program not working. ★★★ Initialising at declaration
+* removes the dependency on a side effect entirely, rather than restoring the forced first remap.
+                ifdef   PLANE_WIN_MMU
+pl_vis_base     fdb     MAP_PHASE_WIN
+pl_pri_base     fdb     MAP_PRI_SLICE
+                else
 pl_vis_base     fdb     0
 pl_pri_base     fdb     0
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 pl_remaps       fdb     0               ; ★ how many times a slice actually changed (AC-5/AC-10)
 
-* ── plane_reset — force both caches invalid. Call at the top of a draw phase ──
-* ★★★ REQUIRED, not hygiene. The MMU slot is shared with the VM phase's volume window
-* (MAP_VOL_WINDOW equ MAP_PHASE_WIN), so after a phase change the register no longer holds what
-* the cache thinks. §2R.1's phase pair is exactly this hazard.
-plane_reset:
-                lda     #$FF
-                sta     pl_vis_cur
-                sta     pl_pri_cur
-                rts
+* ── plane_reset — force both caches invalid. ──
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ RETIRED AT T-P0-135, AND IT IS THE POINT OF THE CHANGE RATHER THAN A TIDY-UP.
+* It read: *"REQUIRED, not hygiene. The MMU slot is shared with the VM phase's volume window, so
+* after a phase change the register no longer holds what the cache thinks."* ★★★★ **That is a
+* description of two caches disagreeing, and it was a THIRD invalidation rather than an owner** --
+* P6.78 added it after the compositor wrote sprite pixels into the staged game data.
+* ★★★★★ WITH ONE RECORD THERE IS NOTHING TO INVALIDATE: plane_vis tests ph_cur6, which the only
+* writer of $FFA6 updates in the same breath, so it cannot be stale after a phase change or after
+* anything else. ★★★ In the flat-backed build it was never needed either -- no register is shared
+* there -- so the routine is gone in both and is not a no-op stub.
+* ★★ Its fault arm is replaced, not dropped: -DPLANE_FAULT_PRIVCACHE below reintroduces the
+* private cache, which is the defect itself rather than the absence of its workaround [§2W].
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ── plane_vis — D = flat visual offset. Returns X = CPU address, slice mapped. ──
@@ -116,10 +169,34 @@ plane_vis:
                 lsra
                 lsra
                 lsra                            ; A = slice
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE TEST IS AGAINST THE SINGLE RECORD, IN BLOCK UNITS [T-P0-135]. One `adda` converts the
+* slice to the block it lives in, and the comparison is then against what the register ACTUALLY
+* holds rather than against what this file last put there. **That is the whole fix**: res_open can
+* map a volume block into slot 6 between two composite writes, and the next plane_vis sees it.
+* ★★★★ -DPLANE_FAULT_PRIVCACHE IS THE REPLACEMENT FAULT ARM and it is a KNOWN-GOOD RED: it
+* restores the private slice cache, which is P6.78's defect exactly -- the compositor writing
+* sprite pixels into Kingquest1's staged volume 1, corrupting logic 1. ★★★ Jay has already
+* described its red: Graham marching in place, the alligators chasing, a stray message box.
+                ifdef   PLANE_WIN_MMU
+                ifdef   PLANE_FAULT_PRIVCACHE
+                cmpa    pl_fault_cur
+                beq     pv_have
+                sta     pl_fault_cur
+                bsr     pl_map_vis
+                else
+                adda    ph_blk_fb               ; ★ slice n of the framebuffer is block fb+n
+                cmpa    ph_cur6                 ; ★ the register's own record, not a private one
+                beq     pv_have
+                bsr     pl_map_vis              ; A = the ABSOLUTE block
+                endc
+                else
                 cmpa    pl_vis_cur
                 beq     pv_have
                 sta     pl_vis_cur
                 bsr     pl_map_vis
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 pv_have:
                 puls    a
                 anda    #$1F                    ; within-slice offset, high byte
@@ -128,6 +205,8 @@ pv_have:
                 rts
 
 * ── plane_pri — D = flat priority offset (already packed if PRI_PACKED). X = address. ──
+* ★★★ SLOT 5, NOT SLOT 6 -- see the namespace note beside the caches. The mechanism is identical
+* and the register is not, which is why there are two records.
 plane_pri:
                 pshs    a
                 lsra
@@ -135,10 +214,24 @@ plane_pri:
                 lsra
                 lsra
                 lsra
+                ifdef   PLANE_WIN_MMU
+                ifdef   PLANE_FAULT_PRIVCACHE
+                cmpa    pl_fault_pcur
+                beq     pp_have
+                sta     pl_fault_pcur
+                bsr     pl_map_pri
+                else
+                adda    ph_blk_pri              ; ★ slice n of the priority plane is block pri+n
+                cmpa    ph_cur5
+                beq     pp_have
+                bsr     pl_map_pri
+                endc
+                else
                 cmpa    pl_pri_cur
                 beq     pp_have
                 sta     pl_pri_cur
                 bsr     pl_map_pri
+                endc
 pp_have:
                 puls    a
                 anda    #$1F
@@ -178,7 +271,16 @@ pl_map_vis:
 * $C000-$DFFF". **That was wrong twice**: $FFA7 covers $E000-$FFFF, and $C000-$DFFF is slot 6 at
 * $FFA6, which mmu_phase.s already owns. The comment is corrected rather than deleted because it
 * was the reasoning that nearly added the second owner.
+* ★★★★★ A IS NOW AN ABSOLUTE BLOCK, SO THIS CALLS phase_slot6 AND NOT phase_draw_fb [T-P0-135].
+* plane_vis has already added ph_blk_fb to form the block it compared against ph_cur6; calling
+* phase_draw_fb here would add it a SECOND time and map a block one plane-length too high. ★★★
+* The fault arm still passes a slice, so it keeps the old call -- which is also what makes it a
+* faithful reproduction of the pre-task behaviour rather than an invented defect.
+                ifdef   PLANE_FAULT_PRIVCACHE
                 jsr     phase_draw_fb
+                else
+                jsr     phase_slot6
+                endc
                 ldd     #MAP_PHASE_WIN
                 std     pl_vis_base
                 else
@@ -207,7 +309,11 @@ pl_map_pri:
                 puls    d
                 ifdef   PLANE_WIN_MMU
 * ★ Same argument as pl_map_vis: phase_draw_pri already maps ph_blk_pri+A into slot 5.
+                ifdef   PLANE_FAULT_PRIVCACHE
                 jsr     phase_draw_pri
+                else
+                jsr     phase_slot5             ; ★ A is an absolute block; see pl_map_vis
+                endc
                 ldd     #MAP_PRI_SLICE
                 std     pl_pri_base
                 else

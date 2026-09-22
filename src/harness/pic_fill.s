@@ -1077,11 +1077,20 @@ fwr_done:
 * ★★★ Invalidating rather than updating: plane_vis then re-maps on its next call, which is
 * correct regardless of what the fill left mapped, and costs a remap only when the two actually
 * interleave. The fill re-derives its own mapping per row, so it needs nothing from the cache.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE INVALIDATION IS GONE AT T-P0-135, AND THIS SITE IS WHY THE RULE CHANGED. The block
+* above is the THIRD instance of one defect -- "a cache of a register's contents is wrong the
+* moment anyone else writes that register" -- written by someone who had the first instance on
+* the screen in front of him. P6.74 and P6.78 are the other two, and each was fixed by adding
+* another invalidation.
+* ★★★★ **mmu_phase.s now keeps the single record and updates it inside the only instruction that
+* writes the register**, so phase_draw_fb and phase_draw_pri_slot6 below record what they did and
+* plane_vis sees it. There is nothing left to invalidate: not here, not after a phase change, and
+* not after a resource fetch. ★★ The fill still re-derives its own mapping per row, exactly as
+* before -- what disappears is the bookkeeping it had to do on somebody else's behalf.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 ff_win_map:
                 pshs    b
-                ldb     #$FF
-                stb     pl_vis_cur
-                stb     pl_pri_cur
                 ldb     fc_case
                 cmpb    #FC_PRIORITY
                 beq     fwm_pri
@@ -1089,11 +1098,10 @@ ff_win_map:
                 puls    b,pc
 fwm_pri:        jsr     phase_draw_pri_slot6
                 puls    b,pc
+* ★ Same as ff_win_map: the borrow moves slot 5, phase_draw_fb_slot5 records it, and plane_pri
+* reads that record [T-P0-135].
 ff_win_map_lo:
                 pshs    b
-                ldb     #$FF                    ; ★ same invalidation; the borrow moves slot 5
-                stb     pl_vis_cur
-                stb     pl_pri_cur
                 ldb     fc_case
                 cmpb    #FC_PRIORITY
                 beq     fwml_pri

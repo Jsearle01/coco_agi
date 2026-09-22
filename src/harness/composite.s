@@ -82,6 +82,13 @@ co_rowpri       fdb     0               ; -> priority row base for curY (offset 
 COMP_PLANE_SAFE equ     1
                 endc
                 endc
+* ★★★★★ AND THE SAME PATTERN IN THE OTHER DIRECTION [T-P0-135]. memmap.inc's reach assertion is
+* now scoped to builds that address a plane, and a build opts out by defining PLANE_ABSENT. **That
+* claim is checked here rather than trusted**: this file composites into both planes, so a build
+* that links it and claims to have none is wrong, and says so at assembly time.
+                ifdef   PLANE_ABSENT
+                error   "composite.s addresses both planes -- PLANE_ABSENT is false in this build"
+                endc
 co_src          fdb     0               ; -> next cel pixel
 co_remh         fcb     0
 co_remw         fcb     0
