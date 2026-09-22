@@ -434,4 +434,5 @@ there; item 4 was checked against a second run rather than explained away.
 `seeds/AGI/live/2026-09-22-the-cheap-mechanism-wins-when-the-layout-is-stable.md`
 
 ### 11 — Commit
-`<hash>`  (pushed to origin/wip before this report)
+`5cc8360`  (pushed to origin/wip before this report)
+Pool candidate `7638816` (methodology-candidate-pool, main).
