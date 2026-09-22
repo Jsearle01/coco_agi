@@ -252,7 +252,7 @@ against ~1,000 bytes free), so the policy change should help that too.
 None.
 
 ### 10 — Candidate(s) captured this task
-- `2026-09-22-the-counter-that-answers-the-question-was-already-there` — pool commit in §11.
+- `2026-09-22-the-counter-that-answers-the-question-was-already-there` — pool `6de755d`.
 
 ### 11 — Commit
-(filled in by the follow-up commit)
+`05bab98`  (pushed to origin/wip before this report)
