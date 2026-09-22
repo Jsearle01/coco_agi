@@ -479,6 +479,54 @@ local function stage()
                 end
             end)
     end
+    -- ═══════════════════════════════════════════════════════════════════════════════════════
+    -- ★★★★★ P3B_RESTAB -- THE CACHE'S LAYOUT AT THE MOMENT IT CHANGES [T-P0-134 §4B].
+    -- P6.80 published the cache's counters and its CONTENTS at the end of a run; it could not say
+    -- the one thing this task turns on. The cache is a BUMP ALLOCATOR: res_ccur starts at
+    -- RES_ARENA_END and grows DOWN, so entries are contiguous in ALLOCATION order and only the
+    -- LOWEST one can be handed back without moving bytes. So "evict the smallest sufficient entry"
+    -- is trivial or is a compaction depending entirely on WHERE that entry sits.
+    -- ★★★★ A TAP ON res_cn, NOT A PER-CYCLE SAMPLE, and that is the point: res_cn is written by
+    -- exactly two places -- `inc res_cn` at the end of res_cache_stash and `clr res_cn` in
+    -- res_cache_evict -- so a write tap on that ONE BYTE records the whole allocation sequence AND
+    -- the eviction, each with the table still intact. ★★★ A per-cycle sample cannot: P6.80's parks
+    -- all read cn0, because the eviction happens mid-cycle and the park is after it.
+    -- ★★ The tap fires BEFORE the store, so res_cn read here is the count the table actually holds.
+    if os.getenv("P3B_RESTAB") and SYM.res_cn and SYM.res_caddr then
+        _G._rt = {}
+        local first = tonumber(os.getenv("P3B_RESTAB_FROM") or "0")
+        _G._rttap = prog:install_write_tap(SYM.res_cn, SYM.res_cn, "restab",
+            function(offset, data, mask)
+                local n = prog:read_u8(ST + 4) * 256 + prog:read_u8(ST + 5)
+                if #_G._rt >= 40 or n < first then return end
+                -- ★ inline, for the closure reason the VARTAP note above records.
+                local function w16(a) return prog:read_u8(a) * 256 + prog:read_u8(a + 1) end
+                local cn, parts = prog:read_u8(SYM.res_cn), {}
+                for i = 0, cn - 1 do
+                    parts[#parts + 1] = string.format("L%d@$%04X:%dB",
+                        prog:read_u8(SYM.res_ckey + i), w16(SYM.res_caddr + i * 2),
+                        w16(SYM.res_clen + i * 2))
+                end
+                -- ★★★★ THE LABEL NAMES THE DIRECTION IT ACTUALLY HAS, and the first version did
+                -- not: it printed "stash" for anything non-zero, so a TRIM (res_cn 5->4) was
+                -- logged as an allocation -- a diagnostic labelling the wrong side, which is the
+                -- precise failure §2W.3 records for said_gate.py's `oracle` column.
+                local to = data % 256
+                -- ★★★★ THE CALLER, BECAUSE §4A ASKS WHAT TRIGGERS EACH EPISODE and the cycle
+                -- number cannot say. res_cache_trim saved a,b,x (4 bytes), so the words above
+                -- that are the return chain: ro_trim -> ro_fetch's retry -> res_open's caller.
+                -- ★★ An episode attributed to "the compositor" by ASSUMING it is the VIEW fetch
+                -- would be the §2W.3 defect exactly -- a diagnostic naming a side it does not have.
+                local s = cpu.state["S"].value
+                local ret = {}
+                for k = 0, 5 do ret[#ret + 1] = string.format("%04X", w16(s + 4 + k * 2)) end
+                _G._rt[#_G._rt + 1] = string.format(
+                    "c%d %s cn%d->%d ccur$%04X top$%04X @$%04X[%s] [%s]",
+                    n, to == 0 and "DROP " or (to < cn and "TRIM " or "stash"), cn, to,
+                    w16(SYM.res_ccur), w16(SYM.res_top), cpu.state["CURPC"].value,
+                    table.concat(ret, " "), table.concat(parts, " "))
+            end)
+    end
     -- ★★★★ P3B_TAPRANGE="lo-hi" + P3B_TAPVALUES="BB,33": who stores THESE values anywhere in a
     -- range [T-P0-131: doubled sprite pixels were found inside the LOGIC cache]. Records PC, the
     -- target address, the block behind it and the stack; the first 24.
@@ -1326,16 +1374,23 @@ _G._n = emu.add_machine_frame_notifier(function()
             if os.getenv("P3B_RESSTATS") and SYM.res_chits then
                 local h, m = rd16(SYM.res_chits), rd16(SYM.res_cmiss)
                 local ev = SYM.res_cevict and rd16(SYM.res_cevict) or 0
+                -- ★★★ tr/dr: entries TRIMMED and episodes that emptied the cache anyway
+                -- [T-P0-134 §4C]. `ev` counts starvation EPISODES and no longer implies a whole
+                -- drop, so quoting it alone would now understate what was handed back.
+                local tr = SYM.res_ctrim and rd16(SYM.res_ctrim) or 0
+                local dr = SYM.res_cdrop and rd16(SYM.res_cdrop) or 0
                 local p = _G._rs_prev
                 if p then
                     _G._rs = _G._rs or {}
+                    _G._rs = _G._rs or {}
                     _G._rs[#_G._rs + 1] = string.format(
-                        "c%d h%d m%d ev%d cn%d top$%04X ccur$%04X free%d",
-                        n, h - p[1], m - p[2], ev - p[3], prog:read_u8(SYM.res_cn),
+                        "c%d h%d m%d ev%d tr%d dr%d cn%d top$%04X ccur$%04X free%d",
+                        n, h - p[1], m - p[2], ev - p[3], tr - p[4], dr - p[5],
+                        prog:read_u8(SYM.res_cn),
                         rd16(SYM.res_top), rd16(SYM.res_ccur),
                         rd16(SYM.res_ccur) - rd16(SYM.res_top))
                 end
-                _G._rs_prev = { h, m, ev }
+                _G._rs_prev = { h, m, ev, tr, dr }
             end
             if os.getenv("P3B_OBJTRACE") and SYM.ph_blk_slot5 then
                 local every = tonumber(os.getenv("P3B_OBJTRACE")) or 10
@@ -1656,10 +1711,13 @@ _G._n = emu.add_machine_frame_notifier(function()
                   os.getenv("P3B_TAPVALUES") or "", table.concat(_G._tr, " "))
             end
             if _G._rs then
-                w("    RESSTATS totals: hits %d, misses %d, starvation evictions %d, cache entries"
+                w("    RESSTATS totals: hits %d, misses %d, starvation episodes %d, entries"
+                  .. " trimmed %d, cache emptied %d, cache entries"
                   .. " %d, arena free %d B (res_top $%04X, res_ccur $%04X)",
                   rd16(SYM.res_chits), rd16(SYM.res_cmiss),
                   SYM.res_cevict and rd16(SYM.res_cevict) or -1,
+                  SYM.res_ctrim and rd16(SYM.res_ctrim) or -1,
+                  SYM.res_cdrop and rd16(SYM.res_cdrop) or -1,
                   prog:read_u8(SYM.res_cn), rd16(SYM.res_ccur) - rd16(SYM.res_top),
                   rd16(SYM.res_top), rd16(SYM.res_ccur))
                 -- ★★★ WHAT IS IN THE CACHE AT THE END, by LOGIC number and length: the working set
@@ -1675,6 +1733,10 @@ _G._n = emu.add_machine_frame_notifier(function()
                       table.concat(parts, " "))
                 end
                 for i = 1, #_G._rs do w("      %s", _G._rs[i]) end
+            end
+            if _G._rt then
+                w("    RESTAB (%d events, allocation order, tap on res_cn):", #_G._rt)
+                for i = 1, #_G._rt do w("      %s", _G._rt[i]) end
             end
             if _G._vt then
                 w("    VARTAP %s writes (P3_CYCLE:value@PC): %s",

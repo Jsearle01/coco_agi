@@ -171,18 +171,41 @@ res_ceil        fdb     RES_ARENA_END   ; the byte res_fetch must not write at o
 * ★★★★ THE TABLE IS NOT THE BINDING LIMIT -- 4 entries of 8 are used. **The BYTES are**: the four
 * LOGICs are 15,376 B (L0 8,999 · L102 3,817 · L1 1,631 · L101 929) in a 16,384 B arena, which
 * leaves 1,008 B for transients, and the compositor's largest VIEW is 2,413 B. So every cycle the
-* VIEW fetch starves, res_cache_evict drops the WHOLE cache, and the next cycle re-fetches and
-* re-decodes all four: **0 hits, 4 misses and 1 starvation eviction per cycle, measured.**
+* VIEW fetch starves, and until T-P0-134 the answer was to drop the WHOLE cache, so the next cycle
+* re-fetched and re-decoded all four: **0 hits, 4 misses and 1 starvation eviction per cycle.**
+* ★★★★ THE SIZE STILL BINDS AND THE POLICY NO LONGER MULTIPLIES IT. res_cache_trim now hands back
+* the lowest entry only, so three of the four stay resident and one is re-fetched -- the arena is
+* still 1,405 B short for the transient, which is a residency project, not a policy one.
 RES_CACHE_MAX   equ     8               ; ★ 4 of 8 used in the castle [T-P0-133]; bytes bind first
 res_cn          fcb     0               ; entries live
 res_ckey        rmb     RES_CACHE_MAX           ; LOGIC index
 res_caddr       rmb     2*RES_CACHE_MAX         ; where its bytes are
 res_clen        rmb     2*RES_CACHE_MAX         ; how many
+* ★★★★★ AND res_ccur IS A BUMP POINTER, WHICH IS THE WHOLE SHAPE OF THIS ALLOCATOR [T-P0-134 §1.1].
+* It starts at RES_ARENA_END and only ever moves DOWN, so entries are contiguous in ALLOCATION
+* order and res_caddr[i] + res_clen[i] == res_caddr[i-1] exactly. ★★★★ Two consequences, and the
+* task that priced per-entry eviction named neither:
+*   - handing back the LOWEST entry is two stores, because it is the only one at the pointer;
+*   - handing back any OTHER entry leaves a hole a bump pointer cannot reuse, so exact victim
+*     choice is not a policy change but an ALLOCATOR change (compaction, or a free list).
+* ★★★ Measured in the castle, identical every cycle [T-P0-134 §4B]: L0@$7CD9 8,999 · L1@$767A
+* 1,631 · L101@$72D9 929 · L102@$63F0 3,817. **The smallest sufficient victim (L1, 1,631 B) is in
+* the MIDDLE and the lowest entry is L102**, so LIFO and exact choice do NOT coincide here.
 res_ccur        fdb     RES_ARENA_END   ; cache allocation pointer, grows DOWN
-res_evicted     fcb     0               ; ★ per-open latch: at most one evict-and-retry
-res_cevict      fdb     0               ; ★ how many times starvation forced an eviction --
-                                        ;   reported, because a HIGH count means the arena is
-                                        ;   genuinely too small and the cache is only masking it
+res_evicted     fcb     0               ; ★ per-open latch: counts the EPISODE once, not the trims
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THREE COUNTERS, BECAUSE res_cevict USED TO MEAN ONE THING AND NOW MEANS THREE [§4C].
+* Before T-P0-134 a starving fetch had exactly one answer -- drop everything -- so one counter
+* described it. Now a starvation episode trims some number of entries and may or may not end with
+* an empty cache, and those are different facts that a single number would average away.
+res_cevict      fdb     0               ; ★ starvation EPISODES: fetches that had to free space.
+                                        ;   ★★★★ ITS ORIGINAL COMMENT PREDICTED THIS TASK -- "a
+                                        ;   HIGH count means the arena is genuinely too small and
+                                        ;   the cache is only masking it" -- and nothing read it
+                                        ;   for months [T-P0-133]. It read 32 in 40 cycles.
+res_ctrim       fdb     0               ; ★ ENTRIES handed back by those episodes (>= res_cevict)
+res_cdrop       fdb     0               ; ★★ episodes that emptied the cache: the LAST RESORT, and
+                                        ;   the old whole-drop behaviour reached by trimming
 res_chits       fdb     0               ; ★ AC-5 evidence the cache is actually hitting
 res_cmiss       fdb     0
 * ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -331,22 +354,68 @@ ro_fetch_retry:
 * because eviction only ever runs when the cache is on. ★★ With this the sweep halts at
 * RES_E_BIG again as it did in T-P0-037, and any volume that COMPLETES before starving reports
 * whether its LOGICs are byte-correct without eviction ever having fired.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ T-P0-134: THE RETRY NOW TRIMS ONE ENTRY AT A TIME INSTEAD OF DROPPING EVERYTHING.
+* ★★★★ THE OLD BOUND WAS A LATCH AND THE NEW ONE IS THE TABLE. `tst res_evicted` capped this at
+* one retry because one whole drop freed everything there was to free, so a second failure could
+* only be a genuine RES_E_BIG. Trimming frees a little at a time, so the loop must be allowed to
+* go round again -- and it still terminates, because every pass either satisfies the fetch or
+* removes an entry, and `lda res_cn / beq` is the floor. **res_cn reaching 0 IS the old whole
+* drop**, arrived at rather than jumped to, which is how §4C's last resort stays reachable
+* without a second routine to keep in step.
+* ★★★ THE EPISODE IS COUNTED ONCE AND THE TRIMS ARE COUNTED EACH. res_evicted keeps its job --
+* it is just latching the counter now rather than the retry.
+* ★★ res_fetch refuses BEFORE writing a byte (see its ceiling contract above), so a failed retry
+* costs a header read and nothing else. That is what makes one-at-a-time affordable.
                 ifdef   ABL_NOEVICT
                 bra     ro_fail_pop
                 endc
-                tst     res_evicted
-                bne     ro_fail_pop             ; already evicted -- this is a real RES_E_BIG
                 tst     res_depth
                 bne     ro_fail_pop             ; ★ depth>0: cached bytes may be executing
                 lda     res_cn
-                beq     ro_fail_pop             ; nothing cached -- eviction would free nothing
-                jsr     res_cache_evict
+                beq     ro_fail_pop             ; nothing cached -- freeing would free nothing
+                tst     res_evicted
+                bne     ro_trim                 ; ★ same episode: count it once, not per entry
                 inc     res_evicted
                 ldd     res_cevict
                 addd    #1
                 std     res_cevict
+ro_trim:
+* ★★★★★ AC-5's FAULT ARM, AND IT IS A KNOWN-GOOD RED: -DRES_FAULT_WHOLEDROP is EVERY BUILD BEFORE
+* THIS TASK. It puts the whole-region drop back on the starvation path and changes nothing else,
+* so it reproduces T-P0-133's measurement exactly -- 0 hits, 4 misses, 15,376 B re-fetched a cycle.
+* ★★★ A fault arm whose red is a number the project has already published is the strongest kind
+* [§2W; the -NoRestore precedent]. ★★ With it the `beq ro_fail_pop` above restores the old
+* one-shot for free, because the drop leaves res_cn = 0.
+                ifdef   RES_FAULT_WHOLEDROP
+                jsr     res_cache_evict
+                else
+                jsr     res_cache_trim
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ -DRES_TEST_TRIMALL EXISTS BECAUSE THE LAST RESORT IS OTHERWISE UNREACHABLE HERE, AND AN
+* UNREACHABLE PATH IS AN ASSERTION WEARING A MECHANISM'S CLOTHES [§2W].
+* ★★★★ Measured: 40 castle cycles trim 34 entries across 32 episodes and res_cdrop stays 0 -- the
+* biggest transient KQ1's castle asks for is a 2,413-byte VIEW and the lowest entry is 3,817 B, so
+* ONE trim always suffices and the loop never reaches res_cn = 0. **The terminal case is where
+* `res_ccur = res_caddr[0] + res_clen[0]` must land exactly on RES_ARENA_END**, and nothing in the
+* corpus makes it happen.
+* ★★★ So this arm trims to zero on every starvation instead of stopping when the fetch fits. It is
+* NOT a fault arm: the result must be IDENTICAL to -DRES_FAULT_WHOLEDROP in every observable --
+* same hits, same misses, same 40-cycle state trace -- because trimming to empty and dropping the
+* whole region are the same end state reached two ways. ★★ A disagreement is the arithmetic being
+* wrong, which is the one thing the castle cannot show.
+                ifdef   RES_TEST_TRIMALL
+rot_all:        lda     res_cn
+                beq     rot_done
+                jsr     res_cache_trim
+                bra     rot_all
+rot_done:
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+                endc
                 clr     res_err
                 bra     ro_fetch_retry
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 
 ro_fetched:     lda     res_err
@@ -601,21 +670,79 @@ res_cache_reset:
 * ★★ No victim choice, no timestamps: the working set is 3-4 entries and a starving fetch needs
 * the whole region, not a slot.
 * ═══════════════════════════════════════════════════════════════════════════════════════════
-* ★★★★★ AND THAT JUSTIFICATION RESTS ON THE STALE FIGURE [T-P0-133]. "The working set is 3-4
-* entries and a starving fetch needs the whole region" is true of the probe it was measured on and
-* false of the castle: there the four entries are 15,376 B and the starving fetch is a 2,413-byte
-* VIEW that needs **1,405 B more than is free** -- so dropping the whole region throws away 15,376 B
-* to make room for 2,413, every cycle. ★★★★ Measured cost: the resource layer is 62% of a castle
-* cycle [P6.79's profile: res_cache_stash 24%, res_fetch 19%, res_decode 19%].
-* ★★★ PER-ENTRY EVICTION WOULD NEED NO MORE MEMORY: evicting the smallest entry that frees enough
-* (L1, 1,631 B) leaves three cached, so one LOGIC is re-fetched per cycle instead of four --
-* 1,631 B against 15,376. **Priced, not built** [T-P0-133 §4C; §6 forbids the fix in that task].
+* ★★★★★ THAT JUSTIFICATION RESTED ON A STALE FIGURE AND IS NOW RETIRED AS A POLICY [T-P0-133,
+* T-P0-134]. "The working set is 3-4 entries and a starving fetch needs the whole region" was true
+* of the VM-only probe it was measured on and false of the castle, where the four entries are
+* 15,376 B and the starving fetch is a 2,413-byte VIEW needing **1,405 B more than is free**. So
+* the whole drop threw away 15,376 B to make room for 2,413, every cycle, and the resource layer
+* was 62% of a castle cycle [P6.79: res_cache_stash 24%, res_fetch 19%, res_decode 19%].
+* ★★★★ res_cache_evict SURVIVES AS THE TOTAL-RELEASE HOME, and that is now its ONLY job:
+* res_cache_flush calls it at a room change, where dropping everything is not a starvation
+* response but the right answer -- the working set is being replaced wholesale. ★★★ The
+* starvation path calls res_cache_trim instead, and reaches this same end state by trimming to
+* zero when nothing smaller suffices. **One home for "give it all back", one for "give some
+* back"** (2F), and they are no longer two spellings of the same thing.
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 res_cache_evict:
                 clr     res_cn
                 ldd     #RES_ARENA_END
                 std     res_ccur
                 rts
+
+* ── res_cache_trim — hand back the LOWEST entry. Caller must guarantee res_depth = 0 ──────
+*
+* ★★★★★ LIFO, AND THE MEASUREMENT CHOSE IT OVER EXACT VICTIM CHOICE [T-P0-134 §4B]. The lowest
+* entry is the only one a bump pointer can release without moving bytes (see res_ccur's block),
+* and in the castle it is L102 at 3,817 B -- which alone is more than the 1,405 B a starving VIEW
+* fetch needs. **So one trim per cycle re-fetches 3,817 B where the whole drop re-fetched
+* 15,376**, and nothing moves.
+* ★★★★ EXACT CHOICE WAS PRICED AND REJECTED. The smallest sufficient entry is L1, 1,631 B, at
+* table slot 1 -- in the MIDDLE -- so choosing it means sliding L101 and L102 up by 1,631 and
+* rewriting their res_caddr: 4,746 bytes moved to avoid re-fetching 2,186. ★★★ About 16% better
+* on traffic, in exchange for the one hazard this file has no other instance of -- a caller
+* holding a pointer into bytes that moved [§3(3)] -- and LIFO is already 75% of the way to the
+* 89% ceiling. **The cruder mechanism wins because the layout is stable and the bottom entry is
+* big.** If a room ever puts a small entry at the bottom, the loop simply trims again.
+* ★★ IT NEEDS NO SIZE ARGUMENT. The caller retries the fetch, which refuses cheaply, so "enough"
+* is discovered rather than computed -- and res_fetch's ceiling stays the single fit test (2F).
+* ★★★ res_ccur = res_caddr[last] + res_clen[last] RATHER THAN res_caddr[last-1], because the two
+* are equal by construction and only the first is true of the LAST entry. Trimming entry 0 lands
+* it exactly on RES_ARENA_END, so the empty case needs no special code -- and that identity is
+* checked on a real run rather than asserted here [§2W].
+res_cache_trim:
+                pshs    a,b,x
+                lda     res_cn
+                beq     rct_out                 ; nothing to hand back
+                deca
+                sta     res_cn                  ; ★ A is now the index of the entry being dropped
+* ── res_ccur = that entry's address + its length ──
+                tfr     a,b
+                clra
+                lslb                            ; D = index*2; res_cn <= 8, so this cannot carry
+                ldx     #res_caddr
+                leax    d,x
+                ldx     ,x                      ; X = the dropped entry's base
+                pshs    x
+                lda     res_cn
+                tfr     a,b
+                clra
+                lslb
+                ldx     #res_clen
+                leax    d,x
+                ldd     ,x                      ; D = its length
+                addd    ,s++                    ; ★ + its base = where the cache now ends
+                std     res_ccur
+                ldd     res_ctrim
+                addd    #1
+                std     res_ctrim
+                lda     res_cn
+                bne     rct_out
+* ★★★ THE LAST RESORT, REACHED AND NOT JUMPED TO: trimming has emptied the cache, which is the
+* old whole-drop end state. Counted separately so res_cevict's successor can never hide it [§4C].
+                ldd     res_cdrop
+                addd    #1
+                std     res_cdrop
+rct_out:        puls    a,b,x,pc
 
 * ★ Called from vm_interpret_cycle, outside every frame. Safe to move res_top here and only here.
 res_cache_flush:

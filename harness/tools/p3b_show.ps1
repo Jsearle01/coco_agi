@@ -114,6 +114,20 @@ param(
   # res_open failure path has always skipped silently [T-P0-127]. Flag-guarded, so every shipped
   # arm stays byte-identical; the three bytes and four instructions exist only in this arm.
   [switch]$SprStats,
+  # ★★★★★ -WholeDrop IS T-P0-134's FAULT ARM (-DRES_FAULT_WHOLEDROP): the starvation path drops the
+  # WHOLE cache again instead of trimming its lowest entry, and nothing else changes. ★★★★ A
+  # KNOWN-GOOD RED whose number is already published -- T-P0-133 measured exactly what it does:
+  # 0 hits, 4 misses, 1 starvation eviction and 15,376 B re-fetched per castle cycle. ★★★ Expect
+  # RESSTATS `h0 m4` against the trimmed arm's `h3 m1`.
+  [switch]$WholeDrop,
+  # ★★★★★ -TrimAll IS NOT A FAULT ARM, IT IS §2W's REACHABILITY ARM (-DRES_TEST_TRIMALL). The
+  # trim loop's terminal case -- res_cn reaching 0, where res_ccur must land exactly on
+  # RES_ARENA_END -- is UNREACHABLE in the castle, because the lowest entry is 3,817 B and the
+  # biggest transient is 2,413. ★★★★ This forces every starvation to trim to empty, so the
+  # arithmetic runs. ★★★ Its result must MATCH -WholeDrop exactly (same hits, misses and
+  # 40-cycle state trace): the two are the same end state reached two ways, and a difference is
+  # the terminal arithmetic being wrong.
+  [switch]$TrimAll,
   # ★★★★★ -NoVblKeys IS T-P0-128's FAULT ARM: the combined arm goes back to scanning the matrix once
   # per interpreter cycle, at LEVELS. That is every build before this task and a known-good red in
   # Jay's own words: "i was not able to control graham reliably."
@@ -311,6 +325,8 @@ if ($RoomDrive) { $FLAGS += "-DP3B_ROOMDRIVE" }
 # and the vector stubs at $FEF0 are what P3_REGIONB_END reserves for.
 if ($Combined) { $FLAGS += @("-DP3B_COMBINED") + $IRQ }
 if ($Count) { $FLAGS += "-DP3B_COUNT" }
+if ($WholeDrop) { $FLAGS += "-DRES_FAULT_WHOLEDROP" }
+if ($TrimAll) { $FLAGS += "-DRES_TEST_TRIMALL" }
 if ($ViewHdrTest) { $FLAGS += "-DP3B_VIEWHDR_TEST" }
 if ($LevelKeys) { $FLAGS += "-DP3B_FAULT_LEVELKEYS" }
 if ($IfRec) { $FLAGS += @("-DVM_IFDIAG","-DVM_SAIDDIAG") }
@@ -349,7 +365,14 @@ $WANT = @("res_volbase","res_slicebase","res_curblk","vm_quit","vm_badop","vm_cy
           # as "AC-5 evidence the cache is actually hitting" -- and no host has published them. P6.79
           # measured the resource layer at 62% of a castle cycle; these six bytes say whether that is
           # the cache missing, the table filling, or the arena starving.
-          "res_cn","res_chits","res_cmiss","res_cevict","res_ckey","res_clen",
+          # ★★★★★ res_caddr JOINS THEM FOR T-P0-134. P6.80 read keys and lengths and could say WHAT
+          # the cache holds; it could not say WHERE, and the cache is a BUMP ALLOCATOR -- entries are
+          # contiguous in allocation order below RES_ARENA_END -- so WHICH ENTRY SITS LOWEST decides
+          # whether a partial eviction is two stores or a compaction [§1.1, §4B].
+          # ★★★ res_ctrim and res_cdrop SPLIT WHAT res_cevict USED TO AVERAGE [T-P0-134 §4C]:
+          # episodes, entries handed back, and the times trimming emptied the cache anyway.
+          "res_cn","res_chits","res_cmiss","res_cevict","res_ckey","res_clen","res_caddr",
+          "res_ctrim","res_cdrop",
           # ★★★★★ vc_err IS PUBLISHED BECAUSE NOTHING HAS EVER READ IT IN THIS PROBE [T-P0-105].
           # p3_composite_all skips a sprite whenever the decode sets it, silently -- and CP_BLITS
           # measured ZERO composites across 60 cycles with four sprites staged, so every one of
