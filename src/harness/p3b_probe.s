@@ -2908,6 +2908,13 @@ p3_skip         rmb     P3_SPR_MAX      ; 1 = unchanged AND isolated -> do not c
 * costs in skips foregone [§4D(1)'s "by which reason"].
 p3_nskip        fdb     0               ; ★ sprites skipped, cumulative
 p3_nunch        fdb     0               ; ★ sprites UNCHANGED, cumulative (>= p3_nskip)
+* ★★★ T-P0-143 §4A's two: how many staged sprites were WALKED, and how many carried the same
+* (view, loop, cel) as last cycle. The ratio is the cel-decode repeat rate, and it is measured
+* before anything is built.
+                ifdef   P3B_CELSTATS
+p3_ncelseen     fdb     0
+p3_ncelsame     fdb     0
+                endc
                 endc
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 
@@ -3030,6 +3037,52 @@ psd_x1          fdb     0
 psd_y0          fdb     0
 psd_y1          fdb     0
 
+* ── pcs_count -- Y = &p3_prev[psd_i]; counts one record, and one repeat if the cel is unchanged ──
+* ★★ Y is preserved: psd_each's copy is live across the call.
+                ifdef   P3B_CELSTATS
+pcs_count:
+                pshs    y
+                ldd     p3_ncelseen
+                addd    #1
+                std     p3_ncelseen
+* ★★★★★ §2W -- THE TWO FAULT ARMS, AND THEY EXIST BECAUSE THE FIRST READING WAS SUSPICIOUS.
+* CELSTATS and the SKIP ceiling's `unchanged` returned the SAME NUMBER in both scenes (111 and 3),
+* and ★★★★ two instruments asking different questions that agree exactly is the shape §2W distrusts.
+*   -DP3B_CELSTATS_NEVER  -- never count a repeat. The rate MUST read 0%.
+*   -DP3B_CELSTATS_ALWAYS -- count every record with a staged partner, compares skipped. The rate
+*                            MUST rise well above 25%, or the three compares are not what limits it.
+* ★★★ Neither arm ships: both are inside P3B_CELSTATS, which is itself a test-only guard.
+                ifdef   P3B_CELSTATS_NEVER
+                bra     pcs_done
+                endc
+                lda     psd_i
+                cmpa    p3_nspr
+                bhs     pcs_done                ; no staged sprite i -> not a repeat
+                ifdef   P3B_CELSTATS_ALWAYS
+                bra     pcs_hit
+                endc
+                ldb     psd_i
+                lda     #P3_SPR_SIZE
+                mul
+                ldx     #p3_spr
+                leax    d,x
+                lda     4,y                     ; prev view
+                cmpa    3,x
+                bne     pcs_done
+                lda     5,y                     ; prev loop
+                cmpa    4,x
+                bne     pcs_done
+                lda     6,y                     ; prev cel
+                cmpa    5,x
+                bne     pcs_done
+pcs_hit:
+                ldd     p3_ncelsame
+                addd    #1
+                std     p3_ncelsame
+pcs_done:       puls    y
+                rts
+                endc
+
 p3_skip_decide:
                 ldx     #p3_skip
                 ldb     #P3_SPR_MAX
@@ -3047,6 +3100,22 @@ psd_each:
                 mul
                 ldy     #p3_prev
                 leay    d,y
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ -DP3B_CELSTATS -- HOW OFTEN IS A STAGED SPRITE'S CEL THE SAME AS LAST CYCLE'S?
+* ★★★★★ A DIFFERENT QUESTION FROM prp_same's, AND THE DIFFERENCE IS THE WHOLE POINT [T-P0-143 §4A].
+* prp_same asks "are this sprite's PIXELS already on the plane?", which needs x and y to match.
+* **This asks only whether the CEL IDENTITY is unchanged** -- view, loop, cel -- because a sprite
+* that walks changes its rectangle every cycle and need not change its cel: VMO_CYCLETIME gates
+* the advance. ★★★★ That is precisely the moving case P6.88 measured at ZERO.
+* ★★★ p3_prev is x,ytop,w,h,view,loop,cel (+4,+5,+6); p3_spr is x,y,prio,view,loop,cel (+3,+4,+5).
+* ★★ Cumulative 16-bit, per P6.84: the question is a RATE over a window, not a last-frame byte.
+* ★★★ OUT OF LINE, and that is not a style choice: inlining forty bytes here put psd_each's own
+* `beq psd_out` and `blo psd_each` out of 8-bit branch reach [lwasm "Byte overflow", 2026-09-23].
+* ★★ A `jsr` costs the loop three bytes when the guard is defined and NOTHING when it is not.
+                ifdef   P3B_CELSTATS
+                jsr     pcs_count
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
                 jsr     prp_same
                 bne     psd_next                ; changed -> it must be composited
                 ldd     p3_nunch
@@ -3994,6 +4063,15 @@ P3_CODE_END     equ     *
 * ★★★ RECORDED, NOT FIXED. The remedy this assertion names is a ruling on the map (D-30's map
 * document arriving as a symptom), and that is the Orchestrator's, not a task's to take in passing.
 * ★★ The next task that adds code to p3b meets this, not just the diagnostic arms.
+*
+* ★★★★★ THE MAP RULING'S FIFTH SYMPTOM, AND THE FIRST ONE THAT COSTS SPEED RATHER THAN AN
+* INSTRUMENT [T-P0-143 §4B]. The four before it were diagnostic arms. **This one is a measured
+* 95.4% reduction in cel-decode work that cannot be placed**: the castle's 20-cel working set is
+* 3,906 bytes, region A is full, and MAP_INPUT's tail belongs to P3_KQ -- roughly 74 bytes free
+* against 3,906 needed. ★★★★ vc_decode_row is 26.6% of the drawing stage and the drawing stage is
+* 59% of a cycle, so the unplaceable win is ~15% of the cycle, at 3.3 cycles/second.
+* ★★★ Still recorded, still not fixed, and still the Orchestrator's ruling [§6, trigger 2] -- but
+* the ledger now has a number in it rather than a list of blocked diagnostics.
 * ═══════════════════════════════════════════════════════════════════════════════════════════
                 ifndef  P3B_ACCEPT_OVERRUN
                 ifgt    P3_CODE_END-MAP_RESERVED_END

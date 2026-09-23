@@ -236,6 +236,23 @@ param(
   # copy only -- the game's object table is untouched. ★★★ Two overlapping sprites at EQUAL
   # priority is precisely the case T-P0-141 §4A named as the one the narrow rect test cannot cover.
   [switch]$ForceOverlap,
+  # ★★★★★ -CelStats IS T-P0-143 §4A's MEASUREMENT (-DP3B_CELSTATS): how often is a staged sprite's
+  # (view, loop, cel) the same as last cycle's? ★★★★ A DIFFERENT question from prp_same's, which
+  # needs x and y to match too -- a sprite that WALKS changes its rectangle every cycle and need
+  # not change its cel, because VMO_CYCLETIME gates the advance. **That is the moving case P6.88
+  # measured at zero.** ★★★ If cels change nearly every cycle the idea is dead and the task stops.
+  [switch]$CelStats,
+
+  # ★★★★★ §2W's TWO FAULT ARMS for -CelStats. -CelStatsNever must read 0%; -CelStatsAlways must read
+  # well ABOVE the live 25%. Either arm returning the live number means the compares are not the
+  # thing being measured. Both imply -CelStats.
+  [switch]$CelStatsNever,
+  [switch]$CelStatsAlways,
+
+  # ★★★★★ -CelTrace writes build/<out>/celtrace.txt -- the per-cycle staged (view.loop.cel:skip)
+  # sequence, read by the HOST, costing the guest nothing. ★★★ It is what -CelStats cannot be: the
+  # adjacency rate prices a ONE-slot cache and §4B asks about four.
+  [switch]$CelTrace,
   [switch]$SlowSteal,
   # ★★★★ -NoRemap IS the fault arm (-DRES_FAULT_NOREMAP): a theft takes the cheap path WITHOUT
   # re-mapping, so the walk reads through whatever the compositor left in slot 6. Expect a wrong
@@ -423,6 +440,11 @@ if ($SkipNoPrio) { $FLAGS += "-DP3B_SKIP_NOPRIO" }
 # ★★★★ T-P0-142 §4E: a constructed scene P6.88's guards can fire on -- sprite 1 moved onto
 # sprite 0 at sprite 0's priority, in the STAGED copy only.
 if ($ForceOverlap) { $FLAGS += "-DP3B_FORCE_OVERLAP" }
+# ★★★★ T-P0-143 §4A: the cel-decode repeat rate, measured before anything is built.
+if ($CelStatsNever -or $CelStatsAlways) { $CelStats = $true }
+if ($CelStats) { $FLAGS += "-DP3B_CELSTATS" }
+if ($CelStatsNever)  { $FLAGS += "-DP3B_CELSTATS_NEVER" }
+if ($CelStatsAlways) { $FLAGS += "-DP3B_CELSTATS_ALWAYS" }
 if ($SlowSteal) { $FLAGS += "-DRES_SLOW_STEAL" }
 if ($NoRemap) { $FLAGS += "-DRES_FAULT_NOREMAP" }
 if ($ViewFaultOneMap) { $FLAGS += "-DVM_VIEW_FAULT_ONEMAP" }
@@ -608,6 +630,14 @@ $WANT += @("P3_CODE_SPLIT","P3_TABLES_BASE","P3_TABLES_END")
 # gap between them is what the isolation test costs in skips foregone. Cel arms only -- p3_skip
 # and its counters live inside `ifdef P3B_CEL_LINK`, which is the same condition as the switch.
 if ($CelLink) { $WANT += @("p3_nskip","p3_nunch") }
+# ★★ Same condition as the symbols' definition -- the rule this file has restated six times.
+if ($CelStats) { $WANT += @("p3_ncelseen","p3_ncelsame") }
+# ★★★★ -CelTrace needs the STAGED TABLE, not a counter: the host reads p3_spr per cycle and writes
+# the decode sequence, so cel_reuse.py can price a cache of ANY size offline [T-P0-143 §4A(2)].
+# ★★ p3_spr/p3_nspr are unconditional; p3_skip is inside `ifdef P3B_CEL_LINK`, hence the split --
+# the want-line's condition must be the same condition as the symbol's definition.
+if ($CelTrace) { $WANT += @("p3_spr","p3_nspr") }
+if ($CelTrace -and $CelLink) { $WANT += @("p3_skip") }
 $WANT += @("p3_drew","p3_shown","p3_errpic","p3_errtop","p3_errdepth","res_depth","vm_objtop",
            "p3_drawtop","p3_drawdepth","res_top","p3_nfall","p3_drawccur","res_ccur",
            "p3_errccur")
@@ -665,6 +695,7 @@ $env:P3B_SYMBOLS = "build\p3b\symbols.txt"
 $env:P3B_CYCLES = "$Cycles"
 $env:P3B_HOLD = "$Hold"
 $env:P3B_OUT = if ($Headless) { "build\p3b_headless" } else { "build\p3b_eye" }
+if ($CelTrace) { $env:P3B_CELTRACE = "1" }
 # ★★★ Set BEFORE the verdict below reads it, so the banner describes the run that will happen.
 if ($NoRoomJump) { $env:P3B_ROOM = "0" }
 

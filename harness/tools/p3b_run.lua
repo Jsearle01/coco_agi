@@ -95,6 +95,23 @@ local cal_t0, CLOCK = nil, nil
 local HOLD = tonumber(os.getenv("P3B_HOLD") or "0")
 local hold_until = nil
 
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+-- ★★★★★ P3B_CELTRACE -- THE DECODE SEQUENCE, CAPTURED BY THE HOST AT ZERO GUEST COST [§4A(2)].
+-- ★★★★★ §4A(1)'s ADJACENCY RATE ANSWERS A DIFFERENT QUESTION FROM THE ONE A CACHE ASKS, and the
+-- difference is the whole reason this exists. "Is this cel the same as LAST cycle's" is distance-1
+-- reuse. ★★★★ A cache with N slots hits on reuse within the last N DISTINCT cels -- and §4B
+-- contemplates four. ★★★ A walk loop that advances one cel per cycle scores ~0% adjacency and
+-- ~100% on a 4-slot cache, so quoting the adjacency number as a predicted hit rate is exactly
+-- §2H's first-mechanism error: real, and not the governing mechanism.
+-- ★★★★ ZERO GUEST BYTES is not incidental -- §1.3 says region A is full and `-IfRec` has not
+-- assembled since P6.88, so a guest-side ring buffer would have been unaffordable AND would have
+-- perturbed the thing being measured. The host already has the address space.
+-- ★★ _G._celsym rather than an upvalue: SYM is declared thirty lines BELOW this tap, so a direct
+-- reference would capture nil forever and the trace would be silently empty [§2W].
+local CELTRACE = os.getenv("P3B_CELTRACE")
+local cel_tr = {}
+_G._celsym = nil
+
 _G._ptap = prog:install_write_tap(PHASE, PHASE, "p3bphase", function(offset, data, mask)
     local v = data % 256
     local t = m.time:as_double()
@@ -110,6 +127,20 @@ _G._ptap = prog:install_write_tap(PHASE, PHASE, "p3bphase", function(offset, dat
                               t - sub_open[2] }
         sub_open = nil
         return
+    end
+    -- ★★★ Marker 9 = ENTER composite: p3_spr is staged and p3_skip is decided, so this is the
+    -- instant the decode requests for the cycle are knowable and none has run yet.
+    if CELTRACE and v == 9 and _G._celsym then
+        local S = _G._celsym
+        local n, row = prog:read_u8(S.n), {}
+        for i = 0, n - 1 do
+            local b = S.spr + i * 6
+            row[#row+1] = string.format("%d.%d.%d:%d",
+                prog:read_u8(b + 3), prog:read_u8(b + 4), prog:read_u8(b + 5),
+                S.skip and prog:read_u8(S.skip + i) or 0)
+        end
+        cel_tr[#cel_tr+1] = string.format("%d %s",
+            prog:read_u8(CYCLE) * 256 + prog:read_u8(CYCLE + 1), table.concat(row, " "))
     end
     if MARK[v] then
         stage_open = {v, t}
@@ -134,6 +165,16 @@ do
     end f:close() end
 end
 if not SYM.res_volbase then w("★★★ %s lacks res_volbase", SYMF); return end
+
+-- ★★★★ The tap's forward reference, resolved now that SYM exists. ★★★ If p3_spr/p3_nspr are not in
+-- the map the trace stays empty and says so at the end, rather than writing a plausible short file.
+if CELTRACE then
+    if SYM.p3_spr and SYM.p3_nspr then
+        _G._celsym = { spr = SYM.p3_spr, n = SYM.p3_nspr, skip = SYM.p3_skip }
+    else
+        w("★★★ P3B_CELTRACE set but %s lacks p3_spr/p3_nspr -- NO TRACE WILL BE WRITTEN", SYMF)
+    end
+end
 
 local vols = {}
 do
@@ -1879,6 +1920,28 @@ _G._n = emu.add_machine_frame_notifier(function()
             -- restore has skipped unchanged ones since P6.60. These say how many COULD be skipped
             -- and how many the isolation test rules out -- per cycle, because a total over a
             -- window answers a different question [P6.84].
+            -- ★★★★★ T-P0-143 §4A: the cel-decode repeat rate. `seen` counts staged sprites walked,
+            -- `same` those whose (view, loop, cel) matched last cycle -- so 1/(1-rate) is how many
+            -- cycles a cel persists on average, and the rate IS the share of decode work that is
+            -- a re-decode of bytes produced last cycle.
+            if SYM.p3_ncelseen and SYM.p3_ncelsame then
+                local sn, sm = rd16(SYM.p3_ncelseen), rd16(SYM.p3_ncelsame)
+                local r = sn > 0 and sm / sn or 0
+                w("    CELSTATS over %d cycles: staged-sprite records %d (%.2f/cycle), cel"
+                  .. " UNCHANGED from last cycle %d -- repeat rate %.1f%%%s",
+                  NCYC, sn, sn/NCYC, sm, 100*r,
+                  r > 0 and string.format(", mean persistence %.2f cycles", 1/(1-math.min(r,0.999)))
+                        or "")
+            end
+            if CELTRACE then
+                local f = io.open(OUT .. "/celtrace.txt", "w")
+                f:write("# <guest cycle> <view.loop.cel:skipflag> ...  one line per cycle,"
+                        .. " sampled at P3_PHASE 9 (enter composite)\n")
+                for i = 1, #cel_tr do f:write(cel_tr[i], "\n") end
+                f:close()
+                w("    CELTRACE: %d cycles written to %s/celtrace.txt%s", #cel_tr, OUT,
+                  #cel_tr == 0 and "   ★★★ EMPTY -- the tap never fired at marker 9" or "")
+            end
             if SYM.p3_nskip and SYM.p3_nunch then
                 local sk, un = rd16(SYM.p3_nskip), rd16(SYM.p3_nunch)
                 w("    SKIP ceiling over %d cycles: unchanged %d (%.2f/cycle), of which isolated"

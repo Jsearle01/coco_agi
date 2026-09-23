@@ -97,6 +97,13 @@ def main():
     ap.add_argument("--games", default=r"C:\Projects\agi-games\pc")
     ap.add_argument("--cels", default=None,
                     help="restrict to specific cels: 'view,loop,cel;view,loop,cel'")
+    # ★★★★★ T-P0-143 §3(3): the DECODED SIZE, which is the one number a cache is priced in.
+    # ★★★ A decoded cel is w x h bytes -- one byte per pixel, the format vc_decode_row emits --
+    # so the corpus distribution of w*h says directly how many cels fit in a given arena.
+    # ★★ It is a column on THIS walk and not a new tool because this walk already visits every
+    # cel in the pinned set and a second walker would be a second thing to keep honest.
+    ap.add_argument("--dims", action="store_true",
+                    help="report the w x h (decoded-bytes) distribution instead of the run census")
     a = ap.parse_args()
 
     want = None
@@ -108,6 +115,7 @@ def main():
 
     keylen = collections.Counter()
     opqlen = collections.Counter()
+    dims = []                       # (w*h, w, h, title, view, loop, cel) -- §3(3)
     ncels = 0
     rows = 0
     for t in (a.titles or PINNED):
@@ -129,8 +137,39 @@ def main():
                 w, h, key, rr = r
                 ncels += 1
                 rows += h
+                dims.append((w * h, w, h, t, e.index, lp, c))
                 for ln, isk in rr:
                     (keylen if isk else opqlen)[ln] += 1
+
+    if a.dims:
+        if not dims:
+            print("no cels matched")
+            return 1
+        dims.sort()
+        n = len(dims)
+        sz = [d[0] for d in dims]
+
+        def pct(p):
+            return sz[min(n - 1, int(p * n / 100))]
+
+        print(f"cels {n}   decoded bytes = w x h, one byte per pixel")
+        print(f"  mean {sum(sz)/n:8.1f}   median {pct(50):6d}   p90 {pct(90):6d}   "
+              f"p99 {pct(99):6d}   max {sz[-1]:6d}")
+        print(f"  smallest {sz[0]} B, largest {dims[-1][1]}x{dims[-1][2]} = {sz[-1]} B "
+              f"({dims[-1][3]} view {dims[-1][4]} loop {dims[-1][5]} cel {dims[-1][6]})")
+        print("  ★ how many fit in a given arena (using the MEAN, then using p90 -- the"
+              " conservative number is the p90 one):")
+        for arena in (256, 512, 1024, 2048, 4096, 8192):
+            print(f"     {arena:>5} B:  {arena//max(1,int(sum(sz)/n)):>3} at mean   "
+                  f"{arena//max(1,pct(90)):>3} at p90   {arena//max(1,sz[-1]):>3} at corpus max")
+        print("  ★ cumulative share of cels at or below a size:")
+        for lim in (64, 128, 256, 512, 1024, 2048):
+            print(f"     <= {lim:>5} B: {100*sum(1 for s in sz if s <= lim)/n:5.1f}%")
+        if want is not None:
+            print("  ★ the requested cels, largest first:")
+            for tot, w, h, t, v, lp, c in sorted(dims, reverse=True):
+                print(f"     {t} view {v:>3} loop {lp} cel {c}:  {w}x{h} = {tot} B")
+        return 0
 
     kn, kp = sum(keylen.values()), sum(l * n for l, n in keylen.items())
     on, op = sum(opqlen.values()), sum(l * n for l, n in opqlen.items())

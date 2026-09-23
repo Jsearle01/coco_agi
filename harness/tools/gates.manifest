@@ -1,5 +1,24 @@
 # harness/tools/gates.manifest -- ONE HOME for how each gate artifact is built (CLAUDE.md 2F).
 #
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ T-P0-143: WHAT NO GATE HERE CAN SEE ABOUT CEL DECODING, and the instrument that can.
+# ★★★★ `cel` (9,193/9,193) proves a decoded cel's BYTES are right. It says nothing about HOW MANY
+# TIMES the same cel is decoded, because it decodes each one once by construction -- it is a
+# correctness gate and re-decode is a cost question. ★★★ That is the same shape as T-P0-141's
+# note about `comp` and frame-to-frame state: a gate is blind to the axis it does not iterate.
+#
+# ★★★★★ THE INSTRUMENT: `p3b_show.ps1 -CelTrace` writes build/<out>/celtrace.txt from a HOST tap
+# at P3_PHASE 9, then `cel_reuse.py <trace> --from-cycle 11` prices an LRU cache of any size.
+# ★★★★ ZERO GUEST BYTES, which is why it could run at all: region A is full [AC-8].
+#
+# ★★★★★ AND `-CelStats` (the guest-side adjacency counter) IS THE CAUTIONARY HALF. It answers
+# "same cel as LAST cycle": 25.0% standing, 0.7% moving -- which reads as "the idea is dead".
+# ★★★★ The trace says the opposite: 20 distinct cels in flight, 95.4% hit at 20 slots, because
+# three animation loops SWEEP one cel per cycle and a sweep has no distance-1 reuse at all.
+# ★★★ Both numbers are correct. Only one answers the question that was asked [§2H].
+# ★★ FAULT ARMS for -CelStats: -CelStatsNever must read 0.0%, -CelStatsAlways must read 100.0%.
+# Both shown 2026-09-23; without them the 25%/0.7% pair was an unexercised assertion [§2W].
+#
 # ★★★★ WHY THIS FILE EXISTS. The four gate probes were built with four DIFFERENT flag sets, and
 # that fact lived in four different places (res_run.ps1, vm_run.ps1, build_comp.sh, and for pic
 # and cel: NOWHERE AT ALL). Recovering pic's and cel's flags took a brute-force size-match against

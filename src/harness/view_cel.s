@@ -107,6 +107,36 @@ vc_w16          fdb     0               ; width, zero-extended, for the 16-bit a
 * whole destination up front, so a cel that raises VC_E_TRUNC half way leaves the same zeroed tail
 * it always did. The per-row clear below then re-clears rows it has already cleared, which costs a
 * pass in the gate and keeps the two paths exactly equivalent.
+*
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ WHAT P6.50 TRADED, PRICED AT LAST [T-P0-143 §4A, and it was never priced until here].
+* ★★★★ The trade above is real and was the right call: it bought back 4,784 bytes and closed a
+* corruption. ★★★★★ WHAT IT SOLD was the oracle's *residency* -- `unpackViewCelData` decodes a cel
+* ONCE and the bytes live with the VIEW, and row-at-a-time decodes it again every time it is drawn.
+* ★★★ vc_decode_row is 26.6% of the drawing stage [P6.87], so the sold side is worth measuring.
+*
+* ★★★★★ MEASURED, over 109 steady castle cycles (room 1, cycles 11-119):
+*   decodes/cycle             3.98 moving, 3.11 standing (P6.88's skip takes 0.89 standing, 0.02 moving)
+*   SAME CEL AS LAST CYCLE    0.7% moving, 25.0% standing
+*   distinct cels in flight   20 moving (three loops sweeping: 6 + 5 + 9 cels, one step per cycle)
+*   LRU hit rate, 1..14 slots 25.1% moving -- FLAT, because a cyclic sweep is LRU-pessimal
+*   LRU hit rate, 20 slots    95.4% moving, and the 20 cels are 3,906 bytes
+*
+* ★★★★★ SO THE RE-DECODE IS ~95% WASTE AND BUYING IT BACK COSTS 3,906 BYTES, which region A does
+* not have -- `-IfRec` has not assembled since P6.88 and MAP_INPUT's tail is P3_KQ's. **The cache
+* is not refuted; it is unplaceable until the map ruling** [T-P0-143 §6, trigger 2].
+*
+* ★★★★★ AND THE ADJACENCY RATE WOULD HAVE KILLED IT WRONGLY. 0.7% moving reads as "cels change
+* every cycle, there is nothing here" -- the exact §6 trigger the dispatch wrote -- while the same
+* trace collapses 3.98 decodes/cycle to 0.18 with enough slots. ★★★★ A sweep has NO distance-1
+* reuse and TOTAL distance-N reuse [§2H: the first mechanism was real and was not the governing one].
+*
+* ★★★★★ ONE PART OF IT NEEDS NO STORAGE AT ALL, and it is the whole of the 1-slot rate: **all 109
+* of the 1-slot hits are two CONSECUTIVELY-STAGED sprites carrying the identical (view, loop, cel)**
+* -- room 1's two alligators share view 107 and swim in lockstep (x=147,y=161,prio 14 and
+* x=104,y=135,prio 12: two objects, not one staged twice). ★★★ Decoding each row once and blitting
+* it to both destinations reuses THIS buffer, changes no decoded byte, and keeps the cel gate's
+* subject intact. ★★ Recorded, not taken: §6 stopped this task at the census.
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 vc_decode_begin:
                 clr     vc_err
