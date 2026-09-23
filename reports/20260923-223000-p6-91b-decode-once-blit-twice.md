@@ -335,4 +335,4 @@ None.
 `seeds/AGI/live/2026-09-23-the-flag-recorded-a-decision-not-an-action.md`
 
 ### 11 — Commit
-(recorded below after push)
+`1f5bdb7` (pushed to origin/wip before this report)
