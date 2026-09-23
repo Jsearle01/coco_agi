@@ -298,4 +298,4 @@ signal is in the *ratio*, not the level. **Stated rather than quietly re-framed.
 `seeds/AGI/live/2026-09-24-compare-each-side-against-itself.md`
 
 ### 11 — Commit
-(recorded below after push)
+`4fcbf42` (pushed to origin/wip before this report)
