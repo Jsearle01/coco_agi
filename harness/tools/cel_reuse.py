@@ -52,6 +52,66 @@ def load(path):
     return out
 
 
+def load_sizes(path):
+    """-> {(view, loop, cel): decoded_bytes}, from cel_runs.py --dims --tsv."""
+    out = {}
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            if line.startswith("#") or not line.strip():
+                continue
+            p = line.split("\t")
+            out[(int(p[0]), int(p[1]), int(p[2]))] = int(p[3])
+    return out
+
+
+def loop_sim(requests, nloops, sizes):
+    """Cache WHOLE LOOPS, LRU over loops. -> (hits, misses, resident_bytes_high_water).
+
+    ★★★★★ WHY A LOOP AND NOT N CELS [T-P0-146 §4B]. P6.90's curve is FLAT at 25.1% from 1 to 14
+    slots and then 95.4% at 20 -- a cliff, because room 1's three animation loops are 6, 5 and 9
+    cels and each ADVANCES ONE CEL PER CYCLE. A partial cache of a cyclic sweep holds exactly the
+    cels that will be wanted last. ★★★★ Caching a whole LOOP inverts that: once a loop is resident,
+    every cel of it hits forever, and the loops are independent. So the useful unit is the loop,
+    and the useful axis is BYTES -- one loop is 6-9 cels, which is where the storage goes.
+
+    ★★★ A loop is admitted only if its TOTAL size is known; a cel whose size is missing from the
+    table makes its loop uncacheable rather than silently free [§2W: an unknown must not price as
+    zero].
+    """
+    by_loop = {}
+    for (v, l, c) in requests:
+        by_loop.setdefault((v, l), set()).add(c)
+    loop_bytes, unknown = {}, set()
+    for key, cels in by_loop.items():
+        tot = 0
+        for c in cels:
+            s = sizes.get((key[0], key[1], c))
+            if s is None:
+                unknown.add(key)
+                break
+            tot += s
+        else:
+            loop_bytes[key] = tot
+
+    resident, hits, misses, hw = [], 0, 0, 0
+    for (v, l, c) in requests:
+        key = (v, l)
+        if key in unknown:
+            misses += 1
+            continue
+        if key in resident:
+            hits += 1
+            resident.remove(key)
+            resident.append(key)
+        else:
+            misses += 1                 # ★ the first touch of a loop always decodes
+            resident.append(key)
+            if len(resident) > nloops:
+                resident.pop(0)
+        hw = max(hw, sum(loop_bytes[k] for k in resident))
+    return hits, misses, hw, loop_bytes, unknown
+
+
 def lru_sim(requests, nslots):
     """LRU over nslots. -> (hits, misses). requests is a flat list of keys."""
     slots, hits, misses = [], 0, 0
@@ -83,6 +143,8 @@ def main():
     # tool then reports "0 actually decoded" for a room that decoded every staged sprite -- a
     # plausible, precise, completely wrong number [T-P0-145; §2W: an instrument proven for one
     # question is not proven for another, L-82].
+    ap.add_argument("--cel-sizes", default=None,
+                    help="TSV from `cel_runs.py --dims --tsv` -- enables the per-loop BYTE curve")
     ap.add_argument("--noskip", action="store_true",
                     help="the trace came from a -NoSkip build: treat every staged record as "
                          "DECODED, because the skip flags are advisory there")
@@ -166,6 +228,24 @@ def main():
         h, m = lru_sim(all_req, n)
         print("     %2d slot%s: %5.1f%% hit" % (n, " " if n == 1 else "s",
                                                 100 * h / (h + m) if h + m else 0))
+
+    # ★★★★★ §4B: THE PER-LOOP CURVE, AGAINST BYTES. This is the axis a map ruling can act on --
+    # "8,192 B of borrowed aperture buys X%" -- where a slot count cannot be placed.
+    if a.cel_sizes:
+        sizes = load_sizes(a.cel_sizes)
+        print("  ── PER-LOOP cache, LRU over whole loops, priced in BYTES [§4B] ──")
+        loops = sorted({(v, l) for (v, l, _c) in dec_req})
+        print("     %d distinct loop(s) in the decoded stream: %s"
+              % (len(loops), ", ".join("v%d.l%d" % k for k in loops)))
+        for n in range(1, len(loops) + 1):
+            h, m, hw, lb, unk = loop_sim(dec_req, n, sizes)
+            print("     %2d loop%s: %5.1f%% hit   high-water %5d B   (%.2f decodes/cycle avoided)%s"
+                  % (n, " " if n == 1 else "s", 100 * h / (h + m) if h + m else 0, hw,
+                     h / len(data), "   ★ %d loop(s) uncacheable: size unknown" % len(unk)
+                     if unk else ""))
+        h, m, hw, lb, unk = loop_sim(dec_req, len(loops), sizes)
+        for k in sorted(lb):
+            print("        v%d.l%d = %d B" % (k[0], k[1], lb[k]))
     return 0
 
 

@@ -28,6 +28,18 @@
 # 640x239; their ego trips ~1.1 of them per event, so it can only UNDERCOUNT. That is safe in
 # one direction only, and a future task must not quote it as an equality [§2W.3].
 #
+# ★★★★★ T-P0-146: OUR IDLE FIGURE, WHICH IS THE LIKE-FOR-LIKE AGAINST SIERRA'S IDLE ROOMS.
+# ★★★★ Room 83 stages ZERO sprites (verified fresh, `sprites 0` on every one of 120 cycles -- not
+# taken from P6.51's three-month-old finding) and is what p3b's own gate row already runs:
+#     room 83, 0 sprites   median 0.0668 s/cycle = 15.0 cycles/second   (p25=p50=p75, rock steady)
+#     room  1, 4 sprites   median 0.2336 s/cycle =  4.3 cycles/second
+# ★★★★★ SAME BUILD, SAME RUN, SAME WINDOW -- the run starts in 83 and jumps to 1 at cycle 9.
+# **Four sprites cost 0.1668 s/cycle, 71.4% of the castle's standing cycle.**
+# ★★★★★ SO THE ENGINE IS NOT THE PROBLEM: 15.0 cycles/second is faster than AGI's PC 10/second and
+# 2.5x Sierra's >=5.87. **Most of the Sierra gap is WORKLOAD** -- their idle rooms animate ~nothing
+# (0.00-0.40 lattice events/s) and our castle composites 3.11 cels EVERY cycle standing still.
+# ★★★ Which is why the cel cache's 99.3% at 4,006 B is the item worth placing [T-P0-146 §4A/§4B].
+#
 # ★★★★ §2P: the corpus disk is the user's game. sierra_live.ps1 copies it per run. ★★★ It also
 # copies the cfg SEED to a temp dir -- MAME writes cfg files, and an ad-hoc invocation pointing
 # -cfg_directory at harness\mame-cfg\sierra-live\ mutated the tracked seed in this very task.

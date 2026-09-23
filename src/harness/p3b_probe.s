@@ -4111,6 +4111,32 @@ P3_CODE_END     equ     *
 * 59% of a cycle, so the unplaceable win is ~15% of the cycle, at 3.3 cycles/second.
 * ★★★ Still recorded, still not fixed, and still the Orchestrator's ruling [§6, trigger 2] -- but
 * the ledger now has a number in it rather than a list of blocked diagnostics.
+*
+* ★★★★★ AND THE RULING NOW HAS AN ANSWER THAT DOES NOT NEED REGION A AT ALL [T-P0-146 §4A].
+* **The constraint was never RAM** -- 512 KB leaves ~46 of 56 blocks free -- **and it turns out not
+* to be the aperture either.** A host-side census tapped every MMU window and bucketed reads and
+* writes by P3_PHASE [`p3b_show.ps1 -SlotCensus`], over 40 castle cycles:
+*     slot 3 $6000-7FFF ARENA low   0 r  0 w in the composite; busy in phases 0, 3, 7
+*     slot 4 $8000-9FFF ARENA high  0 r  0 w in the composite; busy in phases 0 and 3 ONLY
+*     slot 5 priority 17,204 r / 36,651 w · slot 6 fb+volume 36,239 r / 8,539 w -- both LIVE
+*     slot 7 tables/text 759 r -- LIVE, and it is not free anyway: the text engine, the font,
+*            the parser buffers and the flat vocabulary are in "slot 7's hole" [see :4020]
+* ★★★★★ **SLOT 4'S APERTURE IS SILENT FROM THE END OF `interpret` UNTIL THE NEXT CYCLE'S** --
+* through sprites, roomcheck, every room-render sub-step and the whole composite. ★★★ The same
+* taps read 83,357 accesses there in other phases, so the zero is a measurement and not a dead
+* instrument [§2W].
+*
+* ★★★★★ SO A CEL CACHE CAN BE PLACED: map its block into slot 4 at draw-phase entry, restore the
+* arena's high block at exit. ★★★★ **Two MMU writes per cycle (~14 cycles) against ~16% of a
+* cycle saved.** ★★★ The arena's bytes are never touched -- a remap hides them, it does not
+* destroy them -- and $FFA6's single-owner discipline [P6.82] is what makes this askable at all.
+*
+* ★★★★ AND THE SHAPE IS PER-LOOP, NOT N-SLOT [T-P0-146 §4B]. Whole loops, LRU over loops:
+*     1 loop 25.1% / 2,100 B · 2 loops 25.6% / 3,252 B · **3 loops 99.3% / 4,006 B**
+* against the 20-slot LRU's 95.4% at 3,906 B -- **a better hit rate, for 100 more bytes, with a
+* THREE-entry policy.** ★★★ Still a cliff, because room 1's loops sweep concurrently and all three
+* must be resident; **4,006 B fits slot 4's 8,192 with room for double.**
+* ★★ NOT BUILT. §4A was the question; the ruling is Jay's [§6 trigger 1].
 * ═══════════════════════════════════════════════════════════════════════════════════════════
                 ifndef  P3B_ACCEPT_OVERRUN
                 ifgt    P3_CODE_END-MAP_RESERVED_END

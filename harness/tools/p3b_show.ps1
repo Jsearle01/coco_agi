@@ -253,6 +253,11 @@ param(
   # sequence, read by the HOST, costing the guest nothing. ★★★ It is what -CelStats cannot be: the
   # adjacency rate prices a ONE-slot cache and §4B asks about four.
   [switch]$CelTrace,
+
+  # ★★★★★ -SlotCensus taps every MMU aperture and buckets reads/writes by P3_PHASE, so §4A's
+  # question -- is any slot SILENT during a composite, and therefore borrowable for a cel cache --
+  # is answered by measurement rather than by reading the map [T-P0-146].
+  [switch]$SlotCensus,
   [switch]$SlowSteal,
   # ★★★★ -NoRemap IS the fault arm (-DRES_FAULT_NOREMAP): a theft takes the cheap path WITHOUT
   # re-mapping, so the walk reads through whatever the compositor left in slot 6. Expect a wrong
@@ -696,6 +701,7 @@ $env:P3B_CYCLES = "$Cycles"
 $env:P3B_HOLD = "$Hold"
 $env:P3B_OUT = if ($Headless) { "build\p3b_headless" } else { "build\p3b_eye" }
 if ($CelTrace) { $env:P3B_CELTRACE = "1" }
+if ($SlotCensus) { $env:P3B_SLOTCENSUS = "1" }
 # ★★★ Set BEFORE the verdict below reads it, so the banner describes the run that will happen.
 if ($NoRoomJump) { $env:P3B_ROOM = "0" }
 

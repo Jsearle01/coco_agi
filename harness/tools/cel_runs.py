@@ -104,6 +104,8 @@ def main():
     # cel in the pinned set and a second walker would be a second thing to keep honest.
     ap.add_argument("--dims", action="store_true",
                     help="report the w x h (decoded-bytes) distribution instead of the run census")
+    ap.add_argument("--tsv", default=None,
+                    help="with --dims: also write view/loop/cel/bytes as TSV, for cel_reuse.py")
     a = ap.parse_args()
 
     want = None
@@ -169,6 +171,15 @@ def main():
             print("  ★ the requested cels, largest first:")
             for tot, w, h, t, v, lp, c in sorted(dims, reverse=True):
                 print(f"     {t} view {v:>3} loop {lp} cel {c}:  {w}x{h} = {tot} B")
+        # ★★★★ --tsv makes this walk feed cel_reuse.py, which prices a cache in BYTES and cannot
+        # do it without the decoded size of every cel in the trace [T-P0-146 §4B: "the ruling needs
+        # a curve in bytes"]. ★★ One producer for the sizes, so the two tools cannot disagree.
+        if a.tsv:
+            with open(a.tsv, "w", encoding="utf-8") as f:
+                f.write("# view\tloop\tcel\tbytes\twidth\theight\ttitle\n")
+                for tot, w, h, t, v, lp, c in sorted(dims, reverse=True):
+                    f.write(f"{v}\t{lp}\t{c}\t{tot}\t{w}\t{h}\t{t}\n")
+            print(f"  ★ {len(dims)} cel sizes written to {a.tsv}")
         return 0
 
     kn, kp = sum(keylen.values()), sum(l * n for l, n in keylen.items())

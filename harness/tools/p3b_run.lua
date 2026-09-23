@@ -112,8 +112,54 @@ local CELTRACE = os.getenv("P3B_CELTRACE")
 local cel_tr = {}
 _G._celsym = nil
 
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+-- ★★★★★ P3B_SLOTCENSUS -- WHICH MMU SLOTS ARE LIVE DURING A COMPOSITE [T-P0-146 §4A].
+-- ★★★★★ THE RULING'S QUESTION IS NOT "IS THERE MEMORY" -- 512 KB leaves ~376 KB free -- IT IS
+-- "IS A SLOT FREE AT THE MOMENT A DECODE RUNS". A slot can only be borrowed if nothing reads or
+-- writes its aperture while it is away. ★★★★ That is an empirical question about ONE window of
+-- the cycle, and reasoning about it from the map is exactly how the two $FFA6 defects happened
+-- [P6.74, P6.78]: a cache of a register's contents is wrong the moment anyone else writes it.
+-- ★★★ So: tap every aperture, count reads and writes, BUCKET BY P3_PHASE. A region with zero
+-- traffic during phase 9 is borrowable for the duration of the composite; a region with any
+-- traffic is not, and the count says how badly.
+-- ★★ Host-side and guest-free: region A is full [AC-6] and a guest counter could not be afforded.
+local SLOTCENSUS = os.getenv("P3B_SLOTCENSUS")
+local REGIONS = {                       -- {name, lo, hi, slot}
+    {"slot0 $0000-1FFF code/VM/CP_CEL", 0x0000, 0x1FFF, 0},
+    {"slot1 $2000-3FFF code",           0x2000, 0x3FFF, 1},
+    {"slot2 $4000-5FFF code/reserved",  0x4000, 0x5FFF, 2},
+    {"slot3 $6000-7FFF ARENA low",      0x6000, 0x7FFF, 3},
+    {"slot4 $8000-9FFF ARENA high",     0x8000, 0x9FFF, 4},
+    {"slot5 $A000-BFFF priority/vocab", 0xA000, 0xBFFF, 5},
+    {"slot6 $C000-DFFF fb / volume",    0xC000, 0xDFFF, 6},
+    {"slot7 $E000-FEFF tables/text",    0xE000, 0xFEFF, 7},
+}
+local cen = {}                          -- cen[region][phase] = {reads, writes}
+_G._phase_now = 0
+
+-- ★★★ The census taps must live in _G or they are collected and silently stop firing -- the same
+-- trap the stage tap above carries a warning about. One table, one entry per region.
+if SLOTCENSUS then
+    _G._centaps = {}
+    for i = 1, #REGIONS do
+        local r = REGIONS[i]
+        cen[i] = {}
+        local function bucket()
+            local p = _G._phase_now
+            local b = cen[i][p]
+            if not b then b = {0, 0}; cen[i][p] = b end
+            return b
+        end
+        _G._centaps[#_G._centaps+1] =
+            prog:install_read_tap(r[2], r[3], "cr" .. i, function() local b = bucket(); b[1] = b[1] + 1 end)
+        _G._centaps[#_G._centaps+1] =
+            prog:install_write_tap(r[2], r[3], "cw" .. i, function() local b = bucket(); b[2] = b[2] + 1 end)
+    end
+end
+
 _G._ptap = prog:install_write_tap(PHASE, PHASE, "p3bphase", function(offset, data, mask)
     local v = data % 256
+    _G._phase_now = v
     local t = m.time:as_double()
     if v == 11 then cal_t0 = t; return end
     if v == 12 and cal_t0 then CLOCK = CAL_CYCLES / (t - cal_t0); cal_t0 = nil; return end
@@ -1932,6 +1978,49 @@ _G._n = emu.add_machine_frame_notifier(function()
                   NCYC, sn, sn/NCYC, sm, 100*r,
                   r > 0 and string.format(", mean persistence %.2f cycles", 1/(1-math.min(r,0.999)))
                         or "")
+            end
+            if SLOTCENSUS then
+                -- ★★★★ Phase 9 = INSIDE the composite stage (odd = entered, even = left), which
+                -- is the window a cel cache would have to live through. Phase 3 is the VM.
+                w("    ── SLOT CENSUS: traffic per aperture, by stage [T-P0-146 §4A] ──")
+                w("       %-34s %14s %14s", "region", "phase 9 COMPOSITE", "all other")
+                for i = 1, #REGIONS do
+                    local r, comp_r, comp_w, oth = REGIONS[i], 0, 0, 0
+                    for p, b in pairs(cen[i] or {}) do
+                        if p == 9 then comp_r, comp_w = b[1], b[2]
+                        else oth = oth + b[1] + b[2] end
+                    end
+                    w("       %-34s %7d r %5d w %13d%s", r[1], comp_r, comp_w, oth,
+                      (comp_r + comp_w) == 0 and "   ★ SILENT in composite" or "")
+                end
+                w("       ★ a region SILENT during phase 9 could host a borrowed cache for the"
+                  .. " duration of a composite; any traffic at all means it could not.")
+                -- ★★★★★ AND THE BORROW WINDOW IS WIDER THAN PHASE 9, so "silent in the composite"
+                -- is not yet "safe to borrow". A slot handed to a cache at draw-phase ENTRY is away
+                -- until draw-phase EXIT, which spans the restore, the room render's sub-steps and
+                -- the composite. ★★★ So print EVERY phase for the candidate regions: one non-zero
+                -- bucket anywhere in that span and the borrow is unsafe [§2W -- the measurement
+                -- must answer the question actually being asked, not the neighbouring one].
+                local PHNAME = {[1]="pace", [3]="interpret", [5]="sprites", [7]="roomcheck",
+                                [9]="composite", [11]="clockcal", [13]="pic fetch",
+                                [15]="pic clear", [17]="pic render", [19]="pri shadow",
+                                [21]="present"}
+                -- ★★ 4 and 5, not 3 and 4: REGIONS is 1-indexed, so the arena's two apertures are
+                -- entries 4 and 5. The first cut printed slot2 under a slot3 heading.
+                for i = 4, 5 do
+                    local r = REGIONS[i]
+                    w("       ── %s, EVERY phase ──", r[1])
+                    local ks = {}
+                    for p in pairs(cen[i] or {}) do ks[#ks+1] = p end
+                    table.sort(ks)
+                    for _, p in ipairs(ks) do
+                        local b = cen[i][p]
+                        if b[1] + b[2] > 0 then
+                            w("          phase %2d %-12s %9d r %9d w", p,
+                              PHNAME[p] or (p % 2 == 0 and "(leaving)" or "?"), b[1], b[2])
+                        end
+                    end
+                end
             end
             if CELTRACE then
                 local f = io.open(OUT .. "/celtrace.txt", "w")
