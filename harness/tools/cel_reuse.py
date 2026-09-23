@@ -76,6 +76,16 @@ def main():
                     help="ignore cycles below this -- the steady window, excluding boot and the "
                          "room render [the windowing rule every figure in this project carries]")
     ap.add_argument("--sizes", default="1,2,3,4,6,8,16")
+    # ★★★★★ THE SKIP FLAG RECORDS A DECISION, NOT AN ACTION, AND UNDER -NoSkip THEY DIVERGE.
+    # ★★★★ p3_skip_decide always runs and always SETS p3_skip[i]; -DP3B_NOSKIP makes
+    # p3_composite_all IGNORE it. The CELTRACE tap reads the flag at P3_PHASE 9, so under -NoSkip
+    # a trace marks records "skipped" that were in fact DECODED. ★★★★★ Without this switch the
+    # tool then reports "0 actually decoded" for a room that decoded every staged sprite -- a
+    # plausible, precise, completely wrong number [T-P0-145; §2W: an instrument proven for one
+    # question is not proven for another, L-82].
+    ap.add_argument("--noskip", action="store_true",
+                    help="the trace came from a -NoSkip build: treat every staged record as "
+                         "DECODED, because the skip flags are advisory there")
     a = ap.parse_args()
 
     data = [(c, r) for c, r in load(a.trace) if c >= a.from_cycle]
@@ -88,7 +98,12 @@ def main():
     #   DECODED -- only sprites P6.88 did not skip, i.e. what today's build actually decodes.
     # The cache can only save work on the second; the first says how much P6.88 already took.
     all_req = [(v, l, c) for _, row in data for (v, l, c, _s) in row]
-    dec_req = [(v, l, c) for _, row in data for (v, l, c, s) in row if not s]
+    if a.noskip:
+        dec_req = list(all_req)
+    else:
+        dec_req = [(v, l, c) for _, row in data for (v, l, c, s) in row if not s]
+    if a.noskip:
+        print("  ★ --noskip: skip flags treated as advisory; every staged record counts as decoded")
 
     print("%s%d cycles (%d..%d), %d staged records, %d actually decoded (%d skipped by P6.88)"
           % (a.label and a.label + ": " or "", len(data), data[0][0], data[-1][0],
@@ -127,7 +142,8 @@ def main():
     # is free and which part needs the map ruling.
     dup_adj = dup_cyc = 0
     for _c, row in data:
-        live = [(v, l, c) for (v, l, c, s) in row if not s]
+        live = ([(v, l, c) for (v, l, c, _s) in row] if a.noskip
+                else [(v, l, c) for (v, l, c, s) in row if not s])
         seen = set()
         for i, k in enumerate(live):
             if i and live[i - 1] == k:

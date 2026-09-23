@@ -3652,6 +3652,45 @@ pca_gotview:
 * ═══════════════════════════════════════════════════════════════════════════════════════════
                 ldx     #CP_CEL
                 stx     vc_dest
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE INTRA-CYCLE DEDUP, MEASURED AND NOT TAKEN [T-P0-145]. Room 1's two alligators share
+* view 107 and swim in lockstep -- staged consecutively with an identical (view, loop, cel), two
+* objects at (147,161) prio 14 and (104,135) prio 12. **1.00 of 4.00 staged records per cycle.**
+*
+* ★★★★★ THE SHARING RULE, and the dispatch's stated trap CANNOT OCCUR HERE.
+*   **Two staged sprites share a decoded row iff their (view, loop, cel) triples are equal.
+*   Nothing else is required, mirroring included.**
+* ★★★★ MIRRORING IS A PROPERTY OF THE TRIPLE, NOT OF THE SPRITE. vc_mir is computed inside
+* vc_decode_begin from the cel header's mirror bit AND the recorded loop compared against vc_loop
+* [view_cel.s:10-14, 223-235] -- both functions of the triple. ★★★ `vc_mir` appears NOWHERE in
+* this file or in composite.s: there is no per-sprite mirror state to disagree about. **Facing is
+* a different LOOP, which is already part of the triple.** So equal triples always decode to
+* identical bytes, and "same triple, opposite mirror" is not a reachable state.
+*
+* ★★★★★ WHY IT WAS NOT BUILT, AND THE PREMISE THAT FAILED. The dispatch's shape was "decode the
+* row once, blit it to both destinations -- the second blit can read CP_CEL before it is
+* overwritten." ★★★★★ **CP_CEL IS OVERWRITTEN vc_h-1 TIMES DURING ONE SPRITE.** cp_composite's
+* co_row loop calls vc_decode_row per row under COMP_ROW_PULL [composite.s:170-192], so when it
+* returns, CP_CEL holds the LAST row only. ★★★★ The dedup is therefore not a second blit after a
+* decode; it is **two blits interleaved inside one row loop**, each with its own co_basex,
+* co_prio, co_cury and row bases -- a restructure of cp_composite, which is 28.9% of the drawing
+* stage and the hottest loop in the program.
+*
+* ★★★★★ AND THE SAVING IS ROOM 1's ALONE, on every room reachable [§6 trigger 5]:
+*     room 1: 4.00 staged/cycle, **1.00 adjacent duplicate**, 15 distinct triples
+*     room 2: 0.00 staged        room 3: 2.00 staged, 0 duplicates (views 0 and 10 differ)
+*     room 5: 1.00 staged, 0 duplicates
+* ★★★ Two sprites sharing a view is a property of THIS ROOM, not of AGI [§4C(4)].
+*
+* ★★★★ ADJACENCY IS INCIDENTAL, TOO. p3_stage_sprites appends in OBJECT-NUMBER order with no sort
+* [pss_lp]; nothing contracts that a shared view lands consecutively. A non-adjacent pair could
+* only be deduped by hoisting one sprite's blit next to the other's -- **which changes draw order,
+* and at equal priority co_depth lets the LATER drawer win** [§6 trigger 1: a ruling, not a task].
+*
+* ★★★ This is the 1-slot case of the cel cache P6.90 priced at 95.4%/3,906 B and could not place.
+* **It is the part that needs no storage -- and it still needs the hottest loop rebuilt for ~4.4%
+* of a cycle in one room.** Recorded so the next reader does not re-derive the premise.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ BEGIN, NOT DECODE [T-P0-105]. The cel is no longer unpacked here; cp_composite pulls it a
 * row at a time into CP_CEL, which is now VC_ROW_MAX bytes rather than 4,784. **The overlap with
 * RES_ARENA is gone rather than relocated**, and the VIEW this decodes FROM is no longer inside
