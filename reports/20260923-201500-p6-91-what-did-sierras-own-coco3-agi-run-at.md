@@ -370,4 +370,4 @@ picture on both sides.
 `seeds/AGI/live/2026-09-23-measure-the-bar-on-the-target-machine.md`
 
 ### 11 — Commit
-(recorded below after push)
+`0f1bdb5` (pushed to origin/wip before this report)
