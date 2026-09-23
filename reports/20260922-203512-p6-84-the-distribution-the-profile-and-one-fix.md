@@ -328,4 +328,5 @@ including that "about the same" was the expected answer. Jay's two answers are q
 `seeds/AGI/live/2026-09-22-a-mean-over-an-undeclared-window.md`
 
 ### 11 — Commit
-`<hash>`  (pushed to origin/wip before this report)
+`2b78aa7`  (pushed to origin/wip before this report)
+Pool candidate `8640d15` (methodology-candidate-pool, main).
