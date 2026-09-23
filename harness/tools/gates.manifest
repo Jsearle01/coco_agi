@@ -1,6 +1,39 @@
 # harness/tools/gates.manifest -- ONE HOME for how each gate artifact is built (CLAUDE.md 2F).
 #
 # ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ T-P0-144: THE SIERRA BENCHMARK IS A STANDING COMPARISON, NOT A GATE [§9 delta 2].
+# ★★★★ It has no pass/fail and must never acquire one -- it measures ANOTHER program, and a
+# red would mean "Sierra got faster", which is not a defect in this tree. It is here because
+# the port's speed target was AGI's PC figure for this whole arc, and nobody had measured what
+# the machine we are targeting actually does.
+#
+# ★★★★★ REPRODUCING IT (an operator is REQUIRED -- movement is CTRL+letter and the automated
+# probe is a KNOWN-FAILED approach that steals CTRL for the session [sierra_boot.lua's header]):
+#     powershell -File harness\tools\sierra_live.ps1 -Out build\<run> -Game KQ3
+#     type DOS <ENTER>, wait ~25 s, capital R <ENTER>, CTRL+DELETE past the title, then play
+#     python harness\tools\sierra_rooms.py build\<run>\frames.csv      <-- THE instrument
+# ★★★ The `* ROOM CHANGE` lines the Lua prints while you play are CANDIDATES. The offline tool
+# is the measurement: it sees the whole run, which is what coalescing a fragmented disk cluster
+# needs. In T-P0-144 the two agreed to exactly one frame (3.371/3.388, 4.005/4.022).
+#
+# ★★★★ THE FIGURES, 2026-09-23, KQ3, `Floppy 360K` kq3-1.dsk sha256[0:16]=20EA31A82087DA90,
+# mame coco3 at its DEFAULT 512K (`-listxml` ramoption default=yes), n=4 transitions:
+#     room change  median 4.10 s TOTAL = disk 2.80 + DRAW 1.58   (ours: 6.16 s, all draw)
+#     walking      >= 5.87 lattice events/s                      (ours: 3.33 cycles/s)
+#     idle         0.00-0.40 events/s -- their rooms animate ~NOTHING when the ego is still
+#                                        (ours composites 3.11 cels EVERY cycle standing)
+#     display      VMODE=$80 BP=1 VRES=$1E = 320x192x16, our mode 1 -- NOT reduced fidelity
+#
+# ★★★★★ THE LATTICE IS A LOWER BOUND AND THE REPORT MUST SAY SO. 16x10 sample points over
+# 640x239; their ego trips ~1.1 of them per event, so it can only UNDERCOUNT. That is safe in
+# one direction only, and a future task must not quote it as an equality [§2W.3].
+#
+# ★★★★ §2P: the corpus disk is the user's game. sierra_live.ps1 copies it per run. ★★★ It also
+# copies the cfg SEED to a temp dir -- MAME writes cfg files, and an ad-hoc invocation pointing
+# -cfg_directory at harness\mame-cfg\sierra-live\ mutated the tracked seed in this very task.
+# **Use the .ps1; do not hand-roll the invocation.**
+#
+# ═══════════════════════════════════════════════════════════════════════════════════════════
 # ★★★★★ T-P0-143: WHAT NO GATE HERE CAN SEE ABOUT CEL DECODING, and the instrument that can.
 # ★★★★ `cel` (9,193/9,193) proves a decoded cel's BYTES are right. It says nothing about HOW MANY
 # TIMES the same cel is decoded, because it decodes each one once by construction -- it is a
