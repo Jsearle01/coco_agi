@@ -394,13 +394,49 @@ P3_VOCAB_BAD    equ     MAP_STATUS+89   ; 2 B: first vocabulary-window address t
 P3_KEY          equ     MAP_STATUS+91
 P3_NKEY         equ     MAP_STATUS+92
 
-* ── the subsystems' instrumentation, which is NOT optional ───────────────────────
-* ★★★ EVERY ONE OF THESE IS REQUIRED TO ASSEMBLE. pic_draw.s does `ldd CNT_VERT / addd #1 /
-* std CNT_VERT` with no guard, and pic_core.s does the same for CNT_PIX. composite.s guards its
-* counters behind -DCOMP_NOCOUNT; the renderer has no such switch.
-* ★★ **The two subsystems disagree about whether instrumentation is part of the product**, and
-* integration is what surfaced it: a shipped renderer cannot currently be built without its
-* counters. Reported, not worked around (§8 trigger 5).
+* ── the subsystems' instrumentation: the ADDRESSES are required, the COUNTING is not ──
+* ★★★ THE ADDRESSES ARE REQUIRED TO ASSEMBLE. pic_draw.s does `ldd CNT_VERT / addd #1 /
+* std CNT_VERT` with no guard, and pic_core.s does the same for CNT_PIX. **Those two are the
+* genuinely unguarded pair** and they are per-LINE and per-PIXEL, not per fill-check.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ AND THE SENTENCE THAT STOOD HERE WAS FALSE, AND IT COST 29.4% OF A ROOM CHANGE.
+* It read: *"composite.s guards its counters behind -DCOMP_NOCOUNT; **the renderer has no such
+* switch**"* -- and concluded that "a shipped renderer cannot currently be built without its
+* counters". ★★★★★ **The renderer has had exactly such a switch since pic_fill.s was written:
+* PIC_NOCOUNT, tested in SIXTEEN places across pic_fill.s and pic_core.s**, and pic_fill.s's own
+* comment says "timings come from -DPIC_NOCOUNT, where this vanishes entirely".
+* ★★★★ WHAT THE WRONG SENTENCE COST: fc_count -- a `ldd CNT_CHK+2 / addd #1 / std` in the flood
+* fill's innermost loops -- was **29.4% of the room-change cycle**, the largest single routine in
+* it, until T-P0-138 defined the flag. **Room change 9.5456 -> 6.1579 s for one `equ`.**
+* ★★★★★ THE SHAPE, AND IT IS THE THIRD INSTANCE: A COMMENT ASSERTING AN ABSENCE, WITH NOTHING
+* ABLE TO MAKE IT FAIL. The others are res_core.s's *"this is the ONLY routine that writes it"*
+* about $FFA6 [P6.79, two shipped defects] and this file's *"no reader"* [P6.71]. ★★★ A negative
+* claim in prose is the one kind of comment that cannot decay LOUDLY: the code stays correct while
+* the sentence stops being true, so nothing ever contradicts it.
+* ★★ The instrument inventory below is the answer to "which of these is on": a table, not a
+* sentence, and one a future reader can check against the build.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ INSTRUMENT INVENTORY [T-P0-139 §4A]. Every conditional instrument in the tree, and
+* whether a p3b arm pays for it. **ON-BY-DEFAULT ones are `ifndef` -- they cost unless disabled.**
+*
+*   flag            sites  what it counts              disabled in p3b by
+*   PIC_NOCOUNT       16    fill checks, line/px paths  THIS FILE, all arms   [T-P0-138]
+*   COMP_NOCOUNT       6    composite pixels tested/    THIS FILE, COMBINED arm only  [T-P0-130]
+*                           written/rejected            ★ LIVE in the `p3b` cel arm, deliberately:
+*                           gates.manifest's rows quote co_tested and co_rej_pri as evidence,
+*                           so the answer there is a counting ARM, not a switch. Cost when on:
+*                           11.9% of a castle cycle [P6.76].
+*   VM_NOCOUNT         5    opcodes and tests seen      THIS FILE, all arms but -DP3B_COVERAGE
+*                                                       [T-P0-102; P6.46 -- these CORRUPTED game
+*                                                       data before they were guarded]
+*
+* ★★★ OPT-IN (`ifdef`) instruments cost nothing unless a flag is passed, and **none is `equ`'d in
+* any source file** -- checked, not assumed: RES_CHECKSUM, VM_TRACE, VM_IFDIAG, VM_SAIDDIAG,
+* VM_VAR0DIAG, VM_OBJCENSUS, TX_MSGDIAG, P3B_SPRSTATS, P3B_COVERAGE, P3B_CELTEST,
+* P3B_VIEWHDR_TEST, P3B_PICSTEPS, RES_TEST_TRIMALL.
+* ★★ No shipped arm's flag set names one [p3b_arms_check.ps1: $BASE, $TEXT and the two combined
+* rows contain no instrument flag].
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 CNT_VERT        equ     MAP_STATUS+32
 CNT_HORIZ       equ     MAP_STATUS+34
 CNT_DIAG        equ     MAP_STATUS+36

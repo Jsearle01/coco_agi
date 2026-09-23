@@ -158,10 +158,27 @@ def main():
     vs = None
     if "--vs" in args:
         k = args.index("--vs"); vs = args[k + 1]; del args[k:k + 2]
+    # ★★★★★ --stage N: keep only samples whose P3_PHASE byte is N [T-P0-139 §4B].
+    # The profiler already records PHASE beside every PC, and -DP3B_PICSTEPS brackets the room
+    # change's steps with markers 13..22 -- so `--stage 17` is the RENDER and nothing else, without
+    # a second profiling run or a single extra guest instruction.
+    # ★★★ It matters because the render is 79.5% of its cycle: a table over the whole cycle is
+    # dominated by the render but is not a table OF the render, and §4B asks for shares that sum
+    # to 4.90 s rather than to 6.16.
+    stage = None
+    if "--stage" in args:
+        k = args.index("--stage"); stage = int(args[k + 1]); del args[k:k + 2]
     prof, mapf = args
     syms = load_map(mapf)
     defs, entries = scan_source()
     hdr, samples = load_profile(prof)
+    if stage is not None:
+        samples = Counter({k: v for k, v in samples.items() if k[2] == stage})
+        hdr += f"   [--stage {stage}: only samples with P3_PHASE={stage}]"
+        if not samples:
+            print(hdr)
+            print(f"\n★★★ no samples with P3_PHASE={stage} -- was the run built with the markers?")
+            return
     total = sum(samples.values())
     by_r, by_l, windowed, blocks, by_sr = attribute(samples, syms, defs, entries)
     print(hdr)
