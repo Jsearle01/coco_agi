@@ -208,6 +208,12 @@ param(
   # fill's diagnostic counters back in the inner loops, which is every p3b build before this task.
   # **Identical pixels, the old cost.** ★★★ fc_count alone was 29.4% of the room-render cycle.
   [switch]$PicCount,
+  # ★★★★★ -PriXRederive IS T-P0-140's BEFORE ARM (-DCOMP_PRIX_REDERIVE), and it is NOT a fault: the
+  # compositor's priority WRITE re-derives the address the priority READ already formed for the
+  # same pixel, which is what composite.s did before this task. **Identical pixels, the old cost.**
+  # ★★★ co_rej_pri is 0 in the castle, so every opaque pixel is drawn and exactly half of all
+  # plane_pri calls were that re-derivation -- 11,360 of 22,720 over 40 cycles.
+  [switch]$PriXRederive,
   [switch]$SlowSteal,
   # ★★★★ -NoRemap IS the fault arm (-DRES_FAULT_NOREMAP): a theft takes the cheap path WITHOUT
   # re-mapping, so the walk reads through whatever the compositor left in slot 6. Expect a wrong
@@ -385,6 +391,8 @@ if ($NoCross) { $FLAGS += "-DRES_FAULT_NOCROSS" }
 if ($PicSteps) { $FLAGS += "-DP3B_PICSTEPS" }
 # ★★★★ -PicCount is T-P0-138's BEFORE arm: the fill's counters back in the inner loops.
 if ($PicCount) { $FLAGS += "-DP3B_PIC_COUNT" }
+# ★★★★ T-P0-140's BEFORE arm: site 2 re-derives the priority address instead of reusing site 1's.
+if ($PriXRederive) { $FLAGS += "-DCOMP_PRIX_REDERIVE" }
 if ($SlowSteal) { $FLAGS += "-DRES_SLOW_STEAL" }
 if ($NoRemap) { $FLAGS += "-DRES_FAULT_NOREMAP" }
 if ($ViewFaultOneMap) { $FLAGS += "-DVM_VIEW_FAULT_ONEMAP" }

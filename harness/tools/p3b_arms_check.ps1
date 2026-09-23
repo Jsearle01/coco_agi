@@ -231,7 +231,17 @@ $ARMS = @(
   # RETIRED at T-P0-138: p3b 15,883 CF600CD0 | p3b_text 17,041 817747AC | p3b_win3 17,041 38BCE1D9
   #   p3b_notick 17,038 F28109AA | p3b_nomap 17,038 81A538DC | p3b_fault 16,087 87FF3CFB
   #   p3b_flat 16,072 66D4338B | p3b_comb 19,105 57CCB100 | p3b_comb_count 19,140 92C3ADC4
-  @{ n = "p3b";        f = @("-DHAL_KEYBOARD");                          sz = 15741; sha = "8BE2D963" },
+  # ★★★★★ RE-BASELINED T-P0-140, THE THREE CEL-LINKED ARMS ONLY, +2 B EACH. composite.s's priority
+  # WRITE reuses the address its priority READ already formed for the same pixel, instead of
+  # calling plane_pri a second time. **The six text arms link no compositor and are byte-identical**
+  # -- verified, not assumed, and that split is the check that the change is scoped.
+  # ★★★★ co_rej_pri is ZERO in the castle, so every opaque pixel is drawn and exactly half of all
+  # plane_pri calls were the re-derivation: 11,360 of 22,720 over 40 cycles, plane_pri being 11.5%
+  # of the drawing stage. ★★★ Steady cycle mean 0.2925 -> 0.2791, median 0.2837 -> 0.2670.
+  # ★★ Pixels identical: co_tested 25,200 / co_rej_key 13,840 / co_rej_pri 0 / co_WRITTEN 11,360 on
+  # both arms, and comp_probe (the flat `comp` gate) is byte-identical -- the change is windowed-only.
+  # RETIRED at T-P0-140: p3b 15,741 8BE2D963 | p3b_comb 18,963 D6E54FBD | p3b_comb_count 18,998 F97BBF51
+  @{ n = "p3b";        f = @("-DHAL_KEYBOARD");                          sz = 15743; sha = "4C216A08" },
   # ★★★★★ RE-BASELINED T-P0-125: the FIVE TEXT_WIRED arms moved +83 B (clear.lines is real), and
   # p3b, p3b_fault and p3b_flat did NOT -- the first links no text engine and the other two are
   # -DTEXT_MODELLED, which takes vm_text_ops.s's `equ` branch. ★★★ The split falls exactly along
@@ -251,9 +261,9 @@ $ARMS = @(
   # ★★★★ T-P0-128's VBL key latch is OPT-IN (-DP3B_VBLKEYS_OPT) after it failed its eye gate, so
   # the shipped combined arm is back to its P6.74 bytes. Built with the latch it was 18782 B /
   # B9F06823 (+79); that figure is recorded here so the next task re-enabling it has a reference.
-  @{ n = "p3b_comb";   f = @("-DHAL_KEYBOARD","-DP3B_COMBINED","-DP3B_IRQ"); sz = 18963; sha = "D6E54FBD" },
+  @{ n = "p3b_comb";   f = @("-DHAL_KEYBOARD","-DP3B_COMBINED","-DP3B_IRQ"); sz = 18965; sha = "9349B3E4" },
   # ★★★★ T-P0-130's COUNTING ARM (-Count in p3b_show.ps1): the combined arm with the pixel counters.
-  @{ n = "p3b_comb_count"; f = @("-DHAL_KEYBOARD","-DP3B_COMBINED","-DP3B_IRQ","-DP3B_COUNT"); sz = 18998; sha = "F97BBF51" }
+  @{ n = "p3b_comb_count"; f = @("-DHAL_KEYBOARD","-DP3B_COMBINED","-DP3B_IRQ","-DP3B_COUNT"); sz = 19000; sha = "51F6E86A" }
 )
 
 # ★★★ -DP3B_COVERAGE puts the two opcode counters back [p3b_probe.s]. It is a REAL byte change --

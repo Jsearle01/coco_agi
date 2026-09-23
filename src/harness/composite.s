@@ -99,6 +99,11 @@ co_prio         fcb     0
 co_key          fcb     0
 co_col          fcb     0
 co_tmp          fdb     0
+* ★★★ co_prix -- the priority byte's address, formed at site 1 and reused at site 2 [T-P0-140].
+* Windowed only: the flat build re-forms it with a `leax d,x` that costs nothing to repeat.
+                ifdef   PLANE_WINDOWED
+co_prix         fdb     0
+                endc
 co_ctrly        fdb     0               ; checkControlPixel's walking row
 co_ctrloff      fdb     0
 
@@ -113,6 +118,20 @@ co_ctrlstep     rmb     4               ; ★ total column-scan iterations those
 
 * ═══════════════════════════════════════════════════════════════════════════════════
 * ── cp_composite ── draw the decoded cel at (CP_X, CP_Y) with priority CP_PRIO ────
+* ═══════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ WHAT THE DRAWING PATH COSTS, SO THE NEXT READER NEED NOT RE-MEASURE IT [T-P0-140 §4A].
+* Window: KQ1 room 1, steady cycles 11-120, four staged sprites, **3.2 cels composited per cycle**.
+* The whole draw stage (P3_PHASE=9: restore + decode + blit) is **65.5% of a 0.279 s cycle =
+* 0.191 s**, decomposing to 100.0%:
+*     compositor 35.0%  ·  cel decode 27.6%  ·  plane window access 18.6%
+*     restore walk 8.5% ·  resource manager 8.2%  ·  MMU phase 1.8%
+* ★★★★ PER CEL: ~60 ms all in -- ~21 ms to blit and ~16 ms to decode.
+* ★★★★ PER PIXEL: 630 tested and 284 written per cycle, so **~106 us per pixel TESTED** (~190 CPU
+* cycles at 1.79 MHz). That is the number a pixel-loop ruling starts from, not the total.
+* ★★★ THE TWO CORE LOOPS ARE 55% OF THE STAGE -- cp_composite 28.9%, vc_decode_row 26.6% -- and
+* inside each the cost is spread across its own internals. **Structural, not a defect** [§4B].
+* ★★ The castle's sprite load is FOUR objects with two sharing a view; a room with more objects
+* composites more, and this figure is one room of one title.
 * ═══════════════════════════════════════════════════════════════════════════════════
 cp_composite:
                 lda     CP_X
@@ -213,9 +232,31 @@ co_opaque:
                 ifdef   PLANE_WINDOWED
                 addd    co_rowpri
                 jsr     plane_pri               ; X = address, slice mapped
-                else
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ KEEP IT: SITE 2 WANTS THIS EXACT ADDRESS AND USED TO RE-DERIVE IT [T-P0-140].
+* A drawn pixel calls plane_pri TWICE -- here to READ screenPriority for the depth test, and at
+* site 2 to WRITE the priority back -- from the same `co_rowpri + (co_curx >> 1)`. **The inputs
+* are identical and nothing between them changes either one.**
+* ★★★★★ AND THE MAPPING SURVIVES, WHICH IS WHY THE ADDRESS CAN BE REUSED RATHER THAN JUST THE
+* ARITHMETIC SKIPPED. Between the two calls sits only `cmpa co_prio` and `jsr co_put_visual`, and
+* co_put_visual touches co_rowvis and plane_vis -- **slot 6**. plane_pri maps **slot 5**
+* [plane_win.s: "plane_pri is not even the same REGISTER"], and since T-P0-135 the two have
+* separate records, ph_cur6 and ph_cur5. So slot 5 still holds this slice when site 2 runs.
+* ★★★★ MEASURED: co_rej_pri is ZERO in the castle -- every opaque pixel is drawn -- so **exactly
+* half of all plane_pri calls were this re-derivation**: 11,360 of 22,720 over 40 cycles, with
+* plane_pri at 11.5% of the drawing stage [T-P0-140 §4A].
+* ★★★ THE CONTROL-DATA PATH DOES NOT REACH SITE 2 (it draws and takes co_nextx), so the `stx`
+* there is spent and not recovered -- 5 cycles against a ~40-cycle call saved on every pixel that
+* does reach it.
+* ★★ WINDOWED ONLY, deliberately: the flat build's site 2 is a `leax d,x` that costs nothing to
+* repeat, and this file's own rule is that the flat build's instruction order stays byte-for-byte
+* [site 1's header]. **comp_probe is the flat build and is the `comp` gate.**
+                stx     co_prix
+                endc
+                ifndef  PLANE_WINDOWED
                 leax    d,x
                 endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
                 lda     ,x
                 ldb     co_curx
                 bitb    #1
@@ -279,8 +320,15 @@ co_depth:
 * -- this is the write half of the packing cost, and AC-7 measures it rather than assuming it.
                 lsrb
                 ifdef   PLANE_WINDOWED
+* ★★★★★ SITE 1's ADDRESS, NOT A SECOND DERIVATION [T-P0-140]. See the block at site 1 for why it
+* is still valid: co_put_visual maps slot 6 and this is slot 5. ★★★ -DCOMP_PRIX_REDERIVE is the
+* before arm -- it puts the second plane_pri call back and changes nothing else.
+                ifdef   COMP_PRIX_REDERIVE
                 addd    co_rowpri
                 jsr     plane_pri
+                else
+                ldx     co_prix
+                endc
                 else
                 leax    d,x
                 endc
