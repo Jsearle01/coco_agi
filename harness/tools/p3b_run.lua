@@ -1875,6 +1875,16 @@ _G._n = emu.add_machine_frame_notifier(function()
                 end
                 for i = 1, #_G._rs do w("      %s", _G._rs[i]) end
             end
+            -- ★★★★★ T-P0-141's CEILING. The composite redraws every sprite every cycle; the
+            -- restore has skipped unchanged ones since P6.60. These say how many COULD be skipped
+            -- and how many the isolation test rules out -- per cycle, because a total over a
+            -- window answers a different question [P6.84].
+            if SYM.p3_nskip and SYM.p3_nunch then
+                local sk, un = rd16(SYM.p3_nskip), rd16(SYM.p3_nunch)
+                w("    SKIP ceiling over %d cycles: unchanged %d (%.2f/cycle), of which isolated"
+                  .. " %d (%.2f/cycle)   -- the gap is what the isolation test forgoes",
+                  NCYC, un, un/NCYC, sk, sk/NCYC)
+            end
             if _G._ct then
                 w("    CELTEST: view %d loop %d cel %d -> %dx%d, %d row(s) decoded, "
                   .. "vc_err %d, pixel sum %d",

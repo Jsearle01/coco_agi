@@ -214,6 +214,23 @@ param(
   # ★★★ co_rej_pri is 0 in the castle, so every opaque pixel is drawn and exactly half of all
   # plane_pri calls were that re-derivation -- 11,360 of 22,720 over 40 cycles.
   [switch]$PriXRederive,
+  # ★★★★★ -NoSkip IS T-P0-141's BEFORE ARM (-DP3B_NOSKIP): p3_skip_decide still runs and still
+  # counts, so the CEILING is measured identically, but p3_composite_all composites every sprite
+  # as it always did. **Identical pixels, the old cost** -- and it is also the arm that proves the
+  # skip is what moved the number rather than the decision routine's own cost.
+  # ★★★ It is NOT the fault arm: -DP3B_SKIP_NOISO is, and it disables the isolation test so a
+  # sprite gets skipped that a restore has erased [AC-6].
+  [switch]$NoSkip,
+  # ★★★★★ -SkipNoIso IS T-P0-141's FAULT ARM (-DP3B_SKIP_NOISO): the isolation test always says
+  # yes, so a sprite is skipped even when a changed neighbour's restore has written the SHADOW
+  # over it. ★★★★ Expect a sprite with a BITE out of it -- the picture showing through where the
+  # neighbour was erased -- and both planes differing from the non-skipping reference.
+  [switch]$SkipNoIso,
+  # ★★★★★ -SkipNoPrio IS THE ARM THAT ACTUALLY FIRES (-DP3B_SKIP_NOPRIO). -SkipNoIso came back
+  # GREEN with an identical skip count, because **the castle has no overlapping sprites**: 0 of
+  # 111 unchanged sprites are rejected by the isolation test and all 12 rejections are this one's.
+  # ★★★ So the isolation test is unexercised in this corpus [L-85], and this is the red.
+  [switch]$SkipNoPrio,
   [switch]$SlowSteal,
   # ★★★★ -NoRemap IS the fault arm (-DRES_FAULT_NOREMAP): a theft takes the cheap path WITHOUT
   # re-mapping, so the walk reads through whatever the compositor left in slot 6. Expect a wrong
@@ -393,6 +410,11 @@ if ($PicSteps) { $FLAGS += "-DP3B_PICSTEPS" }
 if ($PicCount) { $FLAGS += "-DP3B_PIC_COUNT" }
 # ★★★★ T-P0-140's BEFORE arm: site 2 re-derives the priority address instead of reusing site 1's.
 if ($PriXRederive) { $FLAGS += "-DCOMP_PRIX_REDERIVE" }
+# ★★★★ T-P0-141's BEFORE arm: the skip is decided and counted, then ignored.
+if ($NoSkip) { $FLAGS += "-DP3B_NOSKIP" }
+# ★★★★ AC-6's fault arm: the isolation test always says yes, so an erased sprite gets skipped.
+if ($SkipNoIso) { $FLAGS += "-DP3B_SKIP_NOISO" }
+if ($SkipNoPrio) { $FLAGS += "-DP3B_SKIP_NOPRIO" }
 if ($SlowSteal) { $FLAGS += "-DRES_SLOW_STEAL" }
 if ($NoRemap) { $FLAGS += "-DRES_FAULT_NOREMAP" }
 if ($ViewFaultOneMap) { $FLAGS += "-DVM_VIEW_FAULT_ONEMAP" }
@@ -574,6 +596,10 @@ $WANT += @("P3_CODE_SPLIT","P3_TABLES_BASE","P3_TABLES_END")
 # ★★★★ SHARED LINE BECAUSE THE DEFINITION IS UNCONDITIONAL. Both bytes are declared outside every
 # ifdef in p3b_probe.s, so the want-line's condition must be "always" too [P6.66's rule, which this
 # file states four lines down and which I broke in the task that wrote it].
+# ★★★★ T-P0-141's CEILING: how many sprites are UNCHANGED, and how many are also ISOLATED. The
+# gap between them is what the isolation test costs in skips foregone. Cel arms only -- p3_skip
+# and its counters live inside `ifdef P3B_CEL_LINK`, which is the same condition as the switch.
+if ($CelLink) { $WANT += @("p3_nskip","p3_nunch") }
 $WANT += @("p3_drew","p3_shown","p3_errpic","p3_errtop","p3_errdepth","res_depth","vm_objtop",
            "p3_drawtop","p3_drawdepth","res_top","p3_nfall","p3_drawccur","res_ccur",
            "p3_errccur")

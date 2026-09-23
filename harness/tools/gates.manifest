@@ -59,6 +59,20 @@ pic_nc_pk	src/harness/pic_probe.s	build/pic_nc_packed.bin	-DHAL_GFX_MODE_SERVICE
 pic_win	src/harness/pic_probe.s	build/pic_v_windowed_nocount.bin	-DHAL_GFX_MODE_SERVICE -DPLANE_WINDOWED -DPIC_NOCOUNT	timing 2.9204 s median (+6.4%, windowed per-pixel class)	purpose=timing
 res	src/harness/res_probe.s	build/res_probe.bin	-DHAL_GFX_MODE_SERVICE	purpose=correctness
 cel	src/harness/cel_probe.s	build/cel_probe.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK	purpose=correctness
+# ★★★★★ WHAT THE `comp` ROW CANNOT SEE, WHICH HAS BEEN TRUE SINCE P6.55 AND WAS UNSTATED HERE.
+# comp_probe composites SINGLE FRAMES onto a CLEAN plane, so it has no way to express a
+# relationship between frame N and frame N+1. **Anything whose correctness is frame-to-frame is
+# invisible to it in BOTH directions** -- it stays 124/124 whether such a change is right or wrong.
+# ★★★★ T-P0-141 is the case: the compositor now SKIPS a sprite that is unchanged, isolated and
+# alone in its priority band, and `comp` was green before, after, and under both fault arms.
+# ★★★ THE INSTRUMENT THAT CAN SEE IT is p3b_run.lua's plane dump (P3B_DUMP=1): run N cycles with
+# and without -DP3B_NOSKIP and compare guest.visual.bin and guest.priority.bin byte for byte.
+# **Measured at T-P0-141: identical over 120 cycles, both planes.**
+# ★★★★★ AND ITS OWN BLIND SPOT, STATED SO IT IS NOT DISCOVERED LATER [L-121]: the castle has NO
+# overlapping sprites -- 0 of 111 unchanged sprites are refused by the isolation test -- and no
+# room reachable by this probe stages more than 4 (room 3 stages 2, room 5 one). **So neither of
+# the skip's two guards can be shown to fire**: disabling either leaves both planes identical.
+# The comparison proves the skip is right in a room that cannot test its guards.
 comp	src/harness/comp_probe.s	build/comp_probe.bin	purpose=correctness
 vm	src/harness/vm_probe.s	build/vm_probe.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK	purpose=correctness
 # ★★★★★ AD-140 SAID THE `vm` ROW IS purpose=correctness WHILE THE HEADLINE VM TIMING FIGURE COMES

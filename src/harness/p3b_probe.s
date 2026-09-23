@@ -2853,6 +2853,36 @@ pss_done:
 P3_PREV_SIZE    equ     7               ; x, ytop, w, h, view, loop, cel -- all bytes
 p3_prevn        fcb     0               ; rectangles live from the previous frame
 p3_prev         rmb     P3_SPR_MAX*P3_PREV_SIZE
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE COMPOSITE SKIP'S DECISION, TAKEN WHERE p3_prev IS STILL LIVE [T-P0-141].
+* p3_composite_all's first act is `clr p3_prevn`, so the previous frame's rectangles are gone by
+* the time it walks the sprites -- **the decision cannot be taken there** and is taken during the
+* restore, which is also where `prp_same` already runs.
+* ★★★★★ THE RULE, AND THE DISPATCH'S STATED ONE IS NOT SUFFICIENT [§4A].
+*   skip i  iff  prp_same(i)  AND  rect(i) is disjoint from every OTHER sprite's rect,
+*                                  both its OLD (p3_prev) and its NEW (p3_spr) rect.
+* ★★★★ "Unchanged AND not overlapped by a RESTORED rectangle" misses the case where a sprite j
+* MOVES INTO i's area: j's old rect is restored somewhere else, nothing restores i's area, and j
+* then composites over i. **co_depth rejects only when screenPriority > viewPriority, so at EQUAL
+* priority the later drawer wins** -- and in a full redraw i, if later in list order, would have
+* drawn over j. Skipping i inverts that. ★★★ The wider test covers it and is conservative: if
+* nothing writes into i's area this frame, both planes there are untouched and were right last
+* frame.
+* ★★★ THE THREE DISTURBANCE CASES COLLAPSE INTO ONE TEST because prp_visual and prp_priority walk
+* the IDENTICAL rectangle -- so the visual and the priority plane are disturbed over exactly the
+* same area, and one overlap test serves both [§1.2(3)].
+* ★★ p3_skip[i] = 1 means "do not composite i". Cleared every frame, in the same walk that fills
+* it, so a stale 1 cannot survive a frame in which the sprite changed.
+                ifdef   P3B_CEL_LINK
+p3_skip         rmb     P3_SPR_MAX      ; 1 = unchanged AND isolated -> do not composite
+* ★★★ CUMULATIVE, not per-frame, and 16-bit: the question is a RATE over a window, and a per-frame
+* byte would report whatever the last frame happened to be -- the shape P6.84 spent a task
+* correcting. p3_nunch counts the merely-unchanged so the report can say what the ISOLATION test
+* costs in skips foregone [§4D(1)'s "by which reason"].
+p3_nskip        fdb     0               ; ★ sprites skipped, cumulative
+p3_nunch        fdb     0               ; ★ sprites UNCHANGED, cumulative (>= p3_nskip)
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 
 p3rp_x          fcb     0
 p3rp_w          fcb     0
@@ -2869,6 +2899,9 @@ p3_restbytes    rmb     4
 
 * ── p3_restore_prev -- put back what last frame's sprites covered, both planes ────
 p3_restore_prev:
+                ifdef   P3B_CEL_LINK
+                jsr     p3_skip_decide          ; ★ T-P0-141: fills p3_skip while p3_prev is live
+                endc
                 lda     p3_prevn
                 lbeq    prp_out
                 clr     p3rp_i
@@ -2932,6 +2965,219 @@ prp_skip:
                 blo     prp_each
 prp_out:        rts
 
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ── p3_skip_decide -- which sprites need no compositing this frame? [T-P0-141] ───
+*
+* ★★★★★ RUN BEFORE ANY RESTORE, so it sees the previous frame's rectangles intact -- and it must,
+* because its second test needs every sprite's OLD rect as well as its new one.
+* ★★★★ The rule and why the narrower one is unsound are stated beside p3_skip.
+* ★★★ COST: P3_SPR_MAX is 16 but p3_nspr is 4 in the castle, so the O(n^2) rect test is 12 pairs
+* of byte compares once per frame -- against a cel decode and blit per sprite skipped.
+* ★★ p3_nunch counts the merely-unchanged, so the report can say how much the ISOLATION test costs
+* in skips foregone [§4D(1)'s "by which reason"].
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ AND THE SOUND RULE IS NOT COMPUTABLE HERE, WHICH IS THIS TASK'S OBSTACLE [§4A, §6(1)].
+* The rule needs every OTHER sprite's NEW rectangle, and **a new rectangle's width and height are
+* not known until vc_decode_begin has parsed that sprite's cel header** -- which happens inside
+* p3_composite_all, after this point. p3_spr carries x, y, prio, view, loop, cel and no extent.
+* ★★★★ So this routine can only test the OLD rectangles, and that is the NARROW test: it covers a
+* sprite that moves AWAY (its old rect is restored) and misses one that moves IN.
+* ★★★★★ THE MISS IS BOUNDED, AND THE BOUND IS WHY THIS SHIPS AS A MEASUREMENT AND NOT AS A SKIP.
+* If j composites into i's area while i is skipped, the result differs from a full redraw ONLY IF
+* i would have drawn over j -- and it would not, in two of the three cases:
+*     i NEARER than j   -> i's priority bytes are still in the plane (i was not restored, because
+*                          unchanged), so co_depth REJECTS j there. Correct without drawing i.
+*     i FARTHER than j  -> a full redraw also lets j win. Correct.
+*     EQUAL priority    -> co_depth draws (it rejects only screenPriority > viewPriority), so the
+*                          LATER DRAWER WINS -- and if i is later in list order, a full redraw
+*                          would have put i on top. **This case is wrong.**
+* ★★★ So the narrow rule is unsound exactly for: overlapping, equal priority, i later than j.
+* ★★ The castle cannot exercise it -- co_rej_pri is ZERO, no pixel is ever priority-rejected --
+* which is §1.3's point restated: **the corpus cannot tell a right skip from a wrong one.**
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+                ifdef   P3B_CEL_LINK
+psd_i           fcb     0
+psd_j           fcb     0
+psd_x0          fdb     0               ; sprite i's rect, as 16-bit bounds [x0,x1) [y0,y1)
+psd_x1          fdb     0
+psd_y0          fdb     0
+psd_y1          fdb     0
+
+p3_skip_decide:
+                ldx     #p3_skip
+                ldb     #P3_SPR_MAX
+psd_clr:        clr     ,x+
+                decb
+                bne     psd_clr
+                lda     p3_prevn
+                beq     psd_out                 ; no previous frame -> nothing is skippable
+                clr     psd_i
+psd_each:
+                lda     psd_i
+                sta     p3rp_i                  ; ★ prp_same reads the index from here
+                ldb     psd_i
+                lda     #P3_PREV_SIZE
+                mul
+                ldy     #p3_prev
+                leay    d,y
+                jsr     prp_same
+                bne     psd_next                ; changed -> it must be composited
+                ldd     p3_nunch
+                addd    #1
+                std     p3_nunch
+                jsr     psd_iso                 ; ★ jsr, not bsr: both targets are out of 8-bit reach
+                tsta
+                beq     psd_next                ; unchanged but not isolated -> composite it
+                jsr     psd_prio_uniq
+                tsta
+                beq     psd_next                ; shares a priority -> composite it
+                ldb     psd_i
+                ldx     #p3_skip
+                abx
+                lda     #1
+                sta     ,x
+                ldd     p3_nskip
+                addd    #1
+                std     p3_nskip
+psd_next:
+                inc     psd_i
+                lda     psd_i
+                cmpa    p3_prevn
+                blo     psd_each
+psd_out:        rts
+
+* ── psd_iso -- is p3_prev[psd_i] disjoint from every other p3_prev[j]? A = 1 if so ──
+* ★★ 16-bit bounds because x + w reaches 414 for a 255-wide cel at x=159, and a byte compare
+* there would wrap into a false "disjoint" [L-40's rule: a byte compared as if it could not carry].
+psd_iso:
+* ★★★★★ -DP3B_SKIP_NOISO IS AC-6's FAULT ARM: the isolation test always says yes, so a sprite is
+* skipped even when a changed neighbour's restore has just written the SHADOW over it. ★★★★ The
+* red is a sprite with a bite taken out of it -- **the picture showing through where the neighbour
+* was erased** -- which is the artefact §1.2(1) predicts and exactly the kind Jay is asked to look
+* for. ★★★ Verified by the plane comparison rather than by eye alone: both planes must DIFFER from
+* the non-skipping reference.
+                ifdef   P3B_SKIP_NOISO
+                lda     #1
+                rts
+                endc
+                ldb     psd_i
+                lda     #P3_PREV_SIZE
+                mul
+                ldx     #p3_prev
+                leax    d,x
+                clra
+                ldb     ,x                      ; x
+                std     psd_x0
+                addb    2,x                     ; + w
+                adca    #0
+                std     psd_x1
+                clra
+                ldb     1,x                     ; ytop
+                std     psd_y0
+                addb    3,x                     ; + h
+                adca    #0
+                std     psd_y1
+                clr     psd_j
+psd_j_each:
+                lda     psd_j
+                cmpa    psd_i
+                beq     psd_j_next              ; not against itself
+                ldb     psd_j
+                lda     #P3_PREV_SIZE
+                mul
+                ldx     #p3_prev
+                leax    d,x
+* disjoint if  xi1 <= xj0  or  xj1 <= xi0  or  yi1 <= yj0  or  yj1 <= yi0
+                clra
+                ldb     ,x                      ; xj0
+                cmpd    psd_x1
+                bhs     psd_j_next              ; xj0 >= xi1 -> disjoint in x
+                pshs    a,b
+                addb    2,x                     ; xj1 = xj0 + w
+                adca    #0
+                cmpd    psd_x0
+                puls    a,b
+                bls     psd_j_next              ; xj1 <= xi0 -> disjoint in x
+                clra
+                ldb     1,x                     ; yj0
+                cmpd    psd_y1
+                bhs     psd_j_next
+                pshs    a,b
+                addb    3,x                     ; yj1
+                adca    #0
+                cmpd    psd_y0
+                puls    a,b
+                bls     psd_j_next
+                clra                            ; ★ overlaps -> NOT isolated
+                rts
+psd_j_next:
+                inc     psd_j
+                lda     psd_j
+                cmpa    p3_prevn
+                blo     psd_j_each
+                lda     #1
+                rts
+
+* ── psd_prio_uniq -- does sprite psd_i's priority differ from every other staged one? ──
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THIS IS WHAT MAKES THE NARROW RECT TEST SOUND, AND IT IS THE TASK'S REAL FINDING.
+* The rect test uses OLD rectangles, so it cannot see a sprite j that MOVES INTO i's area: j's new
+* extent is unknown until vc_decode_begin parses its cel header, inside the composite loop.
+* ★★★★★ BUT THE MISS ONLY MATTERS AT EQUAL PRIORITY, and priority IS known here [p3_spr +2]:
+*     i NEARER than j  (prio_i > prio_j) -> i's priority bytes are still in the plane, because
+*                       unchanged means i was NOT restored, so co_depth REJECTS j there.
+*     i FARTHER        -> a full redraw also lets j win, whatever the draw order.
+*     EQUAL            -> co_depth rejects only screenPriority > viewPriority, so it DRAWS, and
+*                       the later drawer wins. If i is later in list order a full redraw puts i
+*                       on top and the skip inverts it. **The one wrong case.**
+* ★★★★ So requiring i's priority to be unique among the staged sprites removes the dependence on
+* an extent this routine cannot know. **Conservative, computable, and sound.**
+* ★★★ In the castle the four priorities are 9, 15, 14 and 12 -- all distinct -- so the test costs
+* nothing there; in a room where two sprites share a band it refuses the skip rather than guessing.
+* ★★ The rect test is still required and is NOT subsumed: a restore writes the SHADOW blindly,
+* respecting no priority at all, so an overlapping restore erases i whatever the priorities are.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+psd_prio_uniq:
+* ★★★★★ -DP3B_SKIP_NOPRIO IS THE ARM THAT CAN ACTUALLY FIRE, AND FINDING THAT OUT IS A RESULT
+* [§2W]. The first fault arm disabled the ISOLATION test and came back GREEN with an identical
+* skip count -- because **the castle has no overlapping sprites at all**: 0 of 111 unchanged
+* sprites are rejected by isolation, and all 12 rejections come from this test. ★★★★ So the
+* isolation test is unexercised code in this corpus and its arm cannot go red here; this one can.
+                ifdef   P3B_SKIP_NOPRIO
+                lda     #1
+                rts
+                endc
+                ldb     psd_i
+                cmpb    p3_nspr
+                bhs     psd_pu_no               ; no staged sprite i -> do not skip
+                lda     #P3_SPR_SIZE
+                mul
+                ldx     #p3_spr
+                leax    d,x
+                lda     2,x                     ; prio of i
+                clr     psd_j
+psd_pu_each:
+                ldb     psd_j
+                cmpb    psd_i
+                beq     psd_pu_next
+                pshs    a
+                lda     #P3_SPR_SIZE
+                mul
+                ldx     #p3_spr
+                leax    d,x
+                puls    a
+                cmpa    2,x
+                beq     psd_pu_no               ; shares a priority band
+psd_pu_next:
+                inc     psd_j
+                ldb     psd_j
+                cmpb    p3_nspr
+                blo     psd_pu_each
+                lda     #1
+                rts
+psd_pu_no:      clra
+                rts
+                endc
 * ── prp_same -- is record i identical to this frame's staged sprite i? ───────────
 * ★ Returns Z SET when UNCHANGED (caller skips the erase). Y must survive; A, B and X do not.
 * ★★ The five fields are x, y, view, loop and cel. The record keeps ytop and the staged list
@@ -3170,6 +3416,29 @@ pca_lp:
                 lda     ,y+
                 sta     vc_cel
                 pshs    y
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE SKIP [T-P0-141]. p3_skip_decide ran during p3_restore_prev, where p3_prev was still
+* live, and decided this sprite is unchanged, isolated from every other OLD rectangle, and alone
+* in its priority band. **Its pixels and its priority bytes are exactly what a redraw would put
+* there, so the decode, the blit and every plane access for it are not work.**
+* ★★★★ IT MUST STILL RECORD ITS RECTANGLE. p3_composite_all clears p3_prevn at the top and rebuilds
+* p3_prev from what it draws -- so a skipped sprite that recorded nothing would be ABSENT from next
+* frame's list, and next frame's restore would not erase it. **It would smear the first time it
+* moved.** The record is rebuilt from p3_prev's own previous entry, which is what p3_skip asserts
+* is still correct.
+* ★★★ -DP3B_NOSKIP is the before arm: the skip is decided and counted, and then ignored.
+                ifndef  P3B_NOSKIP
+                ldb     p3_si
+                ldx     #p3_skip
+                abx
+                lda     ,x
+                beq     pca_draw
+                jsr     pca_keep_rect
+                puls    y
+                lbra    pca_next
+pca_draw:
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 * ── the VIEW resource, through the real path ──
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ INVALIDATE THE VOLUME WINDOW'S CACHE BEFORE EVERY FETCH, AND THIS IS THE ALLIGATORS.
@@ -3393,11 +3662,53 @@ pca_close:
                 endc
                 jsr     res_close
 pca_skip:       puls    y
+pca_next:
                 inc     p3_si
                 lda     p3_si
                 cmpa    p3_nspr
                 lblo    pca_lp          ; ★ long, for the same reason as the lbeq above
 pca_out:        rts
+
+* ── pca_keep_rect -- carry a SKIPPED sprite's rectangle into next frame's list ────
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ WITHOUT THIS A SKIPPED SPRITE SMEARS THE FIRST TIME IT MOVES. p3_composite_all clears
+* p3_prevn and rebuilds p3_prev from what it DRAWS, so a sprite that draws nothing would be absent
+* from next frame's list -- and next frame's p3_restore_prev would not erase it. **The old pixels
+* would stay on the plane forever**, which is the exact failure prp_same's comment warns about for
+* the geometry-only test, arriving by another route.
+* ★★★★ THE RECORD TO CARRY IS THE ONE ALREADY THERE: p3_skip asserts this sprite is unchanged, so
+* p3_prev[p3_si] still describes it exactly. ★★★ It is COPIED rather than left in place because
+* the destination is slot p3_prevn, and an earlier sprite that failed to composite (pca_skip's
+* res_err path) leaves p3_prevn BEHIND p3_si -- so the two indices are equal in the common case
+* and must not be assumed equal.
+* ★★ Bounded by P3_SPR_MAX exactly as the recorder below is.
+                ifndef  P3B_NOSKIP
+pca_keep_rect:
+                lda     p3_prevn
+                cmpa    #P3_SPR_MAX
+                bhs     pkr_out
+                ldb     p3_si
+                lda     #P3_PREV_SIZE
+                mul
+                ldx     #p3_prev
+                leax    d,x                     ; X -> the OLD record for this sprite
+                ldb     p3_prevn
+                lda     #P3_PREV_SIZE
+                mul
+                ldy     #p3_prev
+                leay    d,y                     ; Y -> where this frame's list wants it
+* ★ No X==Y special case: a forward byte copy of a record onto itself is a no-op, and testing for
+* it would cost more than the seven `ldb`/`stb` pairs it avoids.
+                lda     #P3_PREV_SIZE
+pkr_copy:
+                ldb     ,x+
+                stb     ,y+
+                deca
+                bne     pkr_copy
+                inc     p3_prevn
+pkr_out:        rts
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
                 else
 * ★★ The stripped configuration still needs the symbol: the cycle body calls it unconditionally,
 * and a guarded CALL as well as a guarded BODY would put the strip in two places [§2F].
