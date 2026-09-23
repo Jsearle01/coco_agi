@@ -347,4 +347,4 @@ None.
 `seeds/AGI/live/2026-09-23-adjacency-is-not-reuse.md`
 
 ### 11 — Commit
-(recorded below after push)
+`4452c98` (pushed to origin/wip before this report)
