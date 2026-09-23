@@ -286,4 +286,5 @@ unchanged.
 `seeds/AGI/live/2026-09-22-a-comment-asserting-an-absence.md`
 
 ### 11 — Commit
-`<hash>`  (pushed to origin/wip before this report)
+`aee7993`  (pushed to origin/wip before this report)
+Pool candidate `47276c5` (methodology-candidate-pool, main).
