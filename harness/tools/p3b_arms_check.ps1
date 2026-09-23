@@ -209,17 +209,27 @@ $ARMS = @(
   # RETIRED at T-P0-136: p3b 15,670 52AB9C76 | p3b_text 16,882 4D78128E | p3b_win3 16,882 F6FF8580
   #   p3b_notick 16,879 9BF4601F | p3b_nomap 16,879 217459FA | p3b_fault 15,928 C7E8CEF2
   #   p3b_flat 15,913 B393D1D0 | p3b_comb 18,892 687EFD0E | p3b_comb_count 18,927 1641F878
-  @{ n = "p3b";        f = @("-DHAL_KEYBOARD");                          sz = 15875; sha = "FB06064E" },
+  # ★★★★ RE-BASELINED T-P0-137, ALL NINE BY EXACTLY +8 B. res_cnext separates the two reasons its
+  # slow path used to serve: a CROSSING re-derives the address, a THEFT of slot 6 only re-maps the
+  # block it already knows. **Theft is the common case in the compositor** -- every row is decoded
+  # through slot 6 and then composited through it -- and the castle crosses no boundary at all, so
+  # before this change essentially every slow-path entry paid a crossing's price for a theft.
+  # ★★★ Pixels identical (co_WRITTEN 11,360 and CP_BLITS 128 against the -SlowSteal before arm);
+  # steady-window mean 0.2968 -> 0.2917 s/cycle, median 0.3004 -> 0.2837.
+  # RETIRED at T-P0-137: p3b 15,875 FB06064E | p3b_text 17,033 7E4AEBEC | p3b_win3 17,033 858EC6CD
+  #   p3b_notick 17,030 B85CA94F | p3b_nomap 17,030 B02F48D2 | p3b_fault 16,079 D3ED625F
+  #   p3b_flat 16,064 A5FBBCDD | p3b_comb 19,097 793E831B | p3b_comb_count 19,132 AA7E8B29
+  @{ n = "p3b";        f = @("-DHAL_KEYBOARD");                          sz = 15883; sha = "CF600CD0" },
   # ★★★★★ RE-BASELINED T-P0-125: the FIVE TEXT_WIRED arms moved +83 B (clear.lines is real), and
   # p3b, p3b_fault and p3b_flat did NOT -- the first links no text engine and the other two are
   # -DTEXT_MODELLED, which takes vm_text_ops.s's `equ` branch. ★★★ The split falls exactly along
   # TEXT_WIRED, which is the condition the implementation sits behind.
-  @{ n = "p3b_text";   f = $TEXT;                                         sz = 17033; sha = "7E4AEBEC" },
-  @{ n = "p3b_win3";   f = $TEXT + @("-DTEXT_WIN3");                      sz = 17033; sha = "858EC6CD" },
-  @{ n = "p3b_notick"; f = $TEXT + @("-DTEXT_FAULT_NOTICK");              sz = 17030; sha = "B85CA94F" },
-  @{ n = "p3b_nomap";  f = $TEXT + @("-DP3B_VOCAB_NOMAP");                sz = 17030; sha = "B02F48D2" },
-  @{ n = "p3b_fault";  f = $TEXT + @("-DTEXT_MODELLED");                  sz = 16079; sha = "D3ED625F" },
-  @{ n = "p3b_flat";   f = $TEXT + @("-DTEXT_MODELLED","-DTEXT_VOCAB_FLAT"); sz = 16064; sha = "A5FBBCDD" },
+  @{ n = "p3b_text";   f = $TEXT;                                         sz = 17041; sha = "817747AC" },
+  @{ n = "p3b_win3";   f = $TEXT + @("-DTEXT_WIN3");                      sz = 17041; sha = "38BCE1D9" },
+  @{ n = "p3b_notick"; f = $TEXT + @("-DTEXT_FAULT_NOTICK");              sz = 17038; sha = "F28109AA" },
+  @{ n = "p3b_nomap";  f = $TEXT + @("-DP3B_VOCAB_NOMAP");                sz = 17038; sha = "81A538DC" },
+  @{ n = "p3b_fault";  f = $TEXT + @("-DTEXT_MODELLED");                  sz = 16087; sha = "87FF3CFB" },
+  @{ n = "p3b_flat";   f = $TEXT + @("-DTEXT_MODELLED","-DTEXT_VOCAB_FLAT"); sz = 16072; sha = "66D4338B" },
   # ★★★★★ THE EIGHTH ARM, NEW AT T-P0-120: text AND cels in one binary, which no build had before.
   # src/engine/text.s is `org`ed into slot 7's hole at $EBBA -- region A cannot hold both halves
   # (P6.64 measured 513 B over) and slot 7 is never remapped in either phase.
@@ -229,9 +239,9 @@ $ARMS = @(
   # ★★★★ T-P0-128's VBL key latch is OPT-IN (-DP3B_VBLKEYS_OPT) after it failed its eye gate, so
   # the shipped combined arm is back to its P6.74 bytes. Built with the latch it was 18782 B /
   # B9F06823 (+79); that figure is recorded here so the next task re-enabling it has a reference.
-  @{ n = "p3b_comb";   f = @("-DHAL_KEYBOARD","-DP3B_COMBINED","-DP3B_IRQ"); sz = 19097; sha = "793E831B" },
+  @{ n = "p3b_comb";   f = @("-DHAL_KEYBOARD","-DP3B_COMBINED","-DP3B_IRQ"); sz = 19105; sha = "57CCB100" },
   # ★★★★ T-P0-130's COUNTING ARM (-Count in p3b_show.ps1): the combined arm with the pixel counters.
-  @{ n = "p3b_comb_count"; f = @("-DHAL_KEYBOARD","-DP3B_COMBINED","-DP3B_IRQ","-DP3B_COUNT"); sz = 19132; sha = "AA7E8B29" }
+  @{ n = "p3b_comb_count"; f = @("-DHAL_KEYBOARD","-DP3B_COMBINED","-DP3B_IRQ","-DP3B_COUNT"); sz = 19140; sha = "92C3ADC4" }
 )
 
 # ★★★ -DP3B_COVERAGE puts the two opcode counters back [p3b_probe.s]. It is a REAL byte change --

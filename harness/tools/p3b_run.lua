@@ -1285,6 +1285,11 @@ _G._n = emu.add_machine_frame_notifier(function()
             last_timed = n
             local now = m.time:as_double()
             per[#per+1] = now - tprev
+            -- ★★★★★ THE SAME DELTA, KEYED TO ITS CYCLE NUMBER [T-P0-137 §4A]. `per` is sorted in
+            -- place to take the median, which destroys the order -- so "which cycles are the
+            -- expensive ones" cannot be asked of it afterwards. This array is never sorted.
+            _G._pc = _G._pc or {}
+            _G._pc[#_G._pc+1] = { n, now - tprev }
             tprev = now
             -- ═══════════════════════════════════════════════════════════════════════════
             -- ★★★★★ DOES THE PLANE ANIMATE WITHIN ONE RUN? [T-P0-122, after Jay's "no"]
@@ -1511,6 +1516,55 @@ _G._n = emu.add_machine_frame_notifier(function()
             end
             w("    median %.4f s/cycle = %.2f cycles/second", med, 1.0/med)
             w("    mean   %.4f s/cycle = %.2f cycles/second", tot/NCYC, NCYC/tot)
+            -- ═══════════════════════════════════════════════════════════════════════════
+            -- ★★★★★ THE DISTRIBUTION, AND A CHECK ON THE MEAN ITSELF [T-P0-137 §4A].
+            -- ★★★★★ THE `mean` ABOVE IS NOT A MEAN OF CYCLE TIMES. It is (everything since t0)
+            -- divided by NCYC, so it carries the boot, the staging, the title sequence and the
+            -- room render -- none of which is a cycle. **Every s/cycle figure this project has
+            -- published is that number**, and it has been quoted beside a median that is a true
+            -- median of per-cycle deltas. `sum(per)/NCYC` below is the honest mean, and the gap
+            -- between it and `mean` is the non-cycle time the old figure was carrying.
+            -- ★★★★ Then the shape: p90, max, and how many cycles exceed 2x the median -- which is
+            -- the question of whether a minority of cycles dominates, or the mean was an artifact.
+            local sp = 0
+            for i = 1, #per do sp = sp + per[i] end
+            local function q(f)
+                local i = math.floor(#per * f) + 1
+                if i > #per then i = #per end
+                return per[i] or 0
+            end
+            w("    ── distribution over %d timed cycles ──", #per)
+            w("       sum(per-cycle) %.4f s  -> TRUE mean %.4f s/cycle", sp, sp/math.max(#per,1))
+            w("       elapsed-since-t0 %.4f s -> the figure quoted as `mean` above (%.4f)",
+              tot, tot/NCYC)
+            w("       ★ non-cycle time carried by the old figure: %.4f s (%.1f%% of elapsed)",
+              tot - sp, tot > 0 and 100*(tot-sp)/tot or 0)
+            w("       min %.4f  p25 %.4f  median %.4f  p75 %.4f  p90 %.4f  max %.4f",
+              per[1] or 0, q(0.25), med, q(0.75), q(0.90), per[#per] or 0)
+            local nbig, sbig = 0, 0
+            for i = 1, #per do
+                if per[i] > 2*med then nbig = nbig + 1; sbig = sbig + per[i] end
+            end
+            w("       ★★ cycles above 2x median (%.4f s): %d of %d, holding %.4f s (%.1f%% of the"
+              .. " cycle time)", 2*med, nbig, #per, sbig, sp > 0 and 100*sbig/sp or 0)
+            -- ★★★ BY CYCLE NUMBER, so the expensive ones can be named and looked at [§4A(2)].
+            if _G._pc then
+                local byc = {}
+                for i = 1, #_G._pc do byc[i] = _G._pc[i] end
+                table.sort(byc, function(a, b) return a[2] > b[2] end)
+                local parts = {}
+                for i = 1, math.min(12, #byc) do
+                    parts[#parts+1] = string.format("c%d:%.3f", byc[i][1], byc[i][2])
+                end
+                w("       ★★ the 12 most expensive, by cycle: %s", table.concat(parts, "  "))
+            end
+            -- ★ P3B_CYCDIST=1 dumps every cycle in order, for a histogram off-line.
+            if os.getenv("P3B_CYCDIST") and _G._pc then
+                for i = 1, #_G._pc do
+                    w("      [cyc] %d %.4f", _G._pc[i][1], _G._pc[i][2])
+                end
+            end
+            -- ═══════════════════════════════════════════════════════════════════════════
             w("    remaps total %d = %.2f per cycle", rd16(REMAPS), rd16(REMAPS)/NCYC)
             -- ★★★★★ THE RESTORE, IN THE SUMMARY AND NOT IN A GATED DIAGNOSTIC [T-P0-114].
             -- The first version of this readout went beside the composite counters, which sit

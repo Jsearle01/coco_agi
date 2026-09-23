@@ -937,6 +937,21 @@ rf_ok:          rts
 * wrong for a caller that wants eight header bytes: set.view / set.loop / set.cel copied an entire
 * VIEW -- several KB -- to read a loop count, two offsets and a width and height [vm_run.s], and
 * P6.76 profiled that at a third of the resource manager's 16.8% of a castle cycle.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ AND A RESOURCE READ THIS WAY IS OUTSIDE res_check.s ENTIRELY [T-P0-136, recorded here at
+* T-P0-137 §1.2(1)]. res_ck_note baselines the bytes of a RESIDENT COPY and res_ck_verify re-reads
+* them later; a resource read in place has no resident copy, so **there is nothing to baseline and
+* nothing to verify.** Since T-P0-136 that covers every VIEW the compositor draws.
+* ★★★★ THIS IS P6.48's BLIND SPOT 1 GETTING WIDER, AND IT IS THE BLIND SPOT P6.78 SLIPPED THROUGH:
+* the instrument exists to catch a resource corrupted AFTER it was loaded, which is exactly what
+* P6.78 was, and the class of resource P6.78 corrupted is now the class it cannot see.
+* ★★★ What still covers the same failure, and is narrower: the volume write-tap
+* [P3B_TAPRANGE/TAPVALUES/TAPBLK, P6.82 AC-7] sees anything writing INTO staged game data, and
+* res_locate's signature check sees a window pointing at the wrong block. **Neither is a per-byte
+* guarantee.** ★★ LOGICs are unaffected -- still copied, still baselined at the bind, still
+* verified on every later bind.
+* ★ Recorded, not fixed: closing it is a ruling about the instrument, not a task's to take.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★ The seam is kept [design §4.2a, res_seam.py]: the caller still names (type, index) and a
 * PAYLOAD offset, and never learns the volume, the record offset or res_hdrlen. Nothing here
 * touches res_open, res_fetch, res_top or the cache, so the resource gate's path is unchanged.
@@ -1145,22 +1160,57 @@ res_cseek:
 * off the end of the 8 KB aperture into whatever follows it in the CPU map. **A cel whose stream
 * does not cross is unaffected** -- which is why the castle stays green under it and AC-4's
 * constructed case does not [L-85: a fixed sample that always passes is evidence about the sample].
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE TWO REASONS ARE SEPARATED AT T-P0-137, AND CONFLATING THEM WAS COSTING ~5% OF A CYCLE.
+* The first version sent BOTH to the same slow path, which re-derives everything from the payload
+* offset: res_cseek -> res_peek -> res_ptr, a 20-bit offset split into a block index and a window
+* displacement, ~90 CPU cycles. **That is the right answer for a CROSSING and far too much for a
+* THEFT.**
+* ★★★★★ WHEN SLOT 6 IS STOLEN THE POINTER IS STILL CORRECT. res_cptr addresses the same byte of
+* the same block; only the mapping is gone. Re-mapping is `lda res_cblk / jsr res_map_block` --
+* a compare and, on a real change, one store through the single owner.
+* ★★★★ AND IN THE COMPOSITOR THEFT IS THE COMMON CASE, NOT THE RARE ONE [T-P0-137 §4B]: every row
+* is decoded through slot 6 and then composited through slot 6, so the first source byte of every
+* row finds its block gone. The castle straddles NO block boundary at all -- its three views each
+* sit inside one -- so **before this change, essentially every slow-path entry was a theft paying a
+* crossing's price.** Measured: res_ptr 3.2%, res_peek 1.0%, res_cseek 0.9% of a steady cycle.
+* ★★★ -DRES_FAULT_NOREMAP is the arm: it takes the cheap path for a CROSSING too, so the walk
+* keeps reading the old block after the boundary. It must be red on the straddling cel and green
+* on one that does not cross [§2W, the pairing -NoCross already uses].
 res_cnext:
                 ldx     res_cptr
                 ifndef  RES_FAULT_NOCROSS
                 cmpx    #RES_WINDOW+RES_WINDOW_SIZE
-                bhs     rcn_slow
+                bhs     rcn_cross
                 endc
                 lda     res_cblk
                 cmpa    res_curblk
-                bne     rcn_slow
+                bne     rcn_stolen
+rcn_read:
                 lda     ,x+
                 stx     res_cptr
                 rts
+* ── the block was taken from us; the pointer is untouched ──
+rcn_stolen:
+                ifdef   RES_FAULT_NOREMAP
+                bra     rcn_read                ; ★ the arm: read through whatever is mapped
+                endc
+* ★★★★ -DRES_SLOW_STEAL IS THE BEFORE ARM AND NOT A FAULT: it sends a theft down the crossing
+* path, which is exactly what this routine did before T-P0-137. **Same bytes, same pixels, the
+* old cost** -- so §1.3's "measure before, change, measure after" is one binary apart rather than
+* one commit apart [L-30: a baseline taken after the change proves nothing, and one taken on a
+* different build proves something about the build].
+                ifdef   RES_SLOW_STEAL
+                bra     rcn_cross
+                endc
+                jsr     res_map_block           ; A = res_cblk, still in A from the compare
+                ldx     res_cptr
+                bra     rcn_read
 * ★★ THE SLOW PATH RE-DERIVES FROM THE OFFSET, so it handles both reasons identically. The
 * offset is rebuilt from res_cbase rather than kept incrementally: one addition here against one
 * increment per byte in the loop above.
-rcn_slow:
+* ── the walk left the aperture; block AND pointer must both be re-derived ──
+rcn_cross:
                 tfr     x,d
                 subd    #RES_WINDOW
                 addd    res_cbase
@@ -1168,6 +1218,7 @@ rcn_slow:
                 lda     ,x+
                 stx     res_cptr
                 rts
+* ═══════════════════════════════════════════════════════════════════════════════════════════
                 endc
                 endc
 

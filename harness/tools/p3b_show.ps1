@@ -194,6 +194,15 @@ param(
   # straddle and a DIFFERENT one on KQ1 view 67 loop 2 cel 2, whose stream spans +2085..+2329
   # across the boundary at +2310.
   [switch]$NoCross,
+  # ★★★★★ -SlowSteal IS T-P0-137's BEFORE ARM (-DRES_SLOW_STEAL), and it is NOT a fault: when slot
+  # 6 has been taken by the compositor it re-derives the whole address through res_peek/res_ptr,
+  # which is what res_cnext did before that task. **Identical bytes and identical pixels, the old
+  # cost** -- so the saving is measured one binary apart rather than one commit apart.
+  [switch]$SlowSteal,
+  # ★★★★ -NoRemap IS the fault arm (-DRES_FAULT_NOREMAP): a theft takes the cheap path WITHOUT
+  # re-mapping, so the walk reads through whatever the compositor left in slot 6. Expect a wrong
+  # pixel sum on any cel, because the theft happens every row.
+  [switch]$NoRemap,
   [switch]$ViewFaultOneMap,
   [switch]$NoIrq,
   [double]$Hold   = 3.0
@@ -362,6 +371,9 @@ if ($ViewCopy) { $FLAGS += "-DP3B_VIEW_COPY" }
 if ($CelTest) { $FLAGS += "-DP3B_CELTEST" }
 # ★★★★ -NoCross is AC-4's §2W arm: the cursor stops testing the aperture boundary.
 if ($NoCross) { $FLAGS += "-DRES_FAULT_NOCROSS" }
+# ★★★★ T-P0-137: -SlowSteal is the BEFORE arm (same pixels, the old cost); -NoRemap is the fault.
+if ($SlowSteal) { $FLAGS += "-DRES_SLOW_STEAL" }
+if ($NoRemap) { $FLAGS += "-DRES_FAULT_NOREMAP" }
 if ($ViewFaultOneMap) { $FLAGS += "-DVM_VIEW_FAULT_ONEMAP" }
 # ★★★★★ THE CEL ARM GETS THE KEYBOARD TOO [T-P0-115]. Tested on the absence of -DP3B_NO_CEL rather
 # than on a list of the twelve text switches, because that list is the thing this file has already

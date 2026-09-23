@@ -3522,6 +3522,17 @@ P3_CODE_END     equ     *
 * guard that errors prevents the .map from being written, so the size -- the first thing anyone
 * needs when it fires -- becomes unreadable. `-DP3B_ACCEPT_OVERRUN` lets the build complete so the
 * overrun can be MEASURED. It still fails by default.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ IT HAS NOW FIRED, AND ON A DIAGNOSTIC ARM RATHER THAN A SHIPPED ONE [T-P0-136, recorded
+* here at T-P0-137 §1.2(2)]. The in-place VIEW read added 205 B and **`-IfRec` no longer
+* assembles**: `-DVM_IFDIAG -DVM_SAIDDIAG` on top of the combined arm runs past $6000.
+* ★★★★ EVERY SHIPPED ARM STILL BUILDS -- p3b_comb is 19,105 B against a $6000 ceiling -- so what
+* is lost is the instrument, not the program. **`logic_copy_diff.py` reads a snapshot only that
+* arm produces**, which is why T-P0-136's AC-5 had to be answered by a volume write-tap instead.
+* ★★★ RECORDED, NOT FIXED. The remedy this assertion names is a ruling on the map (D-30's map
+* document arriving as a symptom), and that is the Orchestrator's, not a task's to take in passing.
+* ★★ The next task that adds code to p3b meets this, not just the diagnostic arms.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
                 ifndef  P3B_ACCEPT_OVERRUN
                 ifgt    P3_CODE_END-MAP_RESERVED_END
                 error   "P3b code has grown past MAP_RESERVED_END ($6000) into MAP_ARENA_WIN -- region A is full. CP_CEL already left for MAP_INPUT and vm_tables is already relocated, so the next move is a real one: shrink the code, or take a ruling on the map"
