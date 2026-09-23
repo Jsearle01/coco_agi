@@ -258,6 +258,24 @@ param(
   # question -- is any slot SILENT during a composite, and therefore borrowable for a cel cache --
   # is answered by measurement rather than by reading the map [T-P0-146].
   [switch]$SlotCensus,
+
+  # ★★★★★ -NoCelCache is T-P0-147's BEFORE arm: the cache's code is present and its aperture is
+  # borrowed, but every cel reports CC_BYPASS, so the decode path is byte-for-byte the pre-task
+  # one. ★★★ That makes the comparison one variable [L-73] rather than "with and without 400 bytes
+  # of code". The cache is ON by default in the cel arms.
+  [switch]$NoCelCache,
+
+  # ★★★★★ AC-5's TWO FAULT ARMS. -CacheBadRestore puts the WRONG block back in slot 4 at
+  # draw-phase exit, which should corrupt a resource visibly (logic_copy_diff non-zero) -- P6.78's
+  # signature. -CacheStale serves a cached cel without checking the cel number, so a sprite freezes
+  # on one frame while it moves.
+  [switch]$CacheBadRestore,
+  [switch]$CacheStale,
+
+  # ★★★★★ -CachePoison is the guard for the CLASS: it maps a block that is neither the arena nor
+  # the cache into the borrowed slot, so a draw-phase arena reader fails loudly rather than reading
+  # plausible bytes. Its two arms answer different halves -- see the flag line below.
+  [switch]$CachePoison,
   [switch]$SlowSteal,
   # ★★★★ -NoRemap IS the fault arm (-DRES_FAULT_NOREMAP): a theft takes the cheap path WITHOUT
   # re-mapping, so the walk reads through whatever the compositor left in slot 6. Expect a wrong
@@ -447,6 +465,25 @@ if ($SkipNoPrio) { $FLAGS += "-DP3B_SKIP_NOPRIO" }
 if ($ForceOverlap) { $FLAGS += "-DP3B_FORCE_OVERLAP" }
 # ★★★★ T-P0-143 §4A: the cel-decode repeat rate, measured before anything is built.
 if ($CelStatsNever -or $CelStatsAlways) { $CelStats = $true }
+# ★★★★★ T-P0-147: the cel cache is ON in the cel arms and -NoCelCache is the BEFORE arm. The
+# aperture is borrowed either way, so the arms differ in ONE variable -- whether a decoded row is
+# reused -- and not in the MMU traffic [L-73: name every variable a toggle moves].
+# ★★★★★ SPELLED FROM $FLAGS, NOT FROM $CelLink -- AND THE FIRST CUT USED $CelLink AND SILENTLY
+# ADDED NOTHING. $CelLink is computed at the want-list, ~140 lines BELOW this and BELOW the lwasm
+# call, so here it is $null and both branches were false. ★★★ The failure was loud only because
+# the symbols then went missing; had the cache had no symbols it would have been a silent no-op
+# measured as "the cache buys nothing". **The file's own rule, one step further: spell the
+# condition from the flag that actually selects it, at the point you use it.**
+$celArm = ($FLAGS -notcontains "-DP3B_NO_CEL")
+if ($celArm -and -not $NoCelCache) { $FLAGS += @("-DCEL_CACHE", "-DPHASE_CELCACHE") }
+if ($celArm -and $NoCelCache)      { $FLAGS += "-DPHASE_CELCACHE" }
+if ($CacheBadRestore) { $FLAGS += "-DCC_FAULT_BADRESTORE" }
+if ($CacheStale)      { $FLAGS += "-DCC_FAULT_STALE" }
+# ★★★★★ -CachePoison maps the PRIORITY SHADOW into the borrowed slot instead of the cache, so any
+# draw-phase read of $8000-$9FFF is loud instead of plausible. The PAIR is the demonstration:
+# with -NoCelCache it must stay GREEN (nothing reads the aperture) and with the cache it must go
+# RED (the cache does) [T-P0-147].
+if ($CachePoison)     { $FLAGS += "-DCC_FAULT_POISON" }
 if ($CelStats) { $FLAGS += "-DP3B_CELSTATS" }
 if ($CelStatsNever)  { $FLAGS += "-DP3B_CELSTATS_NEVER" }
 if ($CelStatsAlways) { $FLAGS += "-DP3B_CELSTATS_ALWAYS" }
@@ -637,6 +674,14 @@ $WANT += @("P3_CODE_SPLIT","P3_TABLES_BASE","P3_TABLES_END")
 if ($CelLink) { $WANT += @("p3_nskip","p3_nunch") }
 # ★★ Same condition as the symbols' definition -- the rule this file has restated six times.
 if ($CelStats) { $WANT += @("p3_ncelseen","p3_ncelsame") }
+# ★★★★★ AC-2/§4C: the cache's counters, read from the FIRST run [P6.80's lesson -- res_cache_stash
+# failed closed every cycle for months because nothing printed its counters].
+# ★★ Same condition as the symbols' definition: they live inside `ifdef CEL_CACHE`.
+if ($CelLink -and -not $NoCelCache) {
+  $WANT += @("cc_hits","cc_miss","cc_flush","cc_bypass","cc_saved","cc_n","cc_top")
+}
+# ★★ Here $CelLink IS defined (it is computed just above), so this line may use it -- unlike the
+# FLAGS line ~140 lines up, which must not. The two conditions are the same predicate.
 # ★★★★ -CelTrace needs the STAGED TABLE, not a counter: the host reads p3_spr per cycle and writes
 # the decode sequence, so cel_reuse.py can price a cache of ANY size offline [T-P0-143 §4A(2)].
 # ★★ p3_spr/p3_nspr are unconditional; p3_skip is inside `ifdef P3B_CEL_LINK`, hence the split --

@@ -795,6 +795,10 @@ P3_BLK_PRI      equ     0               ; ★ the LIVE priority plane, blocks 0-
                                         ;   can put it back after borrowing ph_blk_pri
 P3_BLK_STAGE_MAX equ    44              ; measured, every manifest; see above
 P3_BLK_CPUWIN   equ     $38             ; 56 -- the CPU's own window starts here
+* ★★★★★ THE CEL CACHE'S BLOCK [T-P0-147], in the gap between the priority shadow and the CPU
+* window. ★★★ Asserted below rather than asserted in a comment: 47-55 are unowned, and the two
+* neighbours that bound the gap are already constants here.
+P3_BLK_CELCACHE equ     47
 * ★★★★ ADJACENCY, ASSERTED AGAINST BOTH NEIGHBOURS. P6.46 cost eight tasks because two symbols
 * sat in a window with nothing asserting it, and P6.47's answer was assertions against EVERY
 * neighbour. Shown RED by setting P3_BLK_PRISHADOW to 44 and to 55 -- both fire [§2W].
@@ -803,6 +807,16 @@ P3_BLK_CPUWIN   equ     $38             ; 56 -- the CPU's own window starts here
                 endc
                 ifgt    P3_BLK_PRISHADOW+P3_BLK_PRISHADOW_N-P3_BLK_CPUWIN
                 error   "the priority shadow reaches the CPU's own window at $38-$3F -- those blocks are not ours; 45-55 is the free range on a 512 KB machine"
+                endc
+* ★★★★★ AND THE CEL CACHE'S BLOCK IS ASSERTED AGAINST BOTH THE SAME NEIGHBOURS [T-P0-147]. It sits
+* in 47-55 and nothing else may. ★★★ Two asserts, not one, for P6.47's reason: an unasserted
+* window is how P6.46 cost eight tasks, and a block number is exactly the kind of constant that
+* looks obviously right and silently overlaps.
+                ifgt    P3_BLK_PRISHADOW+P3_BLK_PRISHADOW_N-P3_BLK_CELCACHE
+                error   "P3_BLK_CELCACHE overlaps the priority shadow -- the shadow occupies P3_BLK_PRISHADOW..+P3_BLK_PRISHADOW_N-1 and the cache must start above it"
+                endc
+                ifgt    P3_BLK_CELCACHE+1-P3_BLK_CPUWIN
+                error   "P3_BLK_CELCACHE reaches the CPU's own window at $38-$3F -- those blocks hold the poked program image and are not free"
                 endc
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★ p3_blk_vis IS DECLARED WITH p3_present, NOT HERE. The first version put its `fcb` between
@@ -895,6 +909,23 @@ P3_BLK_CPUWIN   equ     $38             ; 56 -- the CPU's own window starts here
                 sta     ph_blk_slot3
                 lda     #$3C
                 sta     ph_blk_slot4
+                endc
+* ★★★★★ THE CEL CACHE'S BLOCK [T-P0-147]. P3_BLK_CELCACHE sits in the gap the existing asserts
+* already bound: the priority shadow ends at 46 and the CPU window starts at $38 = 56, so 47-55
+* are unowned. ★★★ ph_blk_slot4 above is the value it borrows AGAINST, and the two are set in the
+* same block so a reader sees both halves of the borrow at once [§2F].
+                ifdef   PHASE_CELCACHE
+                lda     #P3_BLK_CELCACHE
+                sta     ph_blk_cache
+* ★★★★★ AND THE RESTORE VALUE, FOR THE ARMS THAT HAVE NO TEXT WINDOW. The PHASE_TEXT block above
+* sets ph_blk_slot4 to $3C; an arm with cels and no text window never reaches it, and a zero there
+* maps BLOCK 0 -- the live priority plane -- over the arena on the first draw-phase exit.
+* ★★★ Same value, same provenance (the boot map's $38+i), written where the other half of the
+* borrow is written [§2F: one home for the fact, both guards reaching it].
+                ifndef  PHASE_TEXT
+                lda     #$3C
+                sta     ph_blk_slot4
+                endc
                 endc
                 ifdef   P3_VOCAB_WINDOWED
                 jsr     phase_vocab_in
@@ -1174,7 +1205,27 @@ p3_wait:        lda     P3_GO
                 bra     p3_loop
 
                 ifdef   RES_CHECKSUM
-p3_do_sweep:    jsr     res_ck_sweep
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE ARENA COMES BACK BEFORE THE SWEEP WALKS IT [T-P0-147, and it was found by the sweep].
+* ★★★★★ THE SWEEP READS THE ARENA DIRECTLY, not through a bind, so it is the ONE reader that can
+* run with slot 4 borrowed. It did: LOGIC 0 lives at $7CD9 for 8,999 bytes -- **$7CD9+8999 = $A000,
+* so it straddles slots 3 and 4** -- and the sweep read the CACHE's bytes as its top 8 KB and
+* reported `expected $0BF7 got $98D5`. ★★★★ Nothing was corrupted; the checksum read the wrong
+* APERTURE. All 468 in-run verifications passed, because every one of those happens at a bind, in
+* the VM phase, where slot 4 is already restored.
+*
+* ★★★★★ AND THE REAL LESSON IS NOT THIS `jsr` [P6.92 §7 uncertainty flag 2, firing one task after
+* it was written]. The census that proved slot 4 silent during the draw phase ran on a build with
+* NO resource checker in it. **Turning on -CelCheck ADDED a draw-phase arena reader the census
+* never saw.** So "slot 4 is silent" was a property of the build measured, not of the program, and
+* any future draw-phase arena reader will silently read the cache instead.
+* ★★★ That is what CC_FAULT_POISON below exists for: it makes such a reader LOUD instead of
+* plausible, which is the only form of this the next task can rely on.
+p3_do_sweep:
+                ifdef   PHASE_CELCACHE
+                jsr     phase_cache_out
+                endc
+                jsr     res_ck_sweep
                 clr     P3_MODE
                 bra     p3_loop
                 endc
@@ -1217,6 +1268,13 @@ p3_do_cycle:
 * ═══════════════════════════════════════════════════════════════════════════════════════════
                 bra     p3_after_vm_phase
 p3_enter_vm_phase:
+* ★★★★★ THE ARENA COMES BACK FIRST [T-P0-147]. phase_vm and everything after it may touch the
+* arena, so slot 4 must hold $3C again BEFORE any of it runs -- restoring afterwards would leave
+* one window in which a resource fetch reads the cache's bytes as game data, which is P6.78's
+* shape. ★★★ ph_blk_slot4 is the restore value and the boot map is its provenance.
+                ifdef   PHASE_CELCACHE
+                jsr     phase_cache_out
+                endc
                 jsr     phase_vm
 * ★★★★ RESTORE SLOT 5 TO THE OBJECT TABLE, AND THIS IS A GAP IN THE ENGINE'S PHASE MODEL.
 * mmu_phase.s's phase_vm touches slot 6 ONLY, and says so deliberately: *"SLOT 5 IS LEFT ALONE,
@@ -2915,6 +2973,59 @@ p3_nunch        fdb     0               ; ★ sprites UNCHANGED, cumulative (>= 
 p3_ncelseen     fdb     0
 p3_ncelsame     fdb     0
                 endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE CEL CACHE [T-P0-147]. Decoded cels live in a BORROWED APERTURE, not in region A.
+*
+* ★★★★★ WHERE, AND WHY IT IS SAFE: slot 4 ($8000-$9FFF, the arena's HIGH half) is SILENT for the
+* whole draw phase -- 0 reads and 0 writes across sprites, roomcheck, every room-render sub-step
+* and the composite, MEASURED by a per-aperture tap bucketed by P3_PHASE [P6.92 §4A]. ★★★★ The
+* same taps counted 83,357 accesses there in OTHER phases, so the zero is a measurement and not a
+* dead instrument. ★★★ It is re-checked after this change, not assumed [§4D(4)].
+*
+* ★★★★★ THE REGISTER IS $FFA4, NOT $FFA5. The dispatch says $FFA5 four times; $FFA5 is SLOT 5, the
+* priority slice, which the same census shows LIVE during the composite (17,204 r / 36,651 w).
+* **Borrowing it would be P6.78's defect exactly.** mmu_phase.s:51-54 is the mapping.
+*
+* ★★★★ THE BORROW HAS A PRECEDENT AND REUSES ITS RESTORE BYTE. phase_text_in already borrows
+* slots 3 and 4 for the text window and phase_text_out restores them from ph_blk_slot3/ph_blk_slot4
+* -- **a known value from the boot map ($3C), never a read-back of a write-only register.** The
+* cache's borrow is the same shape in the DRAW phase; the text window's is in the VM phase, so the
+* two never overlap [§1.2(4)].
+*
+* ★★★★★ PER CEL WITH A BUMP ALLOCATOR, NOT PER LOOP WITH THREE LRU ENTRIES -- a §22.5 deviation,
+* reported. A per-loop entry must know a loop's TOTAL size before it admits the first cel, which
+* means parsing every cel header of that loop up front; per-cel needs only the w*h it already has
+* from vc_decode_begin. ★★★ For the measured workload the two are identical -- room 1's 20 cels are
+* 4,006 B in an 8,192 B block, so nothing is ever evicted -- and the flush counter is what says
+* when a busier room would differ.
+*
+* ★★★★★ FAIL-CLOSED AND COUNTED [P6.80's warning: res_cache_stash failed closed every cycle for
+* months and nobody read the counters]. A cel that does not fit triggers ONE flush-and-retry; if it
+* still does not fit it is BYPASSED and decodes exactly as today. **Every one of these is counted
+* and the host prints all of them on every run.**
+                ifdef   CEL_CACHE
+CC_MAX          equ     24              ; index entries; room 1 needs 20
+CC_ENT          equ     5               ; view, loop, cel, offset-hi, offset-lo
+CC_BASE         equ     $8000           ; slot 4's aperture
+CC_SIZE         equ     8192
+* ★ cc_state, set once per cel by cc_open and read by cp_composite's row loop.
+CC_BYPASS       equ     0               ; decode every row, as before this task
+CC_FILL         equ     1               ; decode every row AND copy it into the cache
+CC_HIT          equ     2               ; do not decode at all; read rows from the cache
+cc_n            fcb     0               ; entries in use
+cc_top          fdb     0               ; bump pointer, an OFFSET from CC_BASE
+cc_state        fcb     0
+cc_ptr          fdb     0               ; the current cel's cursor, an ABSOLUTE address
+cc_idx          rmb     CC_MAX*CC_ENT
+* ★★ 16-bit and cumulative, per P6.84: the question is a RATE over a window and a per-frame byte
+* reports whatever the last frame happened to be.
+cc_hits         fdb     0
+cc_miss         fdb     0
+cc_flush        fdb     0
+cc_bypass       fdb     0
+cc_saved        rmb     4               ; bytes NOT decoded -- 32-bit, it passes 65,535 in seconds
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
                 endc
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 
@@ -3698,6 +3809,11 @@ pca_gotview:
                 jsr     vc_decode_begin
                 lda     vc_err
                 bne     pca_close
+* ★★★★ ONCE PER CEL, NOT PER ROW: vc_w and vc_h are known here and the row loop needs only the
+* state cc_open leaves behind. ★★★ After the error check, so a truncated cel never enters the index.
+                ifdef   CEL_CACHE
+                jsr     cc_open
+                endc
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ AND THE PLANE LAYER'S CACHE OF THE SAME REGISTER, WHICH P6.74 DID NOT INVALIDATE [T-P0-131].
 * res_open(VIEW) above maps a VOLUME block into slot 6. plane_win.s records which FRAMEBUFFER slice
@@ -3804,6 +3920,134 @@ pca_next:
                 lblo    pca_lp          ; ★ long, for the same reason as the lbeq above
 pca_out:        rts
 
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ── cc_open -- decide this cel's cache state. Called once, after vc_decode_begin ──
+* ★★★★ vc_w and vc_h are parsed by then, so w*h is known and no cel header is re-read.
+* ★★★ Sets cc_state and cc_ptr; cp_composite's row loop does the rest.
+                ifdef   CEL_CACHE
+cc_open:
+                lda     #CC_BYPASS
+                sta     cc_state
+* --- look for (p3_view, vc_loop, vc_cel) in the index ---
+                lda     cc_n
+                beq     cco_miss
+                ldx     #cc_idx
+                ldb     cc_n
+cco_scan:
+                lda     ,x
+                cmpa    p3_view
+                bne     cco_next
+                lda     1,x
+                cmpa    vc_loop
+                bne     cco_next
+* ★★★★★ AC-5's SECOND FAULT ARM: match on (view, loop) and IGNORE the cel number, so the first
+* cel of a loop is served for every cel of it. ★★★ The expected red is VISIBLE -- a sprite frozen
+* on one frame while it walks -- and byte-level: both planes must DIFFER from the reference.
+* ★★ It is the exact defect a cache of this shape has, which is why it is the arm and not a
+* contrived one.
+                ifndef  CC_FAULT_STALE
+                lda     2,x
+                cmpa    vc_cel
+                bne     cco_next
+                endc
+* --- HIT. cc_ptr = CC_BASE + offset ---
+                ldd     3,x
+                addd    #CC_BASE
+                std     cc_ptr
+                lda     #CC_HIT
+                sta     cc_state
+                ldd     cc_hits
+                addd    #1
+                std     cc_hits
+* ★★ bytes not decoded = w*h, accumulated 32-bit
+                lda     vc_w
+                ldb     vc_h
+                mul
+                addd    cc_saved+2
+                std     cc_saved+2
+                bcc     cco_hit_out
+                ldd     cc_saved
+                addd    #1
+                std     cc_saved
+cco_hit_out:    rts
+cco_next:
+                leax    CC_ENT,x
+                decb
+                bne     cco_scan
+cco_miss:
+                ldd     cc_miss
+                addd    #1
+                std     cc_miss
+* --- allocate w*h bytes; one flush-and-retry, then bypass ---
+                jsr     cc_alloc
+                tsta
+                bne     cco_filled
+* ★★★★ THE ONE RETRY, AND IT IS THE WHOLE DEGRADATION POLICY. Flush everything and try once more;
+* a cel that still does not fit is larger than the block and can never be cached, so it BYPASSES
+* and decodes exactly as it did before this task existed.
+                jsr     cc_flush_all
+                jsr     cc_alloc
+                tsta
+                bne     cco_filled
+                ldd     cc_bypass
+                addd    #1
+                std     cc_bypass
+                rts                     ; cc_state is still CC_BYPASS
+cco_filled:
+                lda     #CC_FILL
+                sta     cc_state
+                rts
+
+* ── cc_alloc -- reserve vc_w*vc_h at cc_top and index it. A != 0 on success ──
+cc_alloc:
+                lda     cc_n
+                cmpa    #CC_MAX
+                bhs     cca_no                  ; index full
+                lda     vc_w
+                ldb     vc_h
+                mul                             ; D = decoded size
+                pshs    d
+                addd    cc_top
+                cmpd    #CC_SIZE
+                bhi     cca_no_pull             ; would overrun the block
+* --- entry: view, loop, cel, offset ---
+                lda     cc_n
+                ldb     #CC_ENT
+                mul
+                ldx     #cc_idx
+                leax    d,x
+                lda     p3_view
+                sta     ,x
+                lda     vc_loop
+                sta     1,x
+                lda     vc_cel
+                sta     2,x
+                ldd     cc_top
+                std     3,x
+                addd    #CC_BASE
+                std     cc_ptr
+                inc     cc_n
+                puls    d
+                addd    cc_top
+                std     cc_top
+                lda     #1
+                rts
+cca_no_pull:    puls    d
+cca_no:         clra
+                rts
+
+* ── cc_flush_all -- the cache is emptied; nothing is written back, there is nothing to write ──
+cc_flush_all:
+                clr     cc_n
+                ldd     #0
+                std     cc_top
+                ldd     cc_flush
+                addd    #1
+                std     cc_flush
+                rts
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+
 * ── pca_keep_rect -- carry a SKIPPED sprite's rectangle into next frame's list ────
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ WITHOUT THIS A SKIPPED SPRITE SMEARS THE FIRST TIME IT MOVES. p3_composite_all clears
@@ -3887,6 +4131,14 @@ p3_spr          rmb     P3_SPR_MAX*P3_SPR_SIZE
 phase_draw_enter:
                 lda     #0
                 jsr     phase_draw
+* ★★★★★ THE CEL CACHE'S APERTURE OPENS HERE AND CLOSES IN p3_enter_vm_phase [T-P0-147]. The window
+* is the WHOLE draw phase, not the composite alone, because P6.92 measured slot 4 silent across
+* sprites, roomcheck and every room-render sub-step -- and a narrower window would have to be
+* opened and closed around each of them. ★★★ Two MMU writes per cycle, which is what the borrow
+* costs and what §4D(4)'s re-run census is checked against.
+                ifdef   PHASE_CELCACHE
+                jsr     phase_cache_in
+                endc
 * ★★★★★ INVALIDATE THE WINDOW CACHES HERE, AND THIS IS A CORRECTNESS REQUIREMENT NOT HYGIENE.
 * plane_win.s caches which slice each plane has mapped so a per-pixel access can skip the remap.
 * phase_draw has just written BOTH slots directly, so those caches now describe the previous

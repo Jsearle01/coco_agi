@@ -184,11 +184,54 @@ co_row:
 * the shape being left behind. **This is a port decision, stated as one** [§2.1].
 * ★★ Guarded because comp_probe composites a cel the HOST staged, with no decoder linked at all.
                 ifdef   COMP_ROW_PULL
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE CEL CACHE'S ROW HOOK [T-P0-147]. cc_open ran ONCE for this cel in p3_composite_all
+* and left cc_state; this loop only acts on it. ★★★★ Three states, and the third is today's code
+* unchanged, which is what makes the degradation real rather than promised:
+*   CC_HIT    the rows are already decoded in slot 4 -- co_src points at them, NO DECODE AT ALL
+*   CC_FILL   decode as usual, then COPY the row into the cache so the next cycle hits
+*   CC_BYPASS decode as usual and touch nothing -- byte-for-byte the pre-task path
+* ★★★★★ A CACHED ROW MUST EQUAL A DECODED ONE [AC-1]: CC_FILL copies the bytes vc_decode_row just
+* produced, so the cache cannot hold anything the decoder would not have produced. **The planes are
+* compared over 120 cycles in both scenes rather than argued about.**
+* ★★★ vc_w bytes per row, not 256: CP_CEL is a 256-byte buffer but only the cel's width is live.
+                ifdef   CEL_CACHE
+                lda     cc_state
+                cmpa    #CC_HIT
+                bne     co_rp_decode
+                ldd     cc_ptr                  ; ★ rows are contiguous in the cache
+                std     co_src
+                clra
+                ldb     vc_w
+                addd    cc_ptr
+                std     cc_ptr
+                bra     co_rp_done
+co_rp_decode:
+                endc
                 jsr     vc_decode_row
                 lda     vc_err
                 lbne    co_done                 ; ★ a mid-cel error stops the blit, as before
                 ldd     vc_dest
                 std     co_src
+                ifdef   CEL_CACHE
+                lda     cc_state
+                cmpa    #CC_FILL
+                bne     co_rp_done
+                pshs    x,u
+                ldx     vc_dest                 ; source: the row just decoded
+                ldu     cc_ptr                  ; destination: the cache
+                ldb     vc_w
+                beq     co_rp_cpdone
+co_rp_cp:       lda     ,x+
+                sta     ,u+
+                decb
+                bne     co_rp_cp
+co_rp_cpdone:
+                stu     cc_ptr
+                puls    x,u
+co_rp_done:
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
                 endc
 * ═══════════════════════════════════════════════════════════════════════════════════════════
                 lda     co_basex

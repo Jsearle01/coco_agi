@@ -1979,6 +1979,33 @@ _G._n = emu.add_machine_frame_notifier(function()
                   r > 0 and string.format(", mean persistence %.2f cycles", 1/(1-math.min(r,0.999)))
                         or "")
             end
+            -- ★★★★★ THE CEL CACHE'S COUNTERS [T-P0-147 §4C]. Printed on EVERY run that has them,
+            -- never behind a flag: P6.80's res_cache_stash failed closed every cycle for months
+            -- because nothing surfaced its counters, and this cache's whole degradation story is
+            -- in `bypass` and `flush`.
+            if SYM.cc_hits and SYM.cc_miss then
+                local hi, mi = rd16(SYM.cc_hits), rd16(SYM.cc_miss)
+                local fl = SYM.cc_flush and rd16(SYM.cc_flush) or 0
+                local by = SYM.cc_bypass and rd16(SYM.cc_bypass) or 0
+                local tot = hi + mi
+                local sv = 0
+                if SYM.cc_saved then
+                    sv = prog:read_u8(SYM.cc_saved) * 16777216
+                       + prog:read_u8(SYM.cc_saved + 1) * 65536
+                       + prog:read_u8(SYM.cc_saved + 2) * 256
+                       + prog:read_u8(SYM.cc_saved + 3)
+                end
+                w("    CEL CACHE over %d cycles: %d hit / %d miss = %.1f%% hit   (%.2f lookups/cycle)",
+                  NCYC, hi, mi, tot > 0 and 100 * hi / tot or 0, tot / NCYC)
+                w("       flushes %d   bypassed (too big to cache) %d   bytes NOT decoded %d"
+                  .. "  (%.0f B/cycle)%s",
+                  fl, by, sv, sv / NCYC,
+                  by > 0 and "   ★ some cels degraded to the decode path" or "")
+                if SYM.cc_n and SYM.cc_top then
+                    w("       resident: %d entries, %d of %d B used",
+                      prog:read_u8(SYM.cc_n), rd16(SYM.cc_top), 8192)
+                end
+            end
             if SLOTCENSUS then
                 -- ★★★★ Phase 9 = INSIDE the composite stage (odd = entered, even = left), which
                 -- is the window a cel cache would have to live through. Phase 3 is the VM.

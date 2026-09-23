@@ -322,3 +322,75 @@ phase_text_out:
                 jsr     phase_slot5
                 jmp     phase_vm
                 endc
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE CEL CACHE'S BORROW OF SLOT 4 [T-P0-147]. Same shape as phase_text_in/out above, in a
+* DIFFERENT PHASE, and it restores from the SAME byte.
+*
+* ★★★★★ WHY SLOT 4 AND NOT ANOTHER: a per-aperture tap bucketed by P3_PHASE measured slot 4
+* ($8000-$9FFF, the arena's HIGH half) at **0 reads and 0 writes for the entire draw phase** --
+* sprites, roomcheck, every room-render sub-step and the composite -- while the SAME taps counted
+* 83,357 accesses there in other phases [P6.92 §4A]. ★★★★ Slot 3 is NOT usable: it is busy during
+* roomcheck (4,456 r / 2,752 w), which is inside the borrow window.
+*
+* ★★★★★ THE REGISTER IS $FFA4. $FFA5 IS SLOT 5 -- THE PRIORITY SLICE, AND IT IS LIVE DURING THE
+* COMPOSITE (17,204 r / 36,651 w). The dispatch named $FFA5 for this borrow; borrowing it would
+* map the cache over the priority plane mid-blit, which is P6.78's defect exactly.
+*
+* ★★★★ THE RESTORE VALUE IS ph_blk_slot4 AND ITS PROVENANCE IS THE BOOT MAP: p3b_run.lua pre-sets
+* all eight slots to $38+i, so slot 4 is $3C, and p3b_probe.s stores it there at init. ★★★ The
+* register is WRITE-ONLY, so this byte is the only record -- a read-back would return nothing and
+* a saved copy would be a second opinion about the same fact [§2F].
+*
+* ★★★ ONE OWNER PRESERVED: these two entries are in THIS file, which reg_discipline already
+* reports as the sole owner of $FFA3-$FFA6. A borrow written at the call site would have added a
+* second writer, which is §6's first trigger and what P6.82 cost a task to undo.
+                ifdef   PHASE_CELCACHE
+ph_blk_cache    fcb     0               ; the cache's physical block; set from the boot map
+* ★★★★★ ph_blk_slot4 IS DECLARED UNDER PHASE_TEXT ABOVE, AND THE CACHE NEEDS IT WITHOUT THE TEXT
+* WINDOW [T-P0-147]. The plain `p3b` gate arm has cels and no PHASE_TEXT, so the first cut failed
+* to assemble: "Undefined symbol ph_blk_slot4".
+* ★★★★★ AND THE ASSEMBLER IS WHAT SAVED IT. Had the symbol merely EXISTED and been zero -- which is
+* what a `rmb` or a differently-ordered declaration would have given -- phase_cache_out would have
+* mapped BLOCK 0 over the arena, and block 0 is P3_BLK_PRI, the LIVE PRIORITY PLANE. **That is
+* P6.78's defect exactly: silent, plausible, and visible only as corrupted game data.**
+* ★★★ Declared here only when PHASE_TEXT has not already declared it, so the two can never both
+* define it and the value keeps ONE home [§2F].
+                ifndef  PHASE_TEXT
+ph_blk_slot4    fcb     0               ; what slot 4 holds outside the cache's borrow
+                endc
+phase_cache_in:
+* ★★★★★ CC_FAULT_POISON -- THE GUARD FOR THE CLASS, NOT FOR THE INSTANCE [T-P0-147].
+* ★★★★★ THE BORROW IS SAFE ONLY WHILE NOTHING READS $8000-$9FFF IN THE DRAW PHASE, and that was
+* MEASURED ONCE, ON ONE BUILD [P6.92 §4A]. Turning on -CelCheck added a reader the census never
+* saw, and the symptom was a plausible wrong checksum rather than a crash. ★★★★ A future reader
+* would be just as quiet.
+* ★★★ With this arm the borrowed slot holds the PRIORITY SHADOW instead of the cache, so any
+* draw-phase arena read returns recognisably wrong bytes AND the cache's own reads break -- the
+* planes must go wrong. **It proves the aperture really is being switched, in both directions:
+* -NoCelCache + this arm must stay GREEN (nothing reads it), and the cache + this arm must go RED
+* (the cache reads it).** ★★ That pair is the whole §2W demonstration for a borrow.
+                ifdef   CC_FAULT_POISON
+                lda     #45                     ; the priority shadow -- not ours, and not the cache
+                sta     MMU_SLOT4
+                rts
+                endc
+                lda     ph_blk_cache
+                sta     MMU_SLOT4
+                rts
+phase_cache_out:
+* ★★★★★ AC-5's FAULT ARM: restore the WRONG block. The arena's high half then holds the priority
+* shadow, and the next resource fetch that reaches above $8000 reads and writes the wrong memory.
+* ★★★ The expected red is logic_copy_diff non-zero on logic 1 -- P6.78's own signature -- and NOT
+* merely a different counter. **A restore that cannot be shown to matter is not a restore anyone
+* checked** [§2W].
+                ifdef   CC_FAULT_BADRESTORE
+                lda     #45
+                sta     MMU_SLOT4
+                rts
+                endc
+                lda     ph_blk_slot4
+                sta     MMU_SLOT4
+                rts
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
