@@ -28,6 +28,31 @@
 # 640x239; their ego trips ~1.1 of them per event, so it can only UNDERCOUNT. That is safe in
 # one direction only, and a future task must not quote it as an equality [§2W.3].
 #
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ T-P0-148: >=5.87 WAS ONE ROOM'S NUMBER. DO NOT QUOTE IT AS AN ENGINE-SPEED RATIO.
+# ★★★★ The measurement now has a TOOL -- `sierra_events.py`, whose --selftest re-derives P6.91's
+# own 5.87 / 0.00 / 0.40 from P6.91's own frames.csv. Before T-P0-148 the figure came from an
+# unsaved scratchpad script [L-45]. **Quote from the tool; it is the definition.**
+#
+# ★★★★★ THE METRIC VARIES 7x ACROSS SIERRA'S OWN ROOMS IN ONE RUN -- 0.86 in the starting room,
+# 2.12 standing in the chicken pen, 5.23 walking in it, >=5.87 walking in a near-empty room.
+# **A number that moves 7x across rooms of the same interpreter cannot measure interpreter speed.**
+#
+# ★★★★ EQUAL-LOAD FIGURES, KQ3's CHICKEN PEN, 2026-09-24 (Jay drove; 2 chickens + ego, and the
+# chickens PASS BEHIND EACH OTHER, so their depth test is exercised):
+#     standing, 2 chickens   63.3 s   2.12 events/s   (n=4: 1.39 4.17 1.58 1.32 -- spread 3.2x)
+#     walking,  +ego         27.1 s   5.23 events/s   (n=4: 4.72 5.45 5.01 5.74 -- spread 1.2x)
+# ★★★ The standing spread is the instrument's own limit: a small chicken trips one of 160 sample
+# points only when it overlaps one. **Only the walking figure is tight enough to quote as a level.**
+#
+# ★★★★★ THE COMPARISON THAT IS VALID IS EACH SIDE AGAINST ITSELF, THEN THE RATIOS:
+#     Sierra walking:  >=5.87 near-empty -> 5.23 with 2 chickens   =  -10.9%
+#     Ours standing:     15.0 no sprites ->  4.99 with 4 sprites   =  -66.7%
+# **~6x more sensitive to animation load than they are** -- and not because of fidelity
+# (`320x192x16`, same mode), a missing depth test (their ego is occluded), or non-overlapping
+# objects (their chickens occlude each other). All three are excluded by measurement.
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+#
 # ★★★★★ T-P0-146: OUR IDLE FIGURE, WHICH IS THE LIKE-FOR-LIKE AGAINST SIERRA'S IDLE ROOMS.
 # ★★★★ Room 83 stages ZERO sprites (verified fresh, `sprites 0` on every one of 120 cycles -- not
 # taken from P6.51's three-month-old finding) and is what p3b's own gate row already runs:
