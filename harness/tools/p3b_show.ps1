@@ -198,6 +198,16 @@ param(
   # 6 has been taken by the compositor it re-derives the whole address through res_peek/res_ptr,
   # which is what res_cnext did before that task. **Identical bytes and identical pixels, the old
   # cost** -- so the saving is measured one binary apart rather than one commit apart.
+  # ★★★★★ -PicSteps IS T-P0-138's DECOMPOSITION (-DP3B_PICSTEPS): markers 13..22 bracket the
+  # fetch, the clear, the render, the priority shadow and the present inside draw.pic/show.pic.
+  # ★★★★ A room change costs 9.55 s against a steady cycle of 0.297 [P6.84], and the source's own
+  # figure for the render is ~2.8 s -- so about seven seconds were attributed to nothing.
+  # ★★★ Flag-guarded: every shipped arm is byte-identical without it.
+  [switch]$PicSteps,
+  # ★★★★★ -PicCount IS T-P0-138's BEFORE ARM (-DP3B_PIC_COUNT), and it is NOT a fault: it puts the
+  # fill's diagnostic counters back in the inner loops, which is every p3b build before this task.
+  # **Identical pixels, the old cost.** ★★★ fc_count alone was 29.4% of the room-render cycle.
+  [switch]$PicCount,
   [switch]$SlowSteal,
   # ★★★★ -NoRemap IS the fault arm (-DRES_FAULT_NOREMAP): a theft takes the cheap path WITHOUT
   # re-mapping, so the walk reads through whatever the compositor left in slot 6. Expect a wrong
@@ -372,6 +382,9 @@ if ($CelTest) { $FLAGS += "-DP3B_CELTEST" }
 # ★★★★ -NoCross is AC-4's §2W arm: the cursor stops testing the aperture boundary.
 if ($NoCross) { $FLAGS += "-DRES_FAULT_NOCROSS" }
 # ★★★★ T-P0-137: -SlowSteal is the BEFORE arm (same pixels, the old cost); -NoRemap is the fault.
+if ($PicSteps) { $FLAGS += "-DP3B_PICSTEPS" }
+# ★★★★ -PicCount is T-P0-138's BEFORE arm: the fill's counters back in the inner loops.
+if ($PicCount) { $FLAGS += "-DP3B_PIC_COUNT" }
 if ($SlowSteal) { $FLAGS += "-DRES_SLOW_STEAL" }
 if ($NoRemap) { $FLAGS += "-DRES_FAULT_NOREMAP" }
 if ($ViewFaultOneMap) { $FLAGS += "-DVM_VIEW_FAULT_ONEMAP" }

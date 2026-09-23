@@ -125,6 +125,23 @@ RES_CURSOR      equ     1
 VC_SRC_WINDOWED equ     1
                 endc
 * ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ PIC_NOCOUNT -- THE FILL'S INSTRUMENTATION IS NOT ASSEMBLED HERE [T-P0-138 §4C].
+* ★★★★★ MEASURED: fc_count was 29.4% of the room-render cycle, the largest single routine in it.
+* It is a pure counter -- `ldd CNT_CHK+2 / addd #1 / std` -- called from the fill's INNERMOST
+* loops (ff_left, ff_right, and both seed tests), and every `ifndef PIC_NOCOUNT` block in
+* pic_fill.s is an increment with no logic in it.
+* ★★★★ NOTHING IN THIS PROBE OR ANY HOST READS THEM. p3b_probe.s declares the CNT_* addresses
+* because pic_draw.s and pic_core.s increment two of them UNGUARDED and the file must assemble;
+* it never loads one, and no .lua, .ps1 or .py reads p3b's copies [grepped, T-P0-138 §3]. **The
+* renderer gate is a different probe with its own flags and is untouched.**
+* ★★★ pic_fill.s's own comment has said the answer since it was written: *"timings come from
+* -DPIC_NOCOUNT, where this vanishes entirely"* -- and every p3b timing this project has published
+* was taken without it. ★★ -DP3B_PIC_COUNT restores the counters and is the before arm.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+                ifndef  P3B_PIC_COUNT
+PIC_NOCOUNT     equ     1
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 PIC_W           equ     160
 PIC_H           equ     168
 * ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -2027,7 +2044,21 @@ prc_out:        rts
 * ★★ WHAT IT COSTS AND WHAT IT SAVES, stated as §2I requires: it moves a volume-window fetch
 * (milliseconds) from one opcode to the next one the game issues, and it removes a dangling
 * pointer and a depth leak. **The output is identical; the ordering this task exists to fix is
-* unaffected, because the ~2.8 s RENDER is what moved and it is still here.**
+* unaffected, because the RENDER is what moved and it is still here.**
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE "~2.8 s RENDER" THAT STOOD HERE WAS ANOTHER PROBE'S FIGURE [T-P0-138 §4A]. It is
+* pic_variants.sh's `nocount_packed` median -- **pic_probe, FLAT-mapped, counters OFF** -- and it
+* was quoted as if it described this build, which is windowed through plane_vis/plane_pri and,
+* until this task, had the fill's counters ON. **Three differences from the program it labelled.**
+* ★★★★★ MEASURED HERE, cycle 9 of a 40-cycle castle run, markers 13..22 [-DP3B_PICSTEPS]:
+*     fetch 0.0204  clear 0.2322  RENDER 8.2797  pri shadow 0.1749  present 0.1967
+*     -- 91.0% of a 9.5456 s cycle, reconciling to 95.3% of it
+* ★★★★ AND AFTER -DPIC_NOCOUNT LANDED IN THIS PROBE: **RENDER 4.8957 s, the cycle 6.1579 s.**
+* ★★★ So the honest sentence is: a room change costs ~6.2 s here and the render is ~4.9 s of it,
+* measured on THIS probe in THIS configuration. ★★ Same error class as design spec §7.1's
+* `0.039 s/cycle`, which is comp_probe's, and as every s/cycle taken over an undeclared window
+* [P6.84]. **A figure is about the program it was measured on.**
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 *
 * ★★★ THE FETCH RUNS IN THE VM PHASE AND THE RENDER IN THE DRAW PHASE, and they cannot be
 * swapped -- res_open needs the VOLUME window in slot 6 and the renderer needs the FRAMEBUFFER
@@ -2054,9 +2085,27 @@ p3_pic_draw:
 * measure §2W's. **The cache had eaten the arena; the stack had not filled it.**
                 ldx     res_ccur
                 stx     p3_drawccur
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ -DP3B_PICSTEPS BRACKETS EACH STEP OF A ROOM CHANGE [T-P0-138 §4A]. Markers 13..22, paired
+* odd/even like the outer stages, but accumulated separately by the host because these NEST inside
+* roomcheck (7/8) and the stage tap keeps one open slot.
+* ★★★★ It exists because "roomcheck 8.9076 s" is a TOTAL and not a budget: it is one cycle's worth
+* of fetch, clear, render, shadow and present, and nobody had decomposed it. The published render
+* figure beside this routine is ~2.8 s, which leaves about seven seconds attributed to nothing.
+* ★★★ Flag-guarded, so every shipped arm stays byte-identical.
+                ifdef   P3B_PICSTEPS
+                lda     #13
+                sta     P3_PHASE
+                endc
                 lda     #RES_PICTURE
                 ldb     p3_picnum
                 jsr     res_open
+                ifdef   P3B_PICSTEPS
+                pshs    a
+                lda     #14
+                sta     P3_PHASE
+                puls    a
+                endc
                 lda     res_err
                 bne     ppd_fail
                 ldx     res_base
@@ -2069,17 +2118,39 @@ p3_pic_draw:
                 lda     #P3_BLK_SHADOW
                 sta     ph_blk_fb
                 jsr     phase_draw_enter
+                ifdef   P3B_PICSTEPS
+                lda     #15
+                sta     P3_PHASE
+                endc
                 jsr     p3_clear_planes
+                ifdef   P3B_PICSTEPS
+                lda     #16
+                sta     P3_PHASE
+                lda     #17
+                sta     P3_PHASE
+                endc
                 ldx     p3_picptr
                 stx     pic_ptr
                 jsr     pic_render_at
+                ifdef   P3B_PICSTEPS
+                lda     #18
+                sta     P3_PHASE
+                endc
 * ★★★★★ THE PRIORITY SHADOW BELONGS TO draw.pic, NOT show.pic [§1.2's ruling, §2H's second
 * check -- the CALLER carries the scope]. pic_render_at has just written the room's priority
 * data into the live plane; from here until the next picture that data is the only record of
 * what is underneath a sprite, and every sprite that draws destroys some of it. **It must be
 * taken while the plane is still clean, which is before drawAllSpriteLists -- inside draw.pic.**
                 ifdef   P3B_CEL_LINK
+                ifdef   P3B_PICSTEPS
+                lda     #19
+                sta     P3_PHASE
+                endc
                 jsr     p3_pri_shadow
+                ifdef   P3B_PICSTEPS
+                lda     #20
+                sta     P3_PHASE
+                endc
                 endc
                 jsr     res_close
                 lda     #1
@@ -2158,7 +2229,15 @@ ppd_hard:       lda     res_err
 * object table through slot 5**. ★★★★ This is mmu_phase.s:193-205's recorded hazard arriving:
 * *"a parse inside an open text window leaves slot 5 wrong."* Same slot, same shape, new caller.
 p3_pic_show:
+                ifdef   P3B_PICSTEPS
+                lda     #21
+                sta     P3_PHASE
+                endc
                 jsr     p3_present
+                ifdef   P3B_PICSTEPS
+                lda     #22
+                sta     P3_PHASE
+                endc
                 lda     #1
                 sta     p3_shown                ; ★ state->pictureShown = true [op_cmd.cpp:1218]
                 jmp     p3_enter_vm_phase
@@ -2217,6 +2296,11 @@ ppp_out:        rts
 * so both walk.
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 p3_cl_slice     fcb     0               ; the counter, in memory and not in B
+* ★★★★ WHAT IT COSTS, SO THE NEXT READER NEED NOT RE-MEASURE A 26,880-BYTE OPERATION [T-P0-138]:
+* **0.2322 s, 2.6% of a room change** (cycle 9 of a castle run, -DP3B_PICSTEPS). It was named as a
+* likely large cost and it is not one -- the render beside it is 91%. ★★★ Both planes, and the
+* visual half writes $FFFF over 26,880 B; **whether it is required or defensive was NOT settled
+* here** and is §8's question: `pic_render_at` is the only thing that reads what it leaves.
 p3_clear_planes:
 * ---- visual: 26,880 B across four 8,192 B slices (blocks 2-5 = 32,768; the tail is spare) ----
                 clr     p3_cl_slice
@@ -2562,6 +2646,10 @@ p3rbs_b:        lda     ,x+
 p3rbs_out:      rts
                 endc
 
+* ★★★★ WHAT IT COSTS [T-P0-138]: **0.1967 s, 2.2% of a room change**, once per room, measured on
+* cycle 9 of a castle run (-DP3B_PICSTEPS). ★★★ Named as a likely large cost and it is not one.
+* ★★ Unavoidable while the shadow is the render target -- which is the design that makes draw.pic
+* invisible and show.pic the moment the room appears -- and now it is unavoidable WITH A NUMBER.
 p3_present:
                 clr     p3p_slice
 p3p_next:

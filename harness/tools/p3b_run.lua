@@ -60,6 +60,22 @@ local T_VM, T_MOTION, T_COMP, T_FETCH, T_RENDER = ST+8, ST+12, ST+16, ST+20, ST+
 local PHASE  = ST+30
 local MARK   = {[1]="pace(wait)", [3]="interpret", [5]="sprites", [7]="roomcheck", [9]="composite"}
 local stage_total, stage_open, stage_n = {}, nil, {}
+-- ★★★★★ THE ROOM CHANGE'S STEPS, IN A SEPARATE ACCUMULATOR [T-P0-138 §4A]. Markers 13..22 bracket
+-- the fetch, the clear, the render, the priority shadow and the present -- and they NEST inside
+-- roomcheck (7/8), which the stage machinery above cannot express: it keeps ONE open slot, so a
+-- nested pair would close the outer stage at the inner marker and report a stage that "did not
+-- return". ★★★ Two tables rather than a stack, because the nesting is exactly one deep and a
+-- stack would be machinery for a case that does not exist.
+-- ★★ Each step also records WHICH CYCLE it ran in, since the whole point is that this happens once.
+-- ★★★★★ PER OCCURRENCE, NOT PER TOTAL, AND THE FIRST VERSION WAS PER TOTAL. A 40-cycle run draws
+-- TWO pictures -- the title screen's and the castle's -- so totalling the steps mixed two room
+-- changes, and keeping one cycle number per step kept only the second. **The reconciliation then
+-- compared 16.09 s of steps against a 0.0668 s cycle and printed -24000%**, which is the arithmetic
+-- saying loudly what a quieter instrument would have hidden [§2W.3: a diagnostic that cannot be
+-- wrong does not measure].
+local SUBMARK = {[13]="pic fetch", [15]="pic clear", [17]="pic render",
+                 [19]="pri shadow", [21]="present"}
+local sub_open, sub_ev = nil, {}
 local REMAPS    = ST+28
 
 local m    = manager.machine
@@ -84,6 +100,17 @@ _G._ptap = prog:install_write_tap(PHASE, PHASE, "p3bphase", function(offset, dat
     local t = m.time:as_double()
     if v == 11 then cal_t0 = t; return end
     if v == 12 and cal_t0 then CLOCK = CAL_CYCLES / (t - cal_t0); cal_t0 = nil; return end
+    -- ★★★ The sub-steps are handled FIRST and return, so they never touch stage_open.
+    if SUBMARK[v] then
+        sub_open = {v, t}
+        return
+    elseif sub_open and v == sub_open[1] + 1 then
+        sub_ev[#sub_ev+1] = { SUBMARK[sub_open[1]],
+                              prog:read_u8(CYCLE) * 256 + prog:read_u8(CYCLE + 1),
+                              t - sub_open[2] }
+        sub_open = nil
+        return
+    end
     if MARK[v] then
         stage_open = {v, t}
     elseif stage_open and v == stage_open[1] + 1 then
@@ -1735,6 +1762,50 @@ _G._n = emu.add_machine_frame_notifier(function()
                   k, s, s/NCYC, tot > 0 and 100*s/tot or 0, cnt)
             end
             w("       %-10s %8.4f s total  %8.5f s/cycle", "SUM", tot, tot/NCYC)
+            -- ═══════════════════════════════════════════════════════════════════════════
+            -- ★★★★★ THE ROOM CHANGE, DECOMPOSED [T-P0-138 §4A]. Not per-cycle: these run ONCE,
+            -- in the cycle named beside each, and dividing them by NCYC is the exact mistake
+            -- that made `roomcheck` look like a 31%-per-cycle stage [P6.84].
+            if #sub_ev > 0 then
+                -- ★★★ GROUPED BY THE GUEST CYCLE THEY RAN IN, because a run draws more than one
+                -- picture and each is its own room change.
+                local order, byc = {}, {}
+                for i = 1, #sub_ev do
+                    local c = sub_ev[i][2]
+                    if not byc[c] then byc[c] = {}; order[#order+1] = c end
+                    byc[c][#byc[c]+1] = sub_ev[i]
+                end
+                table.sort(order)
+                w("    ── room changes, decomposed (P3_CYCLE at the step's close) ──")
+                for _, c in ipairs(order) do
+                    local st = 0
+                    for _, e in ipairs(byc[c]) do st = st + e[3] end
+                    w("      P3_CYCLE %d -- steps total %.4f s", c, st)
+                    for _, e in ipairs(byc[c]) do
+                        w("         %-11s %8.4f s  %5.1f%%", e[1], e[3],
+                          st > 0 and 100*e[3]/st or 0)
+                    end
+                    -- ★★★★ RECONCILE AGAINST THE MEASURED CYCLE. ★★★ P3_CYCLE is the GUEST's
+                    -- counter and _pc is keyed by the host's RELEASED-cycle count; they differ by
+                    -- one, so both candidates are printed rather than one being asserted [§2W.3:
+                    -- a diagnostic that labels a side names the side it actually has].
+                    if _G._pc then
+                        for i = 1, #_G._pc do
+                            local n2 = _G._pc[i][1]
+                            if n2 == c or n2 == c + 1 then
+                                w("         ★★ host cycle %d measured %.4f s -> steps are %.1f%%"
+                                  .. ", unattributed %.4f s", n2, _G._pc[i][2],
+                                  _G._pc[i][2] > 0 and 100*st/_G._pc[i][2] or 0,
+                                  _G._pc[i][2] - st)
+                            end
+                        end
+                    end
+                end
+                if sub_open then
+                    w("    ★★★ sub-step %s entered and never left", SUBMARK[sub_open[1]] or "?")
+                end
+            end
+            -- ═══════════════════════════════════════════════════════════════════════════
             if stage_open then
                 w("    ★★★ stage %s entered and never left -- an unpaired marker",
                   MARK[stage_open[1]] or "?")
