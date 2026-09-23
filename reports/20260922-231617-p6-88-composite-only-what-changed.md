@@ -279,4 +279,5 @@ one, and that no speed-up should be expected while moving. Jay's four answers ar
 `seeds/AGI/live/2026-09-22-a-guard-the-corpus-cannot-exercise.md`
 
 ### 11 — Commit
-`<hash>`  (pushed to origin/wip before this report)
+`c7ffb7a`  (pushed to origin/wip before this report)
+Pool candidate `0ae67a7` (methodology-candidate-pool, main).
