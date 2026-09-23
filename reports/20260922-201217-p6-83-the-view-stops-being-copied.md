@@ -332,4 +332,5 @@ answers are quoted in AC-9.
 `seeds/AGI/live/2026-09-22-the-cost-you-measured-is-not-always-the-cost-that-binds.md`
 
 ### 11 — Commit
-`<hash>`  (pushed to origin/wip before this report)
+`c933f30`  (pushed to origin/wip before this report)
+Pool candidate `7d8c391` (methodology-candidate-pool, main).
