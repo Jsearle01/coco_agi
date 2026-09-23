@@ -301,4 +301,5 @@ arm was offered and not needed. Jay's three answers are quoted in AC-11.
 `seeds/AGI/live/2026-09-22-instrumentation-assembled-into-the-timing-build.md`
 
 ### 11 — Commit
-`<hash>`  (pushed to origin/wip before this report)
+`85ba03d`  (pushed to origin/wip before this report)
+Pool candidate `0d6261a` (methodology-candidate-pool, main).
