@@ -262,4 +262,5 @@ build Jay watched at T-P0-141.
 `seeds/AGI/live/2026-09-22-both-arms-off-or-neither-guard-is-red.md`
 
 ### 11 — Commit
-`<hash>`  (pushed to origin/wip before this report)
+`1a0ff9d`  (pushed to origin/wip before this report)
+Pool candidate `e2b6993` (methodology-candidate-pool, main).
