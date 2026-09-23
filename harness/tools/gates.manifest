@@ -73,6 +73,19 @@ cel	src/harness/cel_probe.s	build/cel_probe.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS
 # room reachable by this probe stages more than 4 (room 3 stages 2, room 5 one). **So neither of
 # the skip's two guards can be shown to fire**: disabling either leaves both planes identical.
 # The comparison proves the skip is right in a room that cannot test its guards.
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ CLOSED AT T-P0-142 §4E: THE SCENE IS CONSTRUCTED AND BOTH GUARDS ARE NOW PROVEN.
+# -DP3B_FORCE_OVERLAP moves sprite 1 onto sprite 0 and gives it sprite 0's priority, in the STAGED
+# copy only -- two overlapping sprites at EQUAL priority, the exact case T-P0-141 §4A named as the
+# one the narrow rectangle test cannot cover. In that scene `isolated` falls from 99 to 0: the
+# guards refuse every skip.
+# ★★★★ AND WITH BOTH GUARDS OFF THE PLANES GO WRONG -- visual 76285D37BC19 against a reference
+# 891CA3CF2525, priority E28B08FACA14 against F5A30A58756A, 111 skips instead of 0. **The guards
+# are necessary, measured.**
+# ★★★ WHY NEITHER COULD BE SHOWN RED ALONE, which is the subtlety worth keeping: in that scene
+# EACH guard independently refuses, so disabling one leaves the other refusing and the planes
+# identical. A guard pair that is belt-and-braces needs both arms off to demonstrate either.
+# ═══════════════════════════════════════════════════════════════════════════════════════════
 comp	src/harness/comp_probe.s	build/comp_probe.bin	purpose=correctness
 vm	src/harness/vm_probe.s	build/vm_probe.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK	purpose=correctness
 # ★★★★★ AD-140 SAID THE `vm` ROW IS purpose=correctness WHILE THE HEADLINE VM TIMING FIGURE COMES

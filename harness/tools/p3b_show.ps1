@@ -231,6 +231,11 @@ param(
   # 111 unchanged sprites are rejected by the isolation test and all 12 rejections are this one's.
   # ★★★ So the isolation test is unexercised in this corpus [L-85], and this is the red.
   [switch]$SkipNoPrio,
+  # ★★★★★ -ForceOverlap CONSTRUCTS THE SCENE P6.88's GUARDS COULD NOT BE TESTED ON
+  # (-DP3B_FORCE_OVERLAP): sprite 1 is moved onto sprite 0 and given its priority, in the STAGED
+  # copy only -- the game's object table is untouched. ★★★ Two overlapping sprites at EQUAL
+  # priority is precisely the case T-P0-141 §4A named as the one the narrow rect test cannot cover.
+  [switch]$ForceOverlap,
   [switch]$SlowSteal,
   # ★★★★ -NoRemap IS the fault arm (-DRES_FAULT_NOREMAP): a theft takes the cheap path WITHOUT
   # re-mapping, so the walk reads through whatever the compositor left in slot 6. Expect a wrong
@@ -415,6 +420,9 @@ if ($NoSkip) { $FLAGS += "-DP3B_NOSKIP" }
 # ★★★★ AC-6's fault arm: the isolation test always says yes, so an erased sprite gets skipped.
 if ($SkipNoIso) { $FLAGS += "-DP3B_SKIP_NOISO" }
 if ($SkipNoPrio) { $FLAGS += "-DP3B_SKIP_NOPRIO" }
+# ★★★★ T-P0-142 §4E: a constructed scene P6.88's guards can fire on -- sprite 1 moved onto
+# sprite 0 at sprite 0's priority, in the STAGED copy only.
+if ($ForceOverlap) { $FLAGS += "-DP3B_FORCE_OVERLAP" }
 if ($SlowSteal) { $FLAGS += "-DRES_SLOW_STEAL" }
 if ($NoRemap) { $FLAGS += "-DRES_FAULT_NOREMAP" }
 if ($ViewFaultOneMap) { $FLAGS += "-DVM_VIEW_FAULT_ONEMAP" }

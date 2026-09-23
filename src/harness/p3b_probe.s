@@ -2798,6 +2798,33 @@ pss_next:
                 cmpb    #VM_OBJ_MAX
                 blo     pss_lp
 pss_done:
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ -DP3B_FORCE_OVERLAP -- A SCENE P6.88's GUARDS CAN ACTUALLY FIRE ON [T-P0-142 §4E].
+* ★★★★★ THE PROBLEM IT SOLVES: T-P0-141 shipped a composite skip with two guards -- no overlap
+* with a restored rectangle, and a unique priority band -- and **neither could be shown to fire**.
+* Disabling either left both planes byte-identical, because no room this probe reaches has
+* overlapping sprites: 0 of 111 unchanged sprites were refused by the isolation test, and room 2
+* stages no sprites, room 3 two, room 5 one, against the castle's four.
+* ★★★★ SO THE SCENE IS CONSTRUCTED. Sprite 1 is moved onto sprite 0 and given sprite 0's priority,
+* AFTER staging and before compositing -- so the game's own object table is untouched (§2P: the
+* game's state is not edited, only this frame's staged copy) and update_position keeps working.
+* ★★★ THE RESULT IS TWO OVERLAPPING SPRITES AT EQUAL PRIORITY, which is exactly the configuration
+* §4A of T-P0-141 identified as the one the narrow rect test cannot cover.
+* ★★ Test arm only: no shipped arm assembles a byte of this.
+                ifdef   P3B_FORCE_OVERLAP
+                lda     p3_nspr
+                cmpa    #2
+                blo     pfo_out
+                ldx     #p3_spr
+                lda     ,x                      ; sprite 0's x
+                sta     P3_SPR_SIZE,x           ; -> sprite 1's x
+                lda     1,x                     ; sprite 0's y
+                sta     P3_SPR_SIZE+1,x
+                lda     2,x                     ; sprite 0's priority
+                sta     P3_SPR_SIZE+2,x
+pfo_out:
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
                 lda     p3_nspr
                 sta     P3_NSPR
                 rts

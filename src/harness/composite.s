@@ -196,6 +196,25 @@ co_row:
                 lda     vc_w
                 sta     co_remw
 
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ WHAT SHAPE THE DATA IS, SO THE NEXT READER NEED NOT RE-MEASURE IT [T-P0-142 §4A].
+* This loop tests transparency, reads screen priority and writes two planes ONCE PER PIXEL. Every
+* pixel inside one RLE run shares a colour, so a per-run fast path is the obvious idea -- and the
+* census says the runs are too short to pay for it.
+*     castle cels (view 0/97/107): KEY 58.0% of pixels, mean run 3.47
+*                                  OPAQUE 42.0%, **mean run 1.84**, 80 of 152 runs are ONE pixel
+*                                  opaque pixels in runs >= 4: 20.8%
+*     corpus, 8,682 cels:          KEY 58.9%, mean 4.21 | OPAQUE 41.1%, **mean 2.17**
+*                                  349,915 of 613,176 opaque runs are ONE pixel; >= 4: 41.8%
+* ★★★★★ AND THE RUNS ARE NOT AVAILABLE HERE ANYWAY. co_src walks a PER-PIXEL row buffer that
+* vc_decode_row has already expanded, so this loop cannot see a run without comparing bytes --
+* **and that comparison is the per-pixel look a run-skip would exist to avoid.** Carrying runs
+* across from the decoder is option 3 (fusing decode and blit), which T-P0-141 §1.4 objects to
+* because `cel` gates 9,193 cels by comparing DECODED CEL BYTES.
+* ★★★ PRICED [T-P0-142 §4A, stage-9 labels, moving]: co_pix is 9.2% of the drawing stage and the
+* whole opaque path ~28%. With opaque runs at 1.84 the recoverable share is ~3-5% of a cycle,
+* against a change to code two byte-comparable gates own. **Measured and not taken.**
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 co_pix:
                 lda     co_remw
                 lbeq    co_rownext
