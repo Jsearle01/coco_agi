@@ -283,4 +283,5 @@ AC-11; question 3 was not checked and is recorded as untested.
 `seeds/AGI/live/2026-09-22-structural-with-one-defect-inside-it.md`
 
 ### 11 — Commit
-`<hash>`  (pushed to origin/wip before this report)
+`aa5bc1a`  (pushed to origin/wip before this report)
+Pool candidate `a7ab432` (methodology-candidate-pool, main).
