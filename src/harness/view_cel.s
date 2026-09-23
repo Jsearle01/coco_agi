@@ -59,8 +59,14 @@ vc_remw         fdb     0               ; remaining_width
 vc_remh         fdb     0               ; remaining_height
 vc_len          fdb     0               ; chunk_len
 vc_col          fcb     0               ; colour of the current chunk
-vc_src          fdb     0               ; -> next compressed byte
-vc_srcend       fdb     0               ; one past the last byte of the resource
+vc_src          fdb     0               ; -> next compressed byte (a PAYLOAD OFFSET if windowed)
+* ★★★ vc_srcend MEANS TWO DIFFERENT THINGS AND THE FLAG SAYS WHICH [T-P0-136]: one past the last
+* byte of the resource in the flat build, and the payload LENGTH in the windowed one. Stated here
+* because a caller that gets it wrong produces a decoder that walks off the resource quietly.
+vc_srcend       fdb     0               ; flat: end address | windowed: payload length
+                ifdef   VC_SRC_WINDOWED
+vc_remsrc       fdb     0               ; ★ bytes left before truncation; the windowed bound
+                endc
 vc_loopoff      fdb     0               ; loop offset, absolute
 vc_tested       fdb     0               ; ★ AC-5: source pixels this cel produced
 vc_w16          fdb     0               ; width, zero-extended, for the 16-bit adds
@@ -108,7 +114,12 @@ vc_decode_begin:
                 std     vc_tested
 
                 ldx     vc_view
+                ifdef   VC_SRC_WINDOWED
+                leax    2,x
+                jsr     vc_rd8
+                else
                 lda     2,x
+                endc
                 sta     vc_nloops
                 lda     vc_loop
                 cmpa    vc_nloops
@@ -129,7 +140,11 @@ vc_dc_loopok:
                 std     vc_loopoff
 
                 tfr     d,x
+                ifdef   VC_SRC_WINDOWED
+                jsr     vc_rd8
+                else
                 lda     ,x
+                endc
                 sta     vc_ncels
                 lda     vc_cel
                 cmpa    vc_ncels
@@ -149,6 +164,19 @@ vc_dc_celok:
                 addd    vc_loopoff
                 tfr     d,x                     ; X -> the cel header
 
+                ifdef   VC_SRC_WINDOWED
+                jsr     vc_rd8
+                sta     vc_w
+                clra
+                ldb     vc_w
+                std     vc_w16
+                leax    1,x
+                jsr     vc_rd8
+                sta     vc_h
+                leax    1,x
+                jsr     vc_rd8                  ; transparency + mirror byte
+                leax    -2,x                    ; ★ X back at the cel header, as the flat path
+                else
                 lda     ,x
                 sta     vc_w
                 clra
@@ -157,6 +185,7 @@ vc_dc_celok:
                 lda     1,x
                 sta     vc_h
                 lda     2,x                     ; transparency + mirror byte
+                endc
                 tfr     a,b
                 andb    #$0F
                 stb     vc_key
@@ -192,10 +221,37 @@ vc_dc_sized:
                 lda     #VC_E_BIG
                 sta     vc_err
                 rts
+                ifdef   VC_SRC_WINDOWED
+* ★ One home for the windowed truncation exit; the flat path has no caller for it.
+vc_dc_trunc:    lda     #VC_E_TRUNC
+                sta     vc_err
+                rts
+                endc
 vc_dc_fits:
                 std     vc_tested               ; ★ AC-5: every source pixel this cel carries
                 leax    3,x
+                ifdef   VC_SRC_WINDOWED
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE CURSOR IS OPENED HERE, AND THE TRUNCATION BOUND BECOMES A COUNT [T-P0-136].
+* The flat path's bound is `vc_src < vc_srcend`, a compare of two CPU addresses. Through the
+* window vc_src is a CPU address inside an 8 KB aperture and the resource's end is a PAYLOAD
+* offset -- **the two are not comparable, and comparing them anyway is how a decoder walks off a
+* resource while believing it is inside one.** So the bound is carried as a remaining-byte count,
+* which is addressing-independent by construction.
+* ★★★ vc_srcend IS THE PAYLOAD LENGTH under this flag, not an end address: the caller already
+* has it from res_locate, and the contract change is stated in the caller [p3b_probe.s].
+                stx     vc_src                  ; payload offset of the compressed data
+                pshs    x
+                ldd     vc_srcend               ; = the payload length
+                subd    ,s++                    ; - where this cel starts
+                std     vc_remsrc
+                bls     vc_dc_trunc             ; ★ a cel starting at or past the end is corrupt
+                ldd     vc_src
+                jsr     res_cseek
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+                else
                 stx     vc_src                  ; the compressed data starts here
+                endc
 * ★★ THE PER-CEL CONSTANTS. adjust_pre/adjust_after depend only on the mirror bit, so they are
 * settled once here; vc_p is per-ROW and is set by vc_decode_row.
                 ldd     #0
@@ -264,6 +320,20 @@ vc_dc_go:
                 lbeq    vc_dc_done
 vc_dc_row:
 * cur = comp[pos++]  -- with the truncation check the reference raises on
+                ifdef   VC_SRC_WINDOWED
+* ★★★ THE COUNT IS THE BOUND, AND res_cnext IS THE READ. The cursor re-maps itself whenever the
+* walk crosses the aperture OR somebody else takes slot 6 -- and in the compositor somebody does,
+* every time a pixel is written [plane_win.s]. Neither is visible here.
+                ldd     vc_remsrc
+                bne     vc_dc_haveb
+                lda     #VC_E_TRUNC
+                sta     vc_err
+                rts
+vc_dc_haveb:
+                subd    #1
+                std     vc_remsrc
+                jsr     res_cnext
+                else
                 ldx     vc_src
                 cmpx    vc_srcend
                 blo     vc_dc_haveb
@@ -273,6 +343,7 @@ vc_dc_row:
 vc_dc_haveb:
                 lda     ,x+
                 stx     vc_src
+                endc
                 sta     vc_cur                  ; ★ the row-end test below is on THIS byte
                 tsta
                 bne     vc_dc_run
@@ -418,10 +489,46 @@ vc_wc_fail:     puls    x
 vc_cur          fcb     0               ; the compressed byte driving this iteration
 
 * ── vc_le16 ── X -> two little-endian bytes; returns D ───────────────────────────
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ TWO READERS, ONE SEAM [T-P0-136]. Under -DVC_SRC_WINDOWED every value this decoder reads
+* out of the VIEW comes through the VOLUME WINDOW instead of out of a copy in the arena, and
+* vc_view / vc_loopoff / vc_src are PAYLOAD OFFSETS rather than CPU addresses. All the arithmetic
+* around them is unchanged, because it is all relative to the payload base either way.
+* ★★★★ THE HEADER READS USE res_peek AND THE STREAM USES res_cnext, and that split is the whole
+* design [§4A]. res_peek maps per byte -- straddle-proof by construction, ~90 CPU cycles -- which
+* is right for the ten bytes vc_decode_begin reads and wrong for a cel's compressed stream, up to
+* 1,552 bytes in the corpus. The cursor maps once and re-maps on crossing.
+* ★★★ THE FLAT PATH IS UNTOUCHED, and that is deliberate: cel_probe and comp_probe decode from
+* host-staged memory and neither defines the flag, so **the cel and comp gates assemble the same
+* bytes they always have** and their 9,193/9,193 and 124/124 stay claims about the same program.
+                ifdef   VC_SRC_WINDOWED
+* vc_rd8: X = payload offset -> A = that byte. X is preserved; res_peek clobbers it.
+vc_rd8:
+                pshs    x
+                tfr     x,d
+                jsr     res_peek
+                puls    x
+                rts
+
+* vc_le16: X = payload offset -> D = the little-endian 16-bit value there.
+* ★ Each byte through its own mapping, so a field split across the boundary is read correctly --
+* the same property res_peek gives the VM's header reads [T-P0-130, view_straddle.py].
+vc_le16:
+                pshs    x
+                bsr     vc_rd8                  ; A = LSB
+                pshs    a
+                leax    1,x
+                bsr     vc_rd8                  ; A = MSB
+                puls    b                       ; B = LSB -> D = MSB:LSB
+                puls    x
+                rts
+                else
 vc_le16:
                 ldb     ,x
                 lda     1,x
                 rts
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 
 * ★★ 6,144 AND THE FIGURE IS MEASURED, NOT CHOSEN. This was 4,096 on the strength of P5.1's
 * "peak single cel area 3,256 B across the gated set" -- and six cels refused with VC_E_BIG on

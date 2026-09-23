@@ -563,6 +563,22 @@ local function stage()
                 end
             end)
     end
+    -- ★★★★★ T-P0-136 AC-4: P3B_CELTEST="view,loop,cel" -- decode one cel's every row through the
+    -- build's source path and publish a pixel sum. The point is a cel whose compressed stream
+    -- crosses an 8 KB block boundary, which the castle's three views never do.
+    if SYM.p3_ct_view then
+        local v, l, c = (os.getenv("P3B_CELTEST") or ""):match("^(%d+),?(%d*),?(%d*)$")
+        v, l, c = tonumber(v), tonumber(l) or 0, tonumber(c) or 0
+        if not v then w("★★★ -CelTest needs P3B_CELTEST=<view>[,<loop>,<cel>]"); return false end
+        prog:write_u8(SYM.p3_ct_view, v)
+        prog:write_u8(SYM.p3_ct_loop, l)
+        prog:write_u8(SYM.p3_ct_cel, c)
+        w("cel straddle test: view %d loop %d cel %d will decode once in the VM phase", v, l, c)
+        -- ★★★ THE REQUESTED VIEW IS KEPT HERE, because the guest writes $FF over p3_ct_view as a
+        -- run-once latch -- so reading it back at the end reports 255 for every run [§2W.3: a
+        -- diagnostic that labels a side names the side it actually has].
+        _G._ct = { v, l, c }
+    end
     -- ★★★★ T-P0-130 AC-8: the view the -ViewHdrTest arm runs set.view on, once, in the VM phase.
     if SYM.p3_vh_view then
         local v, l, c = (os.getenv("P3B_VIEWTEST") or ""):match("^(%d+),?(%d*),?(%d*)$")
@@ -1733,6 +1749,13 @@ _G._n = emu.add_machine_frame_notifier(function()
                       table.concat(parts, " "))
                 end
                 for i = 1, #_G._rs do w("      %s", _G._rs[i]) end
+            end
+            if _G._ct then
+                w("    CELTEST: view %d loop %d cel %d -> %dx%d, %d row(s) decoded, "
+                  .. "vc_err %d, pixel sum %d",
+                  _G._ct[1], _G._ct[2], _G._ct[3], prog:read_u8(SYM.p3_ct_w),
+                  prog:read_u8(SYM.p3_ct_h), prog:read_u8(SYM.p3_ct_rows),
+                  prog:read_u8(SYM.p3_ct_err), rd16(SYM.p3_ct_sum))
             end
             if _G._rt then
                 w("    RESTAB (%d events, allocation order, tap on res_cn):", #_G._rt)

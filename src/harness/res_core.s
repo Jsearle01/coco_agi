@@ -989,6 +989,25 @@ rl_s1:          jsr     res_ptr
                 lda     ,x
                 cmpa    #$34
                 bne     rl_badsig
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★ THE PAYLOAD LENGTH, FOR A READER THAT NEVER FETCHES [T-P0-136]. res_locate published where
+* a resource IS and not how long it is, because its only client read fixed header fields and did
+* not need a bound. **A stream reader needs one**: vc_decode_row's truncation test is the only
+* thing standing between a corrupt cel and a walk off the end of the resource.
+* ★★★ Same LE16 at record +3/+4 that res_fetch reads, and the same warning applies -- B from the
+* LSB and A from the MSB assembles the value, and an `exg` after it inverts a conversion that has
+* already happened [res_fetch's note: LOGIC 0 read as 10019 where the record declares 8999].
+* ★★ Each byte through its OWN mapping, for the reason the signature pair above is: the record
+* header can straddle a block boundary.
+* ★★★★ A SUBROUTINE AND NOT AN INLINE BLOCK, AND THE REASON IS A MEASUREMENT. Inline, it sat
+* between res_locate's two early exits and their targets and pushed both out of 8-bit reach --
+* three `bne` became `lbne` and **vm_probe grew 6 bytes for code it does not assemble**, because
+* the branches lengthen whether or not RES_CURSOR is set. A `jsr` costs 3 bytes in the build that
+* wants it and nothing in the build that does not.
+                ifdef   RES_CURSOR
+                jsr     rl_len
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 * payload = record start + res_hdrlen. res_off is record start + 1 here, so add hdrlen - 1.
                 ldb     res_hdrlen
                 decb
@@ -1004,8 +1023,48 @@ rl_badsig:      lda     #RES_E_SIG
                 sta     res_err
                 rts
 
+* ── rl_len ── res_off is record+1 here; publish the payload length into res_len ──
+* ★ Restores res_off/res_offhi, because res_locate's res_lcoff arithmetic depends on them.
+                ifdef   RES_CURSOR
+rl_len:
+                pshs    a,b
+                ldd     res_off
+                pshs    a,b
+                lda     res_offhi
+                pshs    a
+                ldd     res_off
+                addd    #2                      ; record +3, the LSB
+                std     res_off
+                bcc     rl_l1
+                inc     res_offhi
+rl_l1:          jsr     res_ptr
+                ldb     ,x
+                pshs    b
+                ldd     res_off
+                addd    #1                      ; record +4, the MSB
+                std     res_off
+                bcc     rl_l2
+                inc     res_offhi
+rl_l2:          jsr     res_ptr
+                lda     ,x
+                puls    b
+                std     res_len                 ; ★ D = MSB:LSB = the length; do not swap
+                puls    a
+                sta     res_offhi
+                puls    a,b
+                std     res_off
+                puls    a,b
+                rts
+                endc
+
 * res_peek: D = payload offset -> A = that byte. Clobbers B, X and res_off/res_offhi/res_vol --
 * which describe the last FETCH only while res_fetch is running, and nothing reads them after.
+* ★★★ NOT SPLIT FOR THE CURSOR, AND THE FIRST ATTEMPT WAS [T-P0-136]. Factoring the addressing
+* into a res_peek_ptr that the cursor could call cost **+3 bytes on res_probe and vm_probe** --
+* two gate probes that P6.82 re-pinned one task ago, for a refactor neither of them can reach.
+* ★★ res_peek already leaves X at the byte (`jsr res_ptr / lda ,x`), so res_cseek calls res_peek
+* and uses X, paying one redundant `lda ,x` per block crossing. **This routine is byte-identical
+* to its pre-task form**, which is checked rather than claimed: both probes' hashes are unmoved.
 res_peek:
                 addd    res_lcoff
                 std     res_off
@@ -1017,6 +1076,99 @@ res_peek:
                 jsr     res_ptr
                 lda     ,x
                 rts
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ── res_cseek / res_cnext ── A READ CURSOR, FOR A STREAM RATHER THAN A FIELD [T-P0-136] ──
+*
+* ★★★★★ res_peek MAPS PER BYTE AND THAT IS WHY IT DOES NOT SCALE HERE. One mapping per byte is
+* what makes it straddle-proof by construction, and it costs res_ptr -- ~90 CPU cycles -- every
+* time. Eight header bytes is ~720 cycles against a multi-KB copy, which is the trade T-P0-130
+* took and it was right. **A cel's compressed stream is up to 1,552 bytes** [cel_bytes.py, corpus
+* maximum: larry1 view 41], and 1,552 x 90 is ~140,000 cycles against ~12 a byte for the copy.
+* ★★★★ So the stream needs the OTHER shape: map once, walk inside the window, re-map when the walk
+* crosses out of it. **That is what res_fetch's own copy already does internally** -- its header
+* says it "re-derives its source pointer whenever it crosses the window" -- so this is that
+* mechanism given a name rather than a new idea.
+*
+* ★★★★★ TWO THINGS INVALIDATE THE CURSOR AND ONLY ONE OF THEM IS THE BOUNDARY.
+*   1. the walk reaches RES_WINDOW+8192            -- the straddle, and it is per BYTE
+*   2. somebody else maps a different block into slot 6 -- and in the compositor somebody does:
+*      plane_vis maps a FRAMEBUFFER slice there for every pixel write [plane_win.s]
+* ★★★★ (2) IS CHECKED, NOT ASSUMED, AND IT IS CHEAP BECAUSE OF T-P0-135: res_curblk IS ph_cur6,
+* the single record that the only writer of $FFA6 updates in the same breath. So "is my block
+* still mapped?" is one compare against a byte that cannot be stale. **Before P6.82 this cursor
+* could not have been written safely at all** -- it would have been a fourth cache of the same
+* register, which is the defect P6.74 and P6.78 each cost a task.
+*
+* ★★★ THE FAST PATH IS THE WHOLE POINT: two compares and a post-increment load. The slow path
+* re-derives everything from the payload offset, so it is correct regardless of which of the two
+* reasons brought it there -- and a re-seek after a stolen block lands on the same byte.
+* ★★ res_cbase is the payload offset of the window's FIRST byte, so the cursor's offset is
+* res_cbase + (res_cptr - RES_WINDOW) and never needs its own counter in the inner loop.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★ BEHIND ITS OWN FLAG, NOT RES_PEEK's, AND THAT IS NOT TIDINESS [§2M.2's `ifndef` discipline,
+* same shape]. res_probe and vm_probe define RES_PEEK and have no compositor, so putting the
+* cursor under RES_PEEK would add ~80 bytes to both gate probes to carry code neither can reach --
+* and would move two baselines that P6.82 moved one task ago. **A client that walks a stream says
+* so.**
+                ifdef   RES_CURSOR
+* ★ A payload offset is 16 bits here: res_open already refuses anything the arena cannot hold and
+* the corpus maximum resource is 10,428 B, so the cursor needs no high part [contrast res_off,
+* which is a VOLUME offset and is 20 bits -- L-40].
+res_cptr        fdb     0               ; CPU address of the next source byte
+res_cbase       fdb     0               ; payload offset of RES_WINDOW's first byte
+res_cblk        fcb     $FF             ; the block res_cptr lives in ($FF = none)
+
+* res_cseek: D = payload offset. Establishes the cursor there; X = res_cptr on return.
+res_cseek:
+                pshs    a,b
+                jsr     res_peek                ; ★ X -> the byte, slot 6 mapped, res_curblk true
+                stx     res_cptr
+                lda     res_curblk
+                sta     res_cblk
+* ★ base = offset - (X - RES_WINDOW), i.e. the payload offset of this window's byte 0.
+                tfr     x,d
+                subd    #RES_WINDOW
+                pshs    a,b
+                ldd     2,s                     ; the saved payload offset
+                subd    ,s++
+                std     res_cbase
+                puls    a,b
+                ldx     res_cptr
+                rts
+
+* res_cnext: -> A = the next source byte, cursor advanced. X is clobbered.
+* ★★★ THE ORDER OF THE TWO GUARDS IS DELIBERATE. The boundary test is a compare against a
+* constant and the block test is a compare against memory, so the cheaper one goes first and the
+* common case pays for one of them rather than both being unavoidable.
+* ★★★★★ -DRES_FAULT_NOCROSS IS §2W's ARM: it drops the boundary test, so the walk runs straight
+* off the end of the 8 KB aperture into whatever follows it in the CPU map. **A cel whose stream
+* does not cross is unaffected** -- which is why the castle stays green under it and AC-4's
+* constructed case does not [L-85: a fixed sample that always passes is evidence about the sample].
+res_cnext:
+                ldx     res_cptr
+                ifndef  RES_FAULT_NOCROSS
+                cmpx    #RES_WINDOW+RES_WINDOW_SIZE
+                bhs     rcn_slow
+                endc
+                lda     res_cblk
+                cmpa    res_curblk
+                bne     rcn_slow
+                lda     ,x+
+                stx     res_cptr
+                rts
+* ★★ THE SLOW PATH RE-DERIVES FROM THE OFFSET, so it handles both reasons identically. The
+* offset is rebuilt from res_cbase rather than kept incrementally: one addition here against one
+* increment per byte in the loop above.
+rcn_slow:
+                tfr     x,d
+                subd    #RES_WINDOW
+                addd    res_cbase
+                jsr     res_cseek
+                lda     ,x+
+                stx     res_cptr
+                rts
+                endc
                 endc
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════

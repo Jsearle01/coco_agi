@@ -111,6 +111,20 @@ PRI_BASE        equ     MAP_PRI_SLICE           ; priority slice, draw phase
 * PLANE_WIN_MMU reintroduces the exact wrap the windowing exists to remove**, and it was built
 * that way once -- 12,782 bytes that assembled cleanly and could not be run.
 PLANE_WIN_MMU   equ     1
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE COMPOSITOR READS THE VIEW IN PLACE [T-P0-136]. Declared in the SOURCE, as
+* PLANE_WIN_MMU is and for the same reason [AD-119: a symbol on a command line is a fact nobody
+* can see from the source]. Two flags because they are two mechanisms:
+*   RES_CURSOR        res_core.s's stream cursor -- map once, re-map on crossing or on theft
+*   VC_SRC_WINDOWED   view_cel.s reads the VIEW through the window instead of out of the arena
+* ★★★ NEITHER IS SET BY cel_probe OR comp_probe, so the cel and comp gates assemble the byte
+* identical decoder they always have and their 9,193/9,193 and 124/124 remain claims about the
+* same program. ★★ -DP3B_VIEW_COPY restores the copy: AC-4's arm and the before side of §4D.
+                ifndef  P3B_VIEW_COPY
+RES_CURSOR      equ     1
+VC_SRC_WINDOWED equ     1
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 PIC_W           equ     160
 PIC_H           equ     168
 * ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -1188,6 +1202,9 @@ p3_after_vm_phase:
                 ifdef   P3B_VIEWHDR_TEST
                 jsr     p3_vh_test              ; ★ T-P0-130 AC-8, test arm only
                 endc
+                ifdef   P3B_CELTEST
+                jsr     p3_ct_test              ; ★ T-P0-136 AC-4, test arm only
+                endc
 * ★★★ AC-5's brackets. One `sta` per boundary; the host tap does the arithmetic. Placed around
 * the calls rather than inside them so a stage's cost includes its own call overhead, which is
 * what a budget consumer cares about.
@@ -1783,6 +1800,114 @@ ppd_out:        rts
 * [view_straddle.py --expect]; -DVM_VIEW_FAULT_ONEMAP is the arm that must disagree.
 * ★★ Out here and not beside its call: inside the loop body it pushed two short branches out of
 * range. **Test arm only: no shipped arm assembles a byte of this.**
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ -DP3B_CELTEST -- T-P0-136 AC-4: A CEL WHOSE STREAM CROSSES A BLOCK BOUNDARY, DECODED BY
+* THE REAL PATH.
+*
+* ★★★★★ THE CASTLE CANNOT SHOW THIS AND THAT IS THE WHOLE REASON THE HOOK EXISTS. The three views
+* the castle composites -- 0, 97, 107 -- have payloads that sit inside one 8 KB block, so 40
+* cycles of compositing exercise the cursor's boundary path **zero times**. Seven KQ1 views DO
+* straddle [view_straddle.py --construct: 67, 79, 81, 85, 116, 117, 138] and none of them is drawn
+* in room 1. ★★★★ **So a green castle run says nothing about the straddle**, which is L-85's shape
+* and the reason P6.81's and P6.82's reports each had to name an unexercised path.
+*
+* ★★★★ WHAT IT DOES: once, in the VM phase, decode EVERY row of (p3_ct_view, loop, cel) through
+* whichever source path this build has, and publish a 16-bit sum of the decoded pixels plus the
+* cel's geometry and error byte. ★★★ The host runs it on the windowed arm and on -DP3B_VIEW_COPY
+* and compares: **the copy path cannot straddle (res_fetch re-derives its pointer per window) and
+* the windowed path must, so an equal sum is the claim and an unequal one is the defect.**
+* ★★ Test arm only: no shipped arm assembles a byte of this.
+                ifdef   P3B_CELTEST
+p3_ct_view      fcb     $FF             ; $FF = none, or already run
+p3_ct_loop      fcb     0
+p3_ct_cel       fcb     0
+p3_ct_sum       fdb     0               ; sum of every decoded pixel, all rows
+p3_ct_rows      fcb     0               ; rows actually decoded
+p3_ct_err       fcb     0
+p3_ct_w         fcb     0
+p3_ct_h         fcb     0
+
+p3_ct_test:
+                lda     p3_ct_view
+                cmpa    #$FF
+                bne     p3_ct_go                ; ★ an rts, not a branch to the far exit
+                rts
+p3_ct_go:
+                pshs    a
+                lda     #$FF
+                sta     p3_ct_view              ; ★ once only
+                lda     #RES_VIEW
+                ldb     ,s+
+                ifdef   VC_SRC_WINDOWED
+                jsr     res_locate
+                else
+                jsr     res_open
+                endc
+                lda     res_err
+                beq     p3_ct_got
+                sta     p3_ct_err
+                rts
+p3_ct_got:
+                ifdef   VC_SRC_WINDOWED
+                ldd     #0
+                std     vc_view
+                ldd     res_len
+                else
+                ldx     res_base
+                stx     vc_view
+                ldd     res_base
+                addd    res_len
+                endc
+                std     vc_srcend
+                lda     p3_ct_loop
+                sta     vc_loop
+                lda     p3_ct_cel
+                sta     vc_cel
+                ldx     #CP_CEL
+                stx     vc_dest
+                jsr     vc_decode_begin
+                lda     vc_err
+                sta     p3_ct_err
+                bne     p3_ct_done
+                lda     vc_w
+                sta     p3_ct_w
+                lda     vc_h
+                sta     p3_ct_h
+                ldd     #0
+                std     p3_ct_sum
+                clr     p3_ct_rows
+p3_ct_rowlp:
+                lda     p3_ct_rows
+                cmpa    p3_ct_h
+                bhs     p3_ct_done
+                jsr     vc_decode_row
+                lda     vc_err
+                sta     p3_ct_err
+                bne     p3_ct_done
+* ★ sum vc_w bytes of the decoded row; a sum is enough to separate "the same pixels" from
+* "different pixels" and needs no host-side buffer.
+                ldx     #CP_CEL
+                clra
+                ldb     p3_ct_w
+                beq     p3_ct_rownext
+                tfr     d,y                     ; Y = width, the row's byte count
+p3_ct_sumlp:    ldb     ,x+
+                clra                            ; D = the pixel, zero-extended
+                addd    p3_ct_sum
+                std     p3_ct_sum
+                leay    -1,y
+                bne     p3_ct_sumlp
+p3_ct_rownext:
+                inc     p3_ct_rows
+                bra     p3_ct_rowlp
+p3_ct_done:
+                ifndef  VC_SRC_WINDOWED
+                jsr     res_close
+                endc
+p3_ct_out:      rts
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+
                 ifdef   P3B_VIEWHDR_TEST
 p3_vh_view      fcb     $FF             ; the view to test; $FF = none, or already done
 * ★★★ AND WHICH LOOP AND CEL: set_view keeps an object's loop and cel when they are in range, so
@@ -2939,11 +3064,32 @@ pca_lp:
 * writes that register"*. **The compositor is an "anyone else" nobody had listed.**
 * ★★★ Per FETCH, not once per loop: cp_composite runs between iterations, so one invalidation at
 * the top would be stale again by the second sprite.
-                lda     #$FF
-                sta     res_curblk
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ AND BOTH HALVES OF THAT ARE RETIRED AT T-P0-136 -- THE INVALIDATION AND THE FETCH.
+*
+* ★★★★ THE INVALIDATION WENT WITH plane_reset [T-P0-135]. `res_curblk` is no longer a cache that
+* can go stale: it IS mmu_phase.s's ph_cur6, the single record that the only writer of $FFA6
+* updates in the same breath. **There is no second owner to tell**, so storing $FF here would
+* only force a remap the cursor would otherwise skip. The paragraph above describes a world with
+* two caches and that world ended one task ago.
+*
+* ★★★★★ THE FETCH IS REPLACED BY A LOCATE. res_open COPIED the whole VIEW into the arena -- every
+* loop and every cel, up to 2,413 B in the castle -- to decode the ONE cel about to be drawn. In a
+* 16,384 B arena holding 15,376 B of LOGICs that leaves 1,008 B, so the copy starved the cache
+* every cycle and P6.81's trim gave back 3,817 B that the next cycle re-fetched [T-P0-133 §4].
+* ★★★ res_locate maps nothing into the arena: it resolves the DIR entry, checks the signature and
+* publishes where the payload IS and how long it is. **The arena allocation for a sprite becomes
+* zero**, which is the whole task.
+* ★★ THE BEFORE ARM RESTORES THE COPY AND NOT THE INVALIDATION. -DP3B_VIEW_COPY is here to
+* measure what the copy cost; the `sta res_curblk` above retired with plane_reset at T-P0-135 and
+* putting it back would be measuring two changes at once [L-73].
                 lda     #RES_VIEW
                 ldb     p3_view
+                ifdef   VC_SRC_WINDOWED
+                jsr     res_locate
+                else
                 jsr     res_open
+                endc
                 lda     res_err
                 beq     pca_gotview
 * ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -2968,6 +3114,24 @@ pca_gotview:
 * calls**, because `vc_decode_cel` writes to CP_CEL, which in this configuration starts at $5300
 * and runs 4,784 bytes -- 1,456 of them INSIDE the arena this VIEW was just fetched into
 * [P6.47 §7.2]. ★★ No decode applies to a VIEW, so the bytes are final the moment res_open returns.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ AND THE CHECKSUM NOW COVERS NOTHING FOR A VIEW, WHICH IS SAID HERE RATHER THAN DISCOVERED
+* [T-P0-136 §4C]. res_ck_note baselines the bytes of a resident COPY and res_ck_verify re-reads
+* them later. **With no copy there is no resident object to baseline**: the bytes are the game's
+* own, in the staged volume, read once through an 8 KB window and never held.
+* ★★★★ THIS IS P6.48's BLIND SPOT 1 GETTING WIDER AND IT IS A REAL LOSS. The instrument's whole
+* purpose was catching a resource corrupted after it was loaded -- which is exactly what P6.78
+* was -- and a VIEW is now outside its reach entirely. ★★★ What still covers the same failure is
+* narrower and worth naming: the volume write-tap [P6.82 AC-7] sees anything writing INTO the
+* staged data, and the signature check in res_locate sees a window pointing at the wrong block.
+* **Neither is a per-byte guarantee.** ★★ LOGICs are unaffected: they are still copied, still
+* baselined at the bind, and still verified on every later bind.
+* ★ So the hook is not merely unreachable here, it is removed: a checksum call on a resource with
+* no resident bytes would baseline whatever the window happened to hold.
+                ifdef   VC_SRC_WINDOWED
+                ldd     #0
+                std     vc_view                 ; ★ payload offset 0, not a CPU address
+                else
                 ifdef   RES_CHECKSUM
                 lda     #RES_VIEW
                 ldb     p3_view
@@ -2975,6 +3139,7 @@ pca_gotview:
                 endc
                 ldx     res_base
                 stx     vc_view
+                endc
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ vc_srcend, AND THIS PROBE HAS NEVER SET IT [T-P0-106]. It is the ONLY bound VC_E_TRUNC
 * tests -- `cmpx vc_srcend / blo` [view_cel.s:268] -- and the decoder does not derive it: the
@@ -2986,8 +3151,14 @@ pca_gotview:
 * from a HOST-staged VIEW and set the bound; this path decodes from an ARENA-RESIDENT one and did
 * not. **The join is what nobody watched** [L-121, and P6.28d's shape exactly].
 * ★★★ res_open has always published res_len. Nothing in this decode path used it.
+* ★★★ UNDER THE WINDOW vc_srcend IS THE PAYLOAD LENGTH, NOT AN END ADDRESS [view_cel.s says so
+* beside the variable]. res_locate publishes res_len for exactly this reason.
+                ifdef   VC_SRC_WINDOWED
+                ldd     res_len
+                else
                 ldd     res_base
                 addd    res_len
+                endc
                 std     vc_srcend
 * ═══════════════════════════════════════════════════════════════════════════════════════════
                 ldx     #CP_CEL
@@ -3078,6 +3249,14 @@ pca_ytopok:     sta     1,x
                 inc     p3_prevn
 pca_norec:
 pca_close:
+* ★★★★ NOTHING TO CLOSE UNDER THE WINDOW [T-P0-136]. res_locate pushes no frame and allocates no
+* arena, so there is no depth level to pop and no res_top to rewind -- and calling res_close here
+* would pop a level this iteration never pushed, which res_close treats as a no-op at depth 0 and
+* as a REAL pop at any depth above it. ★★★ The release-side checksum goes with it, for the reason
+* stated at pca_gotview: there are no resident bytes to verify.
+                ifdef   VC_SRC_WINDOWED
+                bra     pca_skip
+                endc
                 ifdef   RES_CHECKSUM
                 lda     #RCK_AT_CLOSE
                 sta     rck_site

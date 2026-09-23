@@ -173,6 +173,27 @@ param(
   # ★★★ A KNOWN-GOOD RED in Jay's own words [P6.78]: "graham didn't move... the alligators do not
   # stay in the moat", plus the stray `"` box. Expect logic 1 corrupted by cycle 18.
   [switch]$PrivCache,
+  # ★★★★★ -ViewCopy IS T-P0-136's BEFORE ARM (-DP3B_VIEW_COPY): p3_composite_all copies the whole
+  # VIEW into the arena again and the decoder reads it from there. **That is every build up to
+  # P6.82**, so it is the before side of §4D measured on this binary rather than quoted from a
+  # previous report -- and it is also AC-4's comparison arm, because the copy path is the one that
+  # cannot straddle and the windowed path is the one that must.
+  # ★★★ Expect RESSTATS h3 m1 ev1 tr1 against the shipped arm's h4 m0 ev0 tr0.
+  [switch]$ViewCopy,
+  # ★★★★★ -CelTest IS T-P0-136's AC-4 ARM (-DP3B_CELTEST): decode every row of one named cel
+  # through whichever source path the build has, and publish a sum of the pixels. Driven by
+  # P3B_CELTEST="view,loop,cel". ★★★★ It exists because **the castle cannot straddle**: views 0,
+  # 97 and 107 each sit inside one 8 KB block, so 40 cycles of compositing exercise the cursor's
+  # boundary path zero times. Seven KQ1 views do straddle and none is drawn in room 1.
+  # ★★★ Run it on this arm and on -ViewCopy and compare the sums: the copy path cannot straddle,
+  # the windowed path must, and an equal sum is the claim.
+  [switch]$CelTest,
+  # ★★★★★ -NoCross IS AC-4's FAULT ARM (-DRES_FAULT_NOCROSS): res_cnext stops testing the
+  # aperture boundary, so a stream that crosses one walks off the end of the window. ★★★ It is
+  # the arm that proves -CelTest has teeth: expect the SAME pixel sum on a cel that does not
+  # straddle and a DIFFERENT one on KQ1 view 67 loop 2 cel 2, whose stream spans +2085..+2329
+  # across the boundary at +2310.
+  [switch]$NoCross,
   [switch]$ViewFaultOneMap,
   [switch]$NoIrq,
   [double]$Hold   = 3.0
@@ -337,6 +358,10 @@ if ($ViewHdrTest) { $FLAGS += "-DP3B_VIEWHDR_TEST" }
 if ($LevelKeys) { $FLAGS += "-DP3B_FAULT_LEVELKEYS" }
 if ($IfRec) { $FLAGS += @("-DVM_IFDIAG","-DVM_SAIDDIAG") }
 if ($PrivCache) { $FLAGS += "-DPLANE_FAULT_PRIVCACHE" }
+if ($ViewCopy) { $FLAGS += "-DP3B_VIEW_COPY" }
+if ($CelTest) { $FLAGS += "-DP3B_CELTEST" }
+# ★★★★ -NoCross is AC-4's §2W arm: the cursor stops testing the aperture boundary.
+if ($NoCross) { $FLAGS += "-DRES_FAULT_NOCROSS" }
 if ($ViewFaultOneMap) { $FLAGS += "-DVM_VIEW_FAULT_ONEMAP" }
 # ★★★★★ THE CEL ARM GETS THE KEYBOARD TOO [T-P0-115]. Tested on the absence of -DP3B_NO_CEL rather
 # than on a list of the twelve text switches, because that list is the thing this file has already
@@ -453,6 +478,10 @@ $CelLink = ($FLAGS -notcontains "-DP3B_NO_CEL")
 $Counting = $CelLink -and (-not $Combined -or $Count)
 # ★★ T-P0-130 AC-8's two symbols exist only under -DP3B_VIEWHDR_TEST -- the same condition.
 if ($ViewHdrTest) { $WANT += @("p3_vh_view","p3_vh_loop","p3_vh_cel","p3_vh_out","p3_vh_off","p3_vh_le") }
+# ★★ T-P0-136 AC-4's symbols exist only under -DP3B_CELTEST -- the SAME condition as the switch,
+# which is the rule this file has had to restate five times.
+if ($CelTest) { $WANT += @("p3_ct_view","p3_ct_loop","p3_ct_cel","p3_ct_sum","p3_ct_rows",
+                           "p3_ct_err","p3_ct_w","p3_ct_h") }
 if ($CelLink) { $WANT += @("vc_err","vc_w","vc_h","vc_src","vc_srcend","vc_view",
                                $(if ($Counting) { "co_tested","co_written","co_rejkey","co_rejpri" }),
                                "p3_spr","p3_nspr",
