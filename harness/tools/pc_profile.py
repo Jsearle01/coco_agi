@@ -165,6 +165,11 @@ def main():
     # ★★★ It matters because the render is 79.5% of its cycle: a table over the whole cycle is
     # dominated by the render but is not a table OF the render, and §4B asks for shares that sum
     # to 4.90 s rather than to 6.16.
+    # ★★ Stripped here, not read from sys.argv at the print site: `prof, mapf = args` unpacks
+    # exactly two, so a flag left in the list is a ValueError rather than a wrong answer.
+    want_labels = "--labels" in args
+    if want_labels:
+        args.remove("--labels")
     stage = None
     if "--stage" in args:
         k = args.index("--stage"); stage = int(args[k + 1]); del args[k:k + 2]
@@ -199,6 +204,38 @@ def main():
     for i, (n, c) in enumerate(by_r.most_common(top), 1):
         f = "/".join(sorted(defs.get(n, {"?"})))
         print(f"  {i:>2} {n:<24} {f:<16} {subsystem(n, defs.get(n)):<24} {c:>7} {100*c/total:>5.1f}%")
+
+    # ═══════════════════════════════════════════════════════════════════════════════════════
+    # ★★★★★ --labels: ATTRIBUTE TO EVERY LABEL, NOT ONLY TO ROUTINE ENTRIES [T-P0-153 §4A].
+    # ★★★★★ THE ROUTINE TABLE ABOVE CANNOT SEE INSIDE A LOOP, AND THAT IS WHY THE BLIT HAS BEEN A
+    # SINGLE 38% ROW FOR SIX TASKS. `entries` is built from jsr/bsr targets and fdb tables, so a
+    # label reached by `bra`/`beq` -- co_pix, co_opaque, co_depth, co_st_put, co_nextx -- is NOT a
+    # routine, and its samples fold into the nearest preceding one. **All of cp_composite's inner
+    # loop attributes to cp_composite.**
+    # ★★★★ This file already names the class at EXTRA_ENTRIES: *"entered by FALL-THROUGH, so no
+    # call names them -- the heuristic's stated blind spot"*. ★★★ The fix is not more entries: it is
+    # to stop filtering. `by_label` was already computed and already stage-filtered; nothing printed
+    # it. **The measurement existed and had no reader** [P6.80's shape, in a host tool].
+    # ★★ Routines remain the default because a label table is noisier -- every branch target is a
+    # row, and a row is not a routine.
+    #
+    # ★★★★★ AND A ZERO-LENGTH REGION IS ATTRIBUTED TO THE WRONG NAME -- READ THE TABLE WITH THIS IN
+    # HAND. A label whose body is entirely inside an `ifdef` that the arm does not define occupies
+    # NO BYTES, so it shares an address with the next label and bisect picks one of them by sort
+    # order. ★★★★ Found on this table's first use [T-P0-153]: `co_reject_pri` showed **6.1% of the
+    # drawing stage** while owning only counter code under `ifndef COMP_NOCOUNT` -- which the
+    # shipped arm DEFINES, so its region is empty. **The samples are co_nextx's**, the per-pixel
+    # advance, and co_nextx does not appear in the table at all.
+    # ★★★ The figure was right and the NAME was wrong, which is the quietest kind of wrong: a
+    # plausible routine with a plausible share. ★★ Cross-check any surprising row against the
+    # source's `ifdef` structure before believing the name.
+    if want_labels:
+        print(f"\nTOP {top} LABELS  (every map symbol, including branch targets -- this is what"
+              " decomposes a loop)")
+        print(f"  {'#':>2} {'label':<24} {'file':<16} {'samples':>7} {'share':>6}")
+        for i, (n, c) in enumerate(by_l.most_common(top), 1):
+            f = "/".join(sorted(defs.get(n, {"?"})))
+            print(f"  {i:>2} {n:<24} {f:<16} {c:>7} {100*c/total:>5.1f}%")
     shown = sum(c for _, c in by_r.most_common(top))
     print(f"     top {top} cover {100*shown/total:.1f}% of samples; {len(by_r)} routines seen")
 
