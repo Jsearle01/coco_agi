@@ -280,6 +280,23 @@ param(
   # ★★★★★ AC-5's fault arm: invert the staged sort so sprites draw FRONT TO BACK. A far sprite
   # then lands on top of a near one -- visible, and both planes must differ from the reference.
   [switch]$SortReverse,
+
+  # ★★★★★ T-P0-152. -RestoreBytewise is the BEFORE arm: prp_copy's original byte-at-a-time loop,
+  # so the 16-bit copy is a one-variable comparison [P6.84's rule]. -RestoreNoTail is AC-4's fault
+  # arm: the odd trailing byte is dropped, leaving a one-pixel column unrestored behind a sprite of
+  # odd width.
+  [switch]$RestoreBytewise,
+  [switch]$RestoreNoTail,
+
+  # ★★★★★ -RestoreNoCross is the BEFORE arm for §4C, NOT a fault arm -- the first cut of this
+  # comment called it one and it is the opposite. It removes the SKIP, so prp_visual re-maps on
+  # every row exactly as it did before T-P0-152. Behaviour-identical by construction; it costs time
+  # and changes nothing, which is what a before arm must do [P6.84's one-variable rule].
+  [switch]$RestoreNoCross,
+
+  # ★★★★ AC-4's second FAULT arm: map on the first row of a rectangle and NEVER again, so a
+  # rectangle spanning a slice boundary restores its lower rows through the wrong window.
+  [switch]$RestoreStaleSlice,
   [switch]$SlowSteal,
   # ★★★★ -NoRemap IS the fault arm (-DRES_FAULT_NOREMAP): a theft takes the cheap path WITHOUT
   # re-mapping, so the walk reads through whatever the compositor left in slot 6. Expect a wrong
@@ -489,6 +506,10 @@ if ($CacheStale)      { $FLAGS += "-DCC_FAULT_STALE" }
 # RED (the cache does) [T-P0-147].
 if ($CachePoison)     { $FLAGS += "-DCC_FAULT_POISON" }
 if ($SortReverse)     { $FLAGS += "-DP3B_SORT_REVERSE" }
+if ($RestoreBytewise) { $FLAGS += "-DP3B_RESTORE_BYTEWISE" }
+if ($RestoreNoTail)   { $FLAGS += "-DP3B_RESTORE_NOTAIL" }
+if ($RestoreNoCross)  { $FLAGS += "-DP3B_RESTORE_NOCROSS" }
+if ($RestoreStaleSlice) { $FLAGS += "-DP3B_RESTORE_STALESLICE" }
 if ($CelStats) { $FLAGS += "-DP3B_CELSTATS" }
 if ($CelStatsNever)  { $FLAGS += "-DP3B_CELSTATS_NEVER" }
 if ($CelStatsAlways) { $FLAGS += "-DP3B_CELSTATS_ALWAYS" }

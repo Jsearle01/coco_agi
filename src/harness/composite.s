@@ -154,6 +154,14 @@ co_ctrlstep     rmb     4               ; ★ total column-scan iterations those
 *         floor for load-test-read-compare-write-write-advance  -> **5.0x**
 *     restore, incl. its plane access:      **46 cycles per byte put back** against a 16-bit copy
 *         loop's ~10.5                                            -> **4.4x**
+*     ★★★★★ THE RESTORE ROW IS CORRECTED AT T-P0-152, AND BY ITS OWN AUTHOR: **prp_copy does NOT
+*     call plane_vis/plane_pri** -- it walks FB_BASE/PRI_BASE directly -- so the 70/30 attribution
+*     above over-charged it. **41.8 cycles/byte, not 46**, splitting copy 20.4 / setup 21.3.
+*     ★★★ T-P0-152 then took both halves and measured them separately: 16-bit copy **-0.88%** of
+*     the stage, crossing-test hoist **-2.58%**, together **-3.43% moving** and enough to move the
+*     standing median 0.2003 -> 0.1836 s/cycle. **~39 cycles/byte now.**
+*     ★★★★ The headroom was never 4.4x: at 6-42 byte spans both halves are dominated by PER-CALL and
+*     PER-ROW overhead, not by their inner loops, and 10.5 is a long-copy figure.
 * ★★★★ **Two independent paths, both ~4-5x over, and the factor they share is WINDOWED PLANE
 * ACCESS** -- a 26,880 B plane reached through an 8 KB aperture, one address computation per unit.
 * ★★★ So the target is the per-pixel ADDRESSING, not the pixel count [T-P0-151 §4C].

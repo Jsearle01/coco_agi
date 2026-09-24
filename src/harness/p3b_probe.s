@@ -3542,7 +3542,12 @@ prp_ns_have:
 prp_ns_no:      rts
 
 * ── prp_visual -- one byte per pixel, 160 per row, shadow -> visible ─────────────
+prpv_lastsl     fcb     $FF             ; ★ the slice THIS loop last mapped; $FF = none
 prp_visual:
+* ★★★★★ $FF FIRST, ALWAYS. prp_priority remaps slots 5 and 6 between rectangles, so a slice number
+* carried over from the previous call would skip a map that is genuinely needed [T-P0-152 §4C].
+                lda     #$FF
+                sta     prpv_lastsl
 prpv_row:       lda     p3rp_cnt
                 beq     prpv_done
                 lda     p3rp_rowb
@@ -3560,7 +3565,53 @@ prpv_row:       lda     p3rp_cnt
                 lda     p3rp_w
                 sta     p3rp_n
                 jsr     prp_split
-* map: visible slice into slot 5, shadow slice into slot 6 -- p3rb_map's pair
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ RE-MAP ONLY ON A SLICE CROSSING [T-P0-152 §4C]. The two calls below cost ~50 cycles a row
+* and a row is 6-42 bytes, so they were the larger half of the restore's 41.8 cycles/byte [§4A].
+* ★★★★★ AND THEY ARE REDUNDANT ALMOST ALWAYS: consecutive rows are PIC_W=160 bytes apart and a
+* slice is 8,192, so the slice changes every **51.2 rows**. A sprite is at most 46 rows tall in the
+* whole corpus [cel_bytes.py], **so a rectangle crosses at most ONE boundary** and 50 of 51 rows
+* re-map to the slice already mapped.
+* ★★★★ THE TEST IS AGAINST prpv_lastsl, NOT ph_cur5/ph_cur6, and the distinction is the safety
+* argument: this is a PRIVATE record of what THIS LOOP mapped, reset to $FF on entry, and nothing
+* inside the loop remaps slots 5 or 6 -- prp_copy walks FB_BASE/PRI_BASE with no window call.
+* ★★★ A cache of a register someone else can write is P6.74's and P6.78's defect; a cache scoped to
+* a loop that owns the register for its duration is not. **prp_priority remaps, so the $FF reset on
+* entry is load-bearing** -- it forces the first row to map.
+* ★★ prp_split is still called EVERY row: it also clamps p3rp_n at the slice end, which is per-row
+* work and is not what this skips [§6: do not change the straddle logic, only call it less].
+*
+* ★★★★★ MEASURED: the composite stage went **0.13076 -> 0.12739 s/cycle moving, -2.58%** on top of
+* the 16-bit copy's -0.88% -- **three times the copy's win**, which is what §4A predicted when it
+* measured the setup at 21.3 cycles/byte against the copy's 20.4. ★★★ Standing, the two together
+* crossed a frame quantum: **0.2003 -> 0.1836 s/cycle, 4.99 -> 5.45 cycles/second.**
+*
+* ★★★★★ AND THE CROSSING CASE IS EXERCISED BY THE CASTLE, WHICH I HAD REASONED IT WAS NOT. The
+* arithmetic said a rectangle 4-32 rows tall cannot span a 51.2-row slice, so the test looked
+* defensive. **`-DP3B_RESTORE_STALESLICE` -- map the first row and never again -- CHANGES THE VISUAL
+* PLANE**, so rectangles here do cross. ★★★★ The fault arm corrected the reasoning, which is what
+* §2W is for: **this change is verified by the corpus rather than only by construction** [unlike
+* P6.95's sort, whose arm could not fire at all].
+* ★★ The PRIORITY path is NOT hoisted -- prp_priority still re-maps per row, which is why that arm
+* leaves the priority plane byte-identical. It is 80 bytes a row and packed; its own shape is §7.
+* ★★★★ AC-4's SECOND FAULT ARM: map once per rectangle and never again, so a rectangle that spans a
+* slice boundary restores its lower rows through the window its FIRST row needed. ★★★ It is the
+* defect this test exists to avoid, injected at the one line that decides it.
+                ifdef   P3B_RESTORE_STALESLICE
+                lda     prpv_lastsl
+                cmpa    #$FF
+                bne     prpv_mapped
+                lda     p3rp_slice
+                sta     prpv_lastsl
+                bra     prpv_domap
+                endc
+                lda     p3rp_slice
+                cmpa    prpv_lastsl
+                ifndef  P3B_RESTORE_NOCROSS
+                beq     prpv_mapped
+                endc
+                sta     prpv_lastsl
+prpv_domap:
                 lda     #P3_BLK_VISIBLE
                 sta     ph_blk_fb
                 lda     p3rp_slice
@@ -3569,6 +3620,8 @@ prpv_row:       lda     p3rp_cnt
                 sta     ph_blk_fb
                 lda     p3rp_slice
                 jsr     phase_draw_fb
+prpv_mapped:
+* ═══════════════════════════════════════════════════════════════════════════════════════════
                 jsr     prp_copy
 prpv_next:      inc     p3rp_rowb
                 dec     p3rp_cnt
@@ -3678,11 +3731,60 @@ prp_copy:
                 ldd     p3_restbytes
                 addd    #1
                 std     p3_restbytes
-prpc_nc:        ldb     p3rp_n
+prpc_nc:
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ SIXTEEN BITS AT A TIME [T-P0-152 §4B]. The byte loop below is `lda ,x+` / `sta ,u+` /
+* `decb` / `bne` = 6+6+2+3 = **17 cycles per byte**. The word loop is 8+8+5+3 = 24 per TWO bytes
+* = **12 per byte**, and Sierra's own bus measures 10.5 [P6.96], which is what an UNROLLED word
+* loop costs. ★★★ Unrolling is not taken: region A has 151 bytes [P6.93] and the spans here are
+* 6-42 bytes, where a longer preamble costs more than the inner loop saves (§4A's arithmetic).
+*
+* ★★★★★ AND THE COUNT CANNOT LIVE IN B ANY MORE -- THIS IS P6.33's DEFECT, IN THIS ROUTINE'S OWN
+* HEADER, AND `ldd` IS WHAT CAUSED IT. `ldd ,x++` writes A **and** B, so a count in B is destroyed
+* on the first iteration. ★★★★ The count moves to **Y**, which nothing in the restore path uses;
+* it is pushed and pulled so that stays true if someone later does.
+* ★★ THE ODD TAIL IS AT THE END, not the head: `within` is an offset and alignment is not
+* guaranteed, but a 6809 has no alignment requirement for `ldd`/`std` -- it costs the same on an
+* odd address -- so the head needs no special case and only a trailing byte can be left over.
+*
+* ★★★★★ MEASURED, AND IT BOUGHT LESS THAN THE ARITHMETIC PROMISED [T-P0-152 §4D]. Against
+* `-RestoreBytewise`, the composite stage went **0.13192 -> 0.13076 s/cycle moving, -0.88%** --
+* about **1.9 cycles per byte**, not the ~5 that 17-to-12 implies.
+* ★★★★ WHY, AND IT IS THE LESSON: the spans here are **6 to 42 bytes** (the ego is 6 wide, view 97
+* is 42), and this routine's own preamble -- six pointer set-ups plus the 32-bit p3_restbytes
+* accounting, ~45 cycles -- is paid ONCE PER CALL. At 6 bytes the word loop is no better than the
+* byte loop; at 13 it is ~14% better. ★★★ **An inner-loop cycle count is not a per-byte cost until
+* the span is long enough to amortise the call**, and 10.5 cycles/byte [P6.96's measurement of
+* Sierra's own bus] is the figure for a LONG copy, not for a sprite row.
+                ifdef   P3B_RESTORE_BYTEWISE
+                ldb     p3rp_n
 prpc_b:         lda     ,x+
                 sta     ,u+
                 decb
                 bne     prpc_b
+                rts
+                endc
+                pshs    y
+                clra
+                ldb     p3rp_n
+                lsrb                            ; B = whole words; A is already 0
+                beq     prpc_tail               ; n == 1: tail only
+                tfr     d,y
+prpc_w:         ldd     ,x++
+                std     ,u++
+                leay    -1,y
+                bne     prpc_w
+prpc_tail:
+* ★★★★ AC-4's FAULT ARM: drop the odd byte. A cel of odd width then leaves its RIGHTMOST COLUMN
+* unrestored -- a one-pixel trailing edge that follows the sprite. ★★★ Visible, and byte-detectable.
+                ifndef  P3B_RESTORE_NOTAIL
+                lda     p3rp_n
+                anda    #1
+                beq     prpc_wout
+                lda     ,x
+                sta     ,u
+                endc
+prpc_wout:      puls    y
 prpc_out:       rts
 
 * ── p3_pri_shadow -- copy the LIVE priority plane into its shadow, once per room ─
