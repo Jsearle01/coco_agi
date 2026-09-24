@@ -162,6 +162,32 @@ co_ctrlstep     rmb     4               ; ★ total column-scan iterations those
 *     standing median 0.2003 -> 0.1836 s/cycle. **~39 cycles/byte now.**
 *     ★★★★ The headroom was never 4.4x: at 6-42 byte spans both halves are dominated by PER-CALL and
 *     PER-ROW overhead, not by their inner loops, and 10.5 is a long-copy figure.
+*
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE BLIT ROW, DECOMPOSED AT T-P0-153 AND ACTED ON AT T-P0-154. For six tasks this was one
+* opaque 38% row because pc_profile.py names things by CALL target and every part of this loop is
+* reached by a branch. `--labels` shows it (stage 9, moving, before T-P0-154):
+*     co_pix 13.9% · co_depth 6.9% · co_opaque 6.9% · co_nextx 6.1% · co_put_visual 5.7%
+*     co_st_put 0.9% · co_op_got 0.8% · co_st_lo 0.4%   ·   plane_vis+plane_pri 15.1%
+* ★★★ RECONCILED against instruction counts before anything was changed [T-P0-154 §4A]:
+* co_nextx 19 by count against 19.2 sampled; co_pix 42.6 weighted against 43.7. **They agree**,
+* which is what licensed the change below.
+*
+* ★★★★★ WHAT T-P0-154 REMOVED FROM co_pix -- 14.8 CYCLES PER TESTED PIXEL, measured:
+*     12 cycles: `ldx co_src` / `stx co_src` round-tripped the loop's own pointer through memory on
+*        EVERY pixel. Extended, 6 each, because setdp is 0 and page 0 is the HAL's. Y holds it now.
+*      5 cycles: `sta co_col` sat above the key test, and 55% of tested pixels are transparent and
+*        never read it. It moved to the top of co_opaque.
+* ★★★★ MEASURED SEPARATELY [P6.84's rule]: co_col -0.92%, the pointer -3.79%, together -4.70% of
+* the composite stage moving and -5.08% standing. **0.92 + 3.79 = 4.71, so they are additive** --
+* a consistency check, not an assumption.
+* ★★★ AND THE CODE SHRANK: region A's headroom went 103 -> 110 bytes, the first task in this arc to
+* give any back.
+*
+* ★★★★ NOT TAKEN: the direct page. Moving these variables into page 0 would save a cycle per access
+* with no logic change, but `setdp 0` is the HAL's and page 0 holds hal_frame_hi and blit_tmp --
+* so it needs MAP_STATUS space and it changes every HAL `<` access. **Priced, not built** [§6].
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★ **Two independent paths, both ~4-5x over, and the factor they share is WINDOWED PLANE
 * ACCESS** -- a 26,880 B plane reached through an 8 KB aperture, one address computation per unit.
 * ★★★ So the target is the per-pixel ADDRESSING, not the pixel count [T-P0-151 §4C].
@@ -269,6 +295,11 @@ co_rp_done:
 * ═══════════════════════════════════════════════════════════════════════════════════════════
                 endc
 * ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★ Y PICKS UP THE ROW'S SOURCE HERE, after BOTH paths above have set co_src -- the cel cache's
+* CC_HIT branch and the decode. ★★★ Per ROW, not per pixel, and stored back at co_rownext.
+                ifndef  COMP_SPILL_SRC
+                ldy     co_src
+                endc
                 lda     co_basex
                 sta     co_curx
                 lda     vc_w
@@ -297,10 +328,38 @@ co_pix:
                 lda     co_remw
                 lbeq    co_rownext
 
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE SOURCE POINTER LIVES IN Y ACROSS THE ROW [T-P0-154 §4B(3)]. It used to be
+* `ldx co_src` / `lda ,x+` / `stx co_src` -- **12 cycles of the 41 spent round-tripping the loop's
+* own pointer through memory on every pixel**, because composite.s's variables are EXTENDED (the
+* direct page is `setdp 0` and belongs to the HAL).
+* ★★★★★ Y IS FREE AND THAT IS CHECKED, NOT ASSUMED: the only `y` in this file is in co_sv_row /
+* co_sv_px / co_sv_rest, inside `ifdef CP_SAVE`, which P6.56 established has never been assembled.
+* ★★★★ plane_vis and plane_pri do not touch Y (they work in A, B, D and return X), co_put_visual
+* works in U, and co_inc32 saves A, B and X. **Nothing between two pixels can clobber it.**
+* ★★★ co_src is still the home of the fact [§2F]: Y is loaded from it at the top of each row and
+* stored back at co_rownext, so the NON-row-pull build -- comp_probe, where co_src advances
+* continuously across rows and is set only once per cel -- keeps working unchanged.
+* ★★★★ -DCOMP_SPILL_SRC is the BEFORE arm: the memory round-trip, so §4B(3) is one variable.
+                ifdef   COMP_SPILL_SRC
                 ldx     co_src
                 lda     ,x+
                 stx     co_src
+                else
+                lda     ,y+
+                endc
+* ★★★★★ AND co_col IS STORED BELOW THE KEY TEST [§4B(1)]. It was written here, before the pixel was
+* known to be needed -- and **55% of tested pixels are transparent** [P6.99], so 5 extended cycles
+* were paid for a colour nothing would read. ★★★ co_col's only reader is co_put_visual, which is on
+* the DRAWN path; it moves to the top of co_opaque, before `clra` destroys A.
+* ★★ -DCOMP_EARLY_COL restores the old placement, and is AC-5's fault arm as well as the before arm:
+* with it defined the store happens on both paths, which is correct but slower -- **the FAULT is the
+* mirror case, an arm that READS co_col on the transparent path**, and that cannot be built here
+* because no transparent-path code reads it at all [§6(2) of the report].
+                ifdef   COMP_EARLY_COL
                 sta     co_col
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
                 ifndef  COMP_NOCOUNT
                 ldu     #co_tested
                 jsr     co_inc32
@@ -315,6 +374,12 @@ co_pix:
                 bra     co_nextx
 
 co_opaque:
+* ★★★★ THE COLOUR, NOW THAT IT IS KNOWN TO BE NEEDED [T-P0-154 §4B(1)]. FIRST instruction here,
+* because `clra` four lines down destroys A. co_put_visual is co_col's only reader and it is on
+* this path; the transparent path reads it nowhere, which is what makes the move safe.
+                ifndef  COMP_EARLY_COL
+                sta     co_col
+                endc
 * screenPriority = priority[row + curX]
 * ★★ SITE 1 of 4. The `ifndef` around the ldx and the `ifdef` around the leax keep the FLAT build's
 * instruction order byte-for-byte; the windowed build forms a flat offset and maps it instead.
@@ -528,6 +593,12 @@ co_nextx:
                 lbra    co_pix
 
 co_rownext:
+* ★★★★★ Y GOES BACK TO co_src HERE, and this line is what keeps comp_probe correct. In the
+* non-row-pull build co_src is set ONCE per cel and advances continuously across rows; with the
+* per-pixel `stx` gone, only this store carries the position from one row to the next.
+                ifndef  COMP_SPILL_SRC
+                sty     co_src
+                endc
                 dec     co_remh
                 ldd     co_cury
                 addd    #1

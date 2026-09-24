@@ -54,7 +54,14 @@ $PROBES = @(
   # vc_decode_begin + vc_decode_row so there is ONE unpack rather than two [§2F]. **Its behaviour
   # is unchanged and the cel gate is what says so: 9,193/9,193 byte-identical, 1,525 mirrored.**
   @{ n = "cel";  s = "src/harness/cel_probe.s";  f = @("-DHAL_GFX_MODE_SERVICE","-DHAL_SYS_FAST_CLOCK"); sz = 1527; sha = "8B754B9C" },
-  @{ n = "comp"; s = "src/harness/comp_probe.s"; f = @();                                                sz = 0;    sha = "" }
+# ★★★★★ PINNED AT T-P0-154, FOR THE REASON THE cel ROW ALREADY GIVES: comp_probe MOVED and the
+# on-disk baseline could not notice. The inner-loop change in composite.s is unconditional -- the
+# per-pixel co_src spill and the premature `sta co_col` are paid by the FLAT build too -- so
+# comp_probe went 967 B / 39F5D105 -> 969 B / 1734DC24, and this check printed OK.
+# ★★★★ `sz = 0` means "compare against whatever is on disk", which detects a STALE artifact and not
+# a CHANGED one. **comp is the gate for the compositor; it is the last probe that should be
+# unpinned.** ★★★ Its gate was run green on the moved binary before this pin: comp 124/124.
+  @{ n = "comp"; s = "src/harness/comp_probe.s"; f = @();                                                sz = 969;  sha = "1734DC24" }
 )
 
 $bad = 0

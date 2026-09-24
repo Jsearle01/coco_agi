@@ -265,7 +265,12 @@ $ARMS = @(
   # somewhere it does not belong.
   # ★★ RETIRED at T-P0-152: p3b 16,292 2062158E | p3b_comb 19,514 F7E97915
   #                         p3b_comb_count 19,549 FC00E08F
-  @{ n = "p3b";        f = @("-DHAL_KEYBOARD");                          sz = 16331; sha = "9AF8D96B" },
+  # ★★★★★ RE-BASELINED T-P0-154: the three CEL arms again, +2 B each -- the inner-loop change in
+  # composite.s. ★★★ Region A's code SHRANK by 7 bytes even so (P3_CODE_END $5F99 -> $5F92): three
+  # instructions left co_pix and two per-row ones arrived, and the arms' +2 is elsewhere in the image.
+  # ★★ RETIRED at T-P0-154: p3b 16,331 9AF8D96B | p3b_comb 19,553 F0D32FEB
+  #                         p3b_comb_count 19,588 CD059AE9
+  @{ n = "p3b";        f = @("-DHAL_KEYBOARD");                          sz = 16333; sha = "74958F1C" },
   # ★★★★★ RE-BASELINED T-P0-125: the FIVE TEXT_WIRED arms moved +83 B (clear.lines is real), and
   # p3b, p3b_fault and p3b_flat did NOT -- the first links no text engine and the other two are
   # -DTEXT_MODELLED, which takes vm_text_ops.s's `equ` branch. ★★★ The split falls exactly along
@@ -285,9 +290,9 @@ $ARMS = @(
   # ★★★★ T-P0-128's VBL key latch is OPT-IN (-DP3B_VBLKEYS_OPT) after it failed its eye gate, so
   # the shipped combined arm is back to its P6.74 bytes. Built with the latch it was 18782 B /
   # B9F06823 (+79); that figure is recorded here so the next task re-enabling it has a reference.
-  @{ n = "p3b_comb";   f = @("-DHAL_KEYBOARD","-DP3B_COMBINED","-DP3B_IRQ"); sz = 19553; sha = "F0D32FEB" },
+  @{ n = "p3b_comb";   f = @("-DHAL_KEYBOARD","-DP3B_COMBINED","-DP3B_IRQ"); sz = 19555; sha = "D56B86B6" },
   # ★★★★ T-P0-130's COUNTING ARM (-Count in p3b_show.ps1): the combined arm with the pixel counters.
-  @{ n = "p3b_comb_count"; f = @("-DHAL_KEYBOARD","-DP3B_COMBINED","-DP3B_IRQ","-DP3B_COUNT"); sz = 19588; sha = "CD059AE9" }
+  @{ n = "p3b_comb_count"; f = @("-DHAL_KEYBOARD","-DP3B_COMBINED","-DP3B_IRQ","-DP3B_COUNT"); sz = 19590; sha = "0F423E08" }
 )
 
 # ★★★ -DP3B_COVERAGE puts the two opcode counters back [p3b_probe.s]. It is a REAL byte change --

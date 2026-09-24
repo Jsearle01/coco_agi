@@ -297,6 +297,12 @@ param(
   # ★★★★ AC-4's second FAULT arm: map on the first row of a rectangle and NEVER again, so a
   # rectangle spanning a slice boundary restores its lower rows through the wrong window.
   [switch]$RestoreStaleSlice,
+
+  # ★★★★★ T-P0-154's two BEFORE arms, so §4B's changes are measured one variable at a time.
+  # -SpillSrc keeps the per-pixel ldx/stx round-trip of co_src through memory; -EarlyCol keeps the
+  # `sta co_col` above the key test, where 55% of tested pixels pay for a colour nothing reads.
+  [switch]$SpillSrc,
+  [switch]$EarlyCol,
   [switch]$SlowSteal,
   # ★★★★ -NoRemap IS the fault arm (-DRES_FAULT_NOREMAP): a theft takes the cheap path WITHOUT
   # re-mapping, so the walk reads through whatever the compositor left in slot 6. Expect a wrong
@@ -510,6 +516,8 @@ if ($RestoreBytewise) { $FLAGS += "-DP3B_RESTORE_BYTEWISE" }
 if ($RestoreNoTail)   { $FLAGS += "-DP3B_RESTORE_NOTAIL" }
 if ($RestoreNoCross)  { $FLAGS += "-DP3B_RESTORE_NOCROSS" }
 if ($RestoreStaleSlice) { $FLAGS += "-DP3B_RESTORE_STALESLICE" }
+if ($SpillSrc)        { $FLAGS += "-DCOMP_SPILL_SRC" }
+if ($EarlyCol)        { $FLAGS += "-DCOMP_EARLY_COL" }
 if ($CelStats) { $FLAGS += "-DP3B_CELSTATS" }
 if ($CelStatsNever)  { $FLAGS += "-DP3B_CELSTATS_NEVER" }
 if ($CelStatsAlways) { $FLAGS += "-DP3B_CELSTATS_ALWAYS" }
