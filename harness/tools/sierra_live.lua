@@ -23,6 +23,29 @@
 -- ★★★ So: count writes across the WHOLE map, bucketed by 4 KB. A COPY shows ~27 K writes in a
 -- tight burst concentrated in one or two blocks. An opcode-driven RENDER shows far more writes,
 -- spread over many more frames.
+--
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+-- ★★★★★ RUN AT LAST, 61 TASKS LATER [T-P0-150]. The census above was BUILT (the b0..bF columns)
+-- and never analysed. `sierra_writes.py` is the analysis half. THE ANSWER IS SPLIT:
+--
+-- ★★★★★ THEY DO NOT CACHE RENDERED ROOMS. A RE-ENTRY to the starting room cost 359,361 writes
+-- and 7,967 FDC accesses over 5 s, against a first visit's 347,924 and 12,299 -- **no saving,
+-- and it still read the disk.** All five transitions in the recording read the disk. The room
+-- is re-rendered on entry.
+--
+-- ★★★★★ BUT THE CAPTURE ABOVE WAS REAL, AND IT IS NOT A ROOM CHANGE. Two zero-disk bursts of
+-- ~28,500 writes, **98% into ONE 4 KB bucket**, in 0.17 s, appear MID-ROOM -- t=135.2 s inside
+-- one room and t=224.5 s inside another, not at any transition. Their profiles are near
+-- identical (28,529/28,545 writes; b7 21,800/21,813), so it is one operation happening twice.
+-- ★★★★ The rate corroborates it: 28,529 writes in 0.1667 s at 1.789 MHz is **10.5 cycles per
+-- write**, and a 16-bit 6809 copy loop (ldd ,x++ / std ,u++) is ~10.5 cycles per byte. **It is a
+-- block copy** -- most likely a message window's save/restore, which is a copy of a screen
+-- region and needs no disk.
+--
+-- ★★★★★ AND sierra_rooms.py COULD NEVER HAVE FOUND IT: its detector requires `min_fdc >= 2000`,
+-- so a ZERO-DISK event is invisible to the very tool built to test this hypothesis. **The
+-- instrument excluded the case the hypothesis predicted.**
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
 -- ★ The earlier whole-map tap still ran at 950% of real time, so this is affordable while
 -- playing at normal speed.
 -- ═══════════════════════════════════════════════════════════════════════════════════════════

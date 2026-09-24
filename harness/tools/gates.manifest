@@ -65,6 +65,31 @@
 # (0.00-0.40 lattice events/s) and our castle composites 3.11 cels EVERY cycle standing still.
 # ★★★ Which is why the cel cache's 99.3% at 4,006 B is the item worth placing [T-P0-146 §4A/§4B].
 #
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ T-P0-150: DO THEY CACHE RENDERED ROOMS? NO. `sierra_writes.py` over the same recording:
+#   transition          writes/5s   fdc     note
+#   RC1  76.2 s           347,924  12,299   first visit, unintended room
+#   RC2 157.8 s           359,361   7,967   ★ RE-ENTRY to the starting room -- NO CHEAPER
+#   RC3 267.2 s           434,937   6,908
+#   RC4 288.9 s           348,113   7,975   into the chicken pen
+#   RC5 391.7 s           398,319   3,059
+# ★★★★ Every transition reads the disk and a re-entry costs what a first visit costs. **The room
+# is re-rendered on entry.** So there is no room cache to copy from them.
+#
+# ★★★★★ THE ~27 KB BLOCK COPY IS REAL AND IS NOT A ROOM CHANGE. Two zero-disk bursts of ~28,500
+# writes, 98% into ONE 4 KB bucket, in 0.17 s, MID-ROOM (t=135.2 and t=224.5). 10.5 cycles per
+# write at 1.789 MHz, which is a 16-bit 6809 copy loop's rate. Most likely a message window's
+# save/restore. ★★★ T-P0-015 read it as a room transition and it is not one.
+#
+# ★★★★★ AND THE TOOL COULD NOT HAVE FOUND IT: sierra_rooms.py requires `min_fdc >= 2000`, so a
+# ZERO-DISK event cannot be reported by it. **The instrument excluded the case the hypothesis
+# predicted** -- which is why the question stayed open for 61 tasks.
+#
+# ★★★ WHAT IT PRICES FOR US, and this is the useful half: at their demonstrated 10.5 cycles per
+# byte, a 40,320 B room copy (26,880 visual + 13,440 priority) is **0.237 s** against our 6.16 s
+# room change. **Caching rooms is worth it for us whether or not Sierra does it.**
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+#
 # ★★★★ §2P: the corpus disk is the user's game. sierra_live.ps1 copies it per run. ★★★ It also
 # copies the cfg SEED to a temp dir -- MAME writes cfg files, and an ad-hoc invocation pointing
 # -cfg_directory at harness\mame-cfg\sierra-live\ mutated the tracked seed in this very task.
