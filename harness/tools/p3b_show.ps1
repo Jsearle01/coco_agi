@@ -276,6 +276,10 @@ param(
   # the cache into the borrowed slot, so a draw-phase arena reader fails loudly rather than reading
   # plausible bytes. Its two arms answer different halves -- see the flag line below.
   [switch]$CachePoison,
+
+  # ★★★★★ AC-5's fault arm: invert the staged sort so sprites draw FRONT TO BACK. A far sprite
+  # then lands on top of a near one -- visible, and both planes must differ from the reference.
+  [switch]$SortReverse,
   [switch]$SlowSteal,
   # ★★★★ -NoRemap IS the fault arm (-DRES_FAULT_NOREMAP): a theft takes the cheap path WITHOUT
   # re-mapping, so the walk reads through whatever the compositor left in slot 6. Expect a wrong
@@ -484,6 +488,7 @@ if ($CacheStale)      { $FLAGS += "-DCC_FAULT_STALE" }
 # with -NoCelCache it must stay GREEN (nothing reads the aperture) and with the cache it must go
 # RED (the cache does) [T-P0-147].
 if ($CachePoison)     { $FLAGS += "-DCC_FAULT_POISON" }
+if ($SortReverse)     { $FLAGS += "-DP3B_SORT_REVERSE" }
 if ($CelStats) { $FLAGS += "-DP3B_CELSTATS" }
 if ($CelStatsNever)  { $FLAGS += "-DP3B_CELSTATS_NEVER" }
 if ($CelStatsAlways) { $FLAGS += "-DP3B_CELSTATS_ALWAYS" }

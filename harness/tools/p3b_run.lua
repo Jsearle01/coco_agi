@@ -112,6 +112,12 @@ local CELTRACE = os.getenv("P3B_CELTRACE")
 local cel_tr = {}
 _G._celsym = nil
 
+-- ★★★★★ p3_spr's STRIDE, ONCE [T-P0-149]. It went 6 -> 7 when the oracle's sort key (sortOrder)
+-- was staged, and the stride was hardcoded as `* 6` at FOUR places in this file. ★★★ A missed one
+-- does not fail: it reads the neighbouring sprite's bytes shifted by one and prints a plausible
+-- row, which is the quietest possible wrong answer [§2F: one home for the fact].
+local SPR_SIZE = 7          -- must equal p3b_probe.s's P3_SPR_SIZE
+
 -- ═══════════════════════════════════════════════════════════════════════════════════════════
 -- ★★★★★ P3B_SLOTCENSUS -- WHICH MMU SLOTS ARE LIVE DURING A COMPOSITE [T-P0-146 §4A].
 -- ★★★★★ THE RULING'S QUESTION IS NOT "IS THERE MEMORY" -- 512 KB leaves ~376 KB free -- IT IS
@@ -180,7 +186,7 @@ _G._ptap = prog:install_write_tap(PHASE, PHASE, "p3bphase", function(offset, dat
         local S = _G._celsym
         local n, row = prog:read_u8(S.n), {}
         for i = 0, n - 1 do
-            local b = S.spr + i * 6
+            local b = S.spr + i * SPR_SIZE
             row[#row+1] = string.format("%d.%d.%d:%d",
                 prog:read_u8(b + 3), prog:read_u8(b + 4), prog:read_u8(b + 5),
                 S.skip and prog:read_u8(S.skip + i) or 0)
@@ -1782,7 +1788,7 @@ _G._n = emu.add_machine_frame_notifier(function()
                 local n = prog:read_u8(SYM.p3_nspr)
                 w("    staged sprites: %d", n)
                 for i = 0, math.min(n, 16) - 1 do
-                    local b = SYM.p3_spr + i * 6
+                    local b = SYM.p3_spr + i * SPR_SIZE
                     w("       [%d] x=%3d y=%3d prio=%2d view=%3d loop=%d cel=%d",
                       i, prog:read_u8(b), prog:read_u8(b+1), prog:read_u8(b+2),
                       prog:read_u8(b+3), prog:read_u8(b+4), prog:read_u8(b+5))
@@ -2336,7 +2342,7 @@ _G._n = emu.add_machine_frame_notifier(function()
                         local n = prog:read_u8(SYM.p3_nspr)
                         w("      staged sprites: %d", n)
                         for s = 0, math.min(n, 8) - 1 do
-                            local b = SYM.p3_spr + s * 6
+                            local b = SYM.p3_spr + s * SPR_SIZE
                             w("        [%d] x=%-3d y=%-3d prio=%-2d view=%-3d loop=%d cel=%d",
                               s, prog:read_u8(b), prog:read_u8(b + 1), prog:read_u8(b + 2),
                               prog:read_u8(b + 3), prog:read_u8(b + 4), prog:read_u8(b + 5))
@@ -2351,7 +2357,7 @@ _G._n = emu.add_machine_frame_notifier(function()
                     if SYM.p3_spr and SYM.p3_nspr then
                         local BV = 40                       -- P3_BLK_VISIBLE
                         for s = 0, math.min(prog:read_u8(SYM.p3_nspr), 4) - 1 do
-                            local b = SYM.p3_spr + s * 6
+                            local b = SYM.p3_spr + s * SPR_SIZE
                             local sx, sy = prog:read_u8(b), prog:read_u8(b + 1)
                             -- ★★★★★ AND THE NIBBLES [T-P0-109 AC-5]. A plane byte must hold the
                             -- colour in BOTH halves -- pic_fill.s reads "either nibble; equal by

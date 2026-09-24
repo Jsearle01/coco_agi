@@ -1391,7 +1391,16 @@ p3_z1:          clr     ,x+
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 
 P3_SPR_MAX      equ     16              ; staged sprites; AGI draws far fewer per cycle
-P3_SPR_SIZE     equ     6               ; x, y, prio, view, loop, cel
+* ★★★★★ SEVEN BYTES SINCE T-P0-149, AND THE SEVENTH IS THE ORACLE'S SORT KEY.
+* ★★★★★ AGI SORTS ITS SPRITES AND WE APPENDED IN OBJECT-NUMBER ORDER [sprite.cpp:63, :80].
+* The key is NOT priority, which is what a reader of this file would guess:
+*     sortOrder = yPos                              [sprite.cpp:101]
+*     sortOrder = priorityToY(priority)  if fFixedPriority   [sprite.cpp:97-99]
+* ascending, with ties broken by the object's ORIGINAL order -- `Common::sort` with
+* `givenOrderNr < givenOrderNr`, which is a STABLE sort [sprite.cpp:41-48].
+* ★★★ priorityToY's default is `(priority - 5) * 12 + 48` [graphics.cpp], monotonic in priority,
+* so sorting on sortOrder orders by DEPTH BAND whether the object's priority is fixed or derived.
+P3_SPR_SIZE     equ     7               ; x, y, prio, view, loop, cel, sortOrder
 
 * ── p3_run_vm — one interpreter cycle, exactly as vm_probe drives it ─────────────
 * ★ pace, interpret, post. Splitting pace from the cycle body is what makes cycle number and
@@ -2849,6 +2858,26 @@ pss_lp:
                 sta     ,y+
                 lda     VMO_CEL,x
                 sta     ,y+
+* ★★★★★ THE SORT KEY, COMPUTED HERE BECAUSE THE FLAGS ARE ONLY REACHABLE HERE. After
+* phase_draw_enter slot 5 is the priority plane, so VMO_FLAGS is gone -- the same reason every
+* other field is copied out in this routine.
+                lda     VMO_FLAGS+1,x
+                bita    #fFixedPriority
+                beq     pss_key_y
+* ★★★ priorityToY's DEFAULT formula only [graphics.cpp]. A game that set a priority table gets a
+* table-driven mapping there and we do not model it -- recorded as a gap, not papered over.
+* ★★ The byte arithmetic is exact over AGI's real priority range: priority 4 gives (4-5) = $FF,
+* $FF*12 = $0BF4, B = $F4, +48 wraps to 36, which is the true value. Priorities 0-3 are control
+* lines and no object carries one.
+                lda     VMO_PRIORITY,x
+                suba    #5
+                ldb     #12
+                mul
+                addb    #48
+                tfr     b,a
+                bra     pss_key_st
+pss_key_y:      lda     VMO_Y,x
+pss_key_st:     sta     ,y+
                 inc     p3_nspr
 pss_next:
                 leax    VMO_SIZE,x
@@ -2856,6 +2885,88 @@ pss_next:
                 cmpb    #VM_OBJ_MAX
                 blo     pss_lp
 pss_done:
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ AND NOW SORT, WHICH IS THE FIDELITY FIX [T-P0-149 §4B]. Insertion sort, ascending on
+* sortOrder, shifting only on a STRICT greater-than so equal keys keep their staged order --
+* which is the oracle's stable tie-break on givenOrderNr [sprite.cpp:45].
+* ★★★★ ONCE PER CYCLE OVER FOUR ENTRIES, not in the blit. §4D(4) shows the cost is invisible.
+* ★★★ -DP3B_SORT_REVERSE is AC-5's fault arm: the comparison inverts, so sprites draw FRONT TO
+* BACK and a far sprite lands on top of a near one.
+                jsr     pss_sort
+pss_ret:
+                bra     pss_after_sort
+
+* ── pss_sort -- insertion sort of p3_spr[0..p3_nspr) ascending on sortOrder (+6) ──
+pss_i           fcb     0
+pss_j           fcb     0
+pss_tmp         rmb     P3_SPR_SIZE
+pss_sort:
+                lda     p3_nspr
+                cmpa    #2
+                blo     pss_so_out
+                lda     #1
+                sta     pss_i
+pss_so_i:
+* --- tmp = p3_spr[i] ---
+                ldb     pss_i
+                lda     #P3_SPR_SIZE
+                mul
+                ldx     #p3_spr
+                leax    d,x
+                ldu     #pss_tmp
+                ldb     #P3_SPR_SIZE
+pss_so_cp1:     lda     ,x+
+                sta     ,u+
+                decb
+                bne     pss_so_cp1
+                lda     pss_i
+                sta     pss_j
+pss_so_j:
+                lda     pss_j
+                beq     pss_so_ins
+* --- X = &p3_spr[j-1] ---
+                deca
+                tfr     a,b
+                lda     #P3_SPR_SIZE
+                mul
+                ldx     #p3_spr
+                leax    d,x
+                lda     6,x                     ; its sortOrder
+                cmpa    pss_tmp+6
+                ifdef   P3B_SORT_REVERSE
+                bhs     pss_so_ins              ; ★ AC-5's fault arm: front to back
+                else
+                bls     pss_so_ins              ; <= : stable, this is the insertion point
+                endc
+* --- shift p3_spr[j-1] up into p3_spr[j] ---
+                tfr     x,u
+                leau    P3_SPR_SIZE,u
+                ldb     #P3_SPR_SIZE
+pss_so_sh:      lda     ,x+
+                sta     ,u+
+                decb
+                bne     pss_so_sh
+                dec     pss_j
+                bra     pss_so_j
+pss_so_ins:
+                ldb     pss_j
+                lda     #P3_SPR_SIZE
+                mul
+                ldx     #p3_spr
+                leax    d,x
+                ldu     #pss_tmp
+                ldb     #P3_SPR_SIZE
+pss_so_cp2:     lda     ,u+
+                sta     ,x+
+                decb
+                bne     pss_so_cp2
+                inc     pss_i
+                lda     pss_i
+                cmpa    p3_nspr
+                blo     pss_so_i
+pss_so_out:     rts
+
+pss_after_sort:
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ -DP3B_FORCE_OVERLAP -- A SCENE P6.88's GUARDS CAN ACTUALLY FIRE ON [T-P0-142 §4E].
 * ★★★★★ THE PROBLEM IT SOLVES: T-P0-141 shipped a composite skip with two guards -- no overlap
@@ -3137,6 +3248,13 @@ prp_out:        rts
 *                          LATER DRAWER WINS -- and if i is later in list order, a full redraw
 *                          would have put i on top. **This case is wrong.**
 * ★★★ So the narrow rule is unsound exactly for: overlapping, equal priority, i later than j.
+* ★★★★★ AND SORTING DOES NOT RETIRE THIS GUARD [T-P0-149 §4E]. The reasoning above rests on draw
+* order being arbitrary, and since T-P0-149 it is not -- it is the oracle's, ascending on sortOrder.
+* ★★★★ **But the hazard is the SKIP, not the order.** Skipping i removes it from the draw sequence
+* entirely, so an overlapping j at equal priority still wins where a full redraw would have put i
+* on top. ★★★ Sorting makes "which is later" DEFINED and oracle-faithful; it does not make it
+* irrelevant. **The guard is still necessary and was not touched** [§10: removing it is its own
+* change]. ★★ Confirmed by measurement: under -ForceOverlap `isolated` still falls 99 -> 0.
 * ★★ The castle cannot exercise it -- co_rej_pri is ZERO, no pixel is ever priority-rejected --
 * which is §1.3's point restated: **the corpus cannot tell a right skip from a wrong one.**
 * ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -3622,6 +3740,10 @@ pca_lp:
                 sta     vc_loop
                 lda     ,y+
                 sta     vc_cel
+* ★★★★ THE SEVENTH BYTE IS THE SORT KEY AND THIS LOOP DOES NOT WANT IT [T-P0-149]. Y walks the
+* staged row, so it must step OVER sortOrder or every sprite after the first reads one byte
+* skewed -- x from the previous row's key. **Spelled from P3_SPR_SIZE so it cannot drift.**
+                leay    P3_SPR_SIZE-6,y
                 pshs    y
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ THE SKIP [T-P0-141]. p3_skip_decide ran during p3_restore_prev, where p3_prev was still
@@ -3797,6 +3919,11 @@ pca_gotview:
 * [pss_lp]; nothing contracts that a shared view lands consecutively. A non-adjacent pair could
 * only be deduped by hoisting one sprite's blit next to the other's -- **which changes draw order,
 * and at equal priority co_depth lets the LATER drawer win** [§6 trigger 1: a ruling, not a task].
+* ★★★★★ CORRECTED AT T-P0-149: **IT SORTS NOW**, on the oracle's own key (see the P3_SPR_SIZE block
+* above), so the order is no longer object number. ★★★★ **And the unsorted order was a DIVERGENCE
+* from the oracle, not a choice** -- AGI has always sorted [sprite.cpp:63, :80] and this port had
+* never done it. ★★★ The paragraph above remains true in its own terms: adjacency is still
+* incidental, because the sort key is sortOrder and two sprites sharing a VIEW need not share it.
 *
 * ★★★ This is the 1-slot case of the cel cache P6.90 priced at 95.4%/3,906 B and could not place.
 * **It is the part that needs no storage -- and it still needs the hottest loop rebuilt for ~4.4%

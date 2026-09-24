@@ -422,6 +422,27 @@ co_st_lo:       anda    #$F0                    ; odd x: keep the EVEN pixel, re
                 ora     co_prio
                 endc
 co_st_put:      sta     ,x
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THIS STORE IS THE SPRITE'S PRIORITY STAMP, AND IT IS ORACLE-FAITHFUL [T-P0-149 §4C].
+* ★★★★★ T-P0-149 set out to REMOVE it: sorted back to front, a later sprite's priority is >= an
+* earlier one's, so the depth test against a stamp is satisfied before it is made and the stamp
+* looked like an operation with no reader. ★★★★ **Both halves of that are wrong.**
+*
+* ★★★★★ FIRST, THE ORACLE STAMPS TOO: `putPixel(curX, curY, GFX_SCREEN_MASK_ALL, curColor,
+* viewPriority)` [sprite.cpp:350], and MASK_ALL includes PRIORITY [graphics.cpp's putPixel].
+* **So removing this store is a DIVERGENCE FROM THE ORACLE, not an optimisation of something the
+* oracle does not do.** ★★★ A visual-only variant exists one line above it (:346, MASK_VISUAL) and
+* is a different case, not a licence.
+*
+* ★★★★★ SECOND, IT HAS A LIVE READER: co_checkctrl walks DOWN the priority column looking for the
+* first value > 2 [graphics.cpp:553, transcribed at co_checkctrl below]. ★★★★ Sorting puts earlier
+* sprites ABOVE later ones, so a downward walk usually misses them -- **but a TALL later sprite's
+* upper rows sit above an earlier sprite's bottom rows**, and the walk from there reaches a stamp.
+* ★★ Not hypothetical in shape: it is exactly the overlap case the corpus cannot exercise.
+*
+* ★★★ So the stamp stays, and T-P0-149 delivered the sort alone -- which was worth having on its
+* own, because the unsorted order was a fidelity divergence [§4B].
+* ═══════════════════════════════════════════════════════════════════════════════════════════
                 else
                 ifdef   PLANE_WINDOWED
                 addd    co_rowpri
