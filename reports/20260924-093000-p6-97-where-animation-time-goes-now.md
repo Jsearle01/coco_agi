@@ -336,4 +336,4 @@ recordings Jay drove at P6.91 and P6.94.
 `seeds/AGI/live/2026-09-24-a-share-is-not-a-cost.md`
 
 ### 11 — Commit
-(recorded below after push)
+`6371e66` (pushed to origin/wip before this report)
