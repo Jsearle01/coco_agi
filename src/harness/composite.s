@@ -132,6 +132,33 @@ co_ctrlstep     rmb     4               ; ★ total column-scan iterations those
 * inside each the cost is spread across its own internals. **Structural, not a defect** [§4B].
 * ★★ The castle's sprite load is FOUR objects with two sharing a view; a room with more objects
 * composites more, and this figure is one room of one title.
+*
+* ═══════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ SUPERSEDED — RE-MEASURED AT T-P0-151 AFTER THREE CHANGES. The table above is P6.87's and
+* predates the cel cache [P6.93], the sort [P6.95] and the skip's later tuning. **It was cited in
+* four dispatches while stale.** Same window (KQ1 room 1, cycles 11-120), MOVING, `--stage 9`:
+*
+*     blit 46.2%  ·  restore walk 20.3%  ·  plane window access 15.1%  ·  CEL DECODE 2.7%
+*     key scan 5.2%  ·  resource manager 3.9%  ·  MMU phase 3.9%  ·  other ~2.7%
+*   standing is the same shape: cp_composite 42.8%, decode 0.9%.
+*
+* ★★★★★ THE CEL CACHE DID WHAT IT WAS BUILT TO DO: **cel decode 27.6% -> 2.7%**, a 10x collapse, at
+* a 95.3% live hit rate. ★★★★ **And the stage itself fell from 65.5% of the cycle to 48.7%**, with
+* `interpret` now 37.5% -- the drawing path is no longer most of a cycle.
+* ★★★ The restore walk MORE THAN DOUBLED its share (8.5% -> 20.3%) without changing: it is the same
+* work against a smaller denominator. **A share is not a cost** [the trap P6.84 spent a task on].
+*
+* ★★★★★ THE LARGEST ITEM IS NOW cp_composite AT 38.0% (42.8% standing) -- this loop, below.
+* ★★★★★ AND THE PER-UNIT COSTS ARE ~5x A 6809 FLOOR, WHICH IS THE ACTIONABLE FINDING:
+*     blit, incl. the plane access it calls: **159 CPU cycles per pixel TESTED** against a ~32-cycle
+*         floor for load-test-read-compare-write-write-advance  -> **5.0x**
+*     restore, incl. its plane access:      **46 cycles per byte put back** against a 16-bit copy
+*         loop's ~10.5                                            -> **4.4x**
+* ★★★★ **Two independent paths, both ~4-5x over, and the factor they share is WINDOWED PLANE
+* ACCESS** -- a 26,880 B plane reached through an 8 KB aperture, one address computation per unit.
+* ★★★ So the target is the per-pixel ADDRESSING, not the pixel count [T-P0-151 §4C].
+* ★★ The 70/30 attribution of plane_vis/plane_pri between blit and restore is an ASSUMPTION: the
+* profiler cannot attribute a callee to its caller, and both call them.
 * ═══════════════════════════════════════════════════════════════════════════════════
 cp_composite:
                 lda     CP_X
