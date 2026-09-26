@@ -85,6 +85,106 @@ numeric and one human, of the same frame.**
 
 ---
 
+# S-03 — The 16-colour pair, and stage 2
+
+★★★★★ **STOPPED AT A §6 TRIGGER. The 16-colour pair SPLITS exactly as the 4-colour pair does, but its
+row-to-scanline behaviour is NOT identical — there is a periodic single-row repeat that 4 colours does
+not have — and §6 says report a behavioural difference rather than push on.** ★★★★ **Stage 2 (§4C) and
+§4D were NOT attempted**: the dispatch's own words are *"stage 2 on a mode the port will not use is
+wasted"*, and the mode the port WILL use has an unexplained difference in it.
+
+| item | result |
+|---|---|
+| §4A buffer placement + vectors | ★★★★★ **SOLVED without all-RAM.** See below. |
+| §4B(1) does it split at `$1E`/`$16`? | ★★★★★ **YES** — runs 2 → 4, transitions 319 → 159, **ratio 2.01** |
+| §4B(3) do three boundaries land? | ★★★★★ **YES** — four bands, same structure as 4 colours |
+| §4B(2) does the counter keep running? | ★★★★ **In kind YES (1 above, 2 below) — but with a periodic repeat 4 colours does not show** |
+| §4C stage 2 (FIRQ) | **NOT ATTEMPTED** — stopped at the trigger |
+| §4D three boundaries under FIRQ | **NOT ATTEMPTED** |
+
+## §4A — the buffer, and the vectors, with no all-RAM
+
+★★★★★ **The 30,720-byte buffer is filled through a MOVING TWO-SLOT WINDOW, so `$FFDF` is never written
+and the 6809's vectors stay in ROM.**
+
+The observation that makes it free: **VOFFSET addresses PHYSICAL RAM, not the CPU's logical space**
+[`gfx.s:206-215`; S-01 confirmed `$E800` → physical `$74000` empirically]. The GIME fetches the
+framebuffer without going through the MMU, **so the buffer never has to be visible to the CPU all at
+once — only the bytes being WRITTEN do.** The buffer lives at physical `$74000`–`$7B7FF` (blocks
+`$3A,$3B,$3C,$3D`) and is filled through logical `$4000`–`$7FFF`, remapping slots 2 and 3 once at the
+seam. **Logical `$4000`–`$7FFF` is RAM under every map.**
+
+★★★★★ **So §1.2's trap is AVOIDED rather than managed.** Nothing in this spike can produce an NMI
+through a garbage vector, which is the false negative the series exists to prevent. ★★★ Code at `$3000`
+is slot 1 (block `$39`) and is never remapped; slots 2 and 3 are restored before the fill returns.
+★★ The seam is crossed exactly once (30,720 < 32,768).
+
+## §4B(1) and §4B(3) — the split, at the port's depth
+
+```
+$1E / $16, stripe fill $0F, one split at dly 2400
+  y= 30 runs 2,2,2,2,...   y=110 runs 2,2,2,2,...   y=210 runs 4,4,4,4,...
+  row transitions  30:319  50:319  70:319  90:319  110:319 | 130:159 150:159 170:159 190:159 210:159
+  ratio 2.01
+
+three splits (dly 1200 / dly2 700 / dly3 700)
+  row transitions  30:319 | 50:159 70:159 | 90:319 110:319 130:319 | 150:159 170:159 190:159 210:159
+  band                320 |     160      |          320           |             160
+```
+
+★★★★★ **§3(2)'s caution honoured, and it matters: at 4 bpp a byte is TWO pixels, so the stripe `$0F`
+gives runs of 2 and 4 — NOT S-01's 4 and 8 at 2 bpp.** Different arithmetic, same conclusion; **had the
+numbers matched, the proof would have been a coincidence.**
+
+## §4B(2) — the counter, and the difference
+
+**Instrument:** the row-number fill, read as *how many consecutive displayed rows share a row
+signature*. Above the switch the stride is one source row per displayed row, so the answer must be 1;
+below it two displayed rows fall inside one source row, so it must be 2. ★★★★ **This needs no palette
+calibration at all**, which is why it was chosen: at 16 colours a byte is two pixels and an absolute
+decode would need all sixteen entries mapped.
+
+```
+16 COLOURS ($1E/$16):  1,1,1,1,1,1,2, 1x14,2, 1x14,2, 1x14,2, ... then 2,2,2,2,... (the narrow band)
+                       runs of 1: 119   runs of 2: 37   anything else: 0
+ 4 COLOURS ($15/$0D):  1 x 171 (unbroken), then 2,2,2,...
+                       runs of 1: 171   runs of 2: 11   anything else: 0
+```
+
+★★★★★ **In kind the behaviour matches — 1 above, 2 below — so the counter keeps running at 16 colours
+too.** ★★★★★ **But at 16 colours ONE SOURCE ROW IS DISPLAYED TWICE EVERY 16 ROWS, and at 4 colours it
+is not.** The period is exact and the 4-colour control with the *same instrument* is unbroken over 171
+rows, so **this is not an instrument artefact of the signature method.**
+
+★★★ **It is ~6.7% of vertical stretch (16/15)**, which is the shape of a lines-per-row or field-length
+interaction rather than anything about the counter. ★★ `$FF98 = $80` (LPR = 000) is written identically
+in both depths, so LPR as *written* is not the differentiator. **Not diagnosed further — §6 says stop.**
+
+## ★★★★ AND A CAVEAT ABOUT THIS INSTRUMENT, which must be stated with its result
+
+★★★★★ **The 4-colour control put the 1→2 transition at run index 171 (≈ scanline 196), but `dly 2400`
+places the boundary near y=123** — where S-02's absolute decode found it, and where the stripe
+transition profile independently puts it. **So the row-signature instrument's ABSOLUTE POSITIONS are
+wrong, even though its 1-vs-2 pattern is clean.**
+
+★★★ **Only the pattern should be read from it, not the position.** ★★ Why the positions are wrong is
+not established, and **the repeat-every-16 finding rests on the pattern rather than on any position**,
+so it survives the caveat — but a later task must not quote this instrument for a scanline number.
+
+## What is still owed
+
+1. ★★★★★ **Diagnose the periodic row repeat at 16 colours**, since it is the port's own depth. The
+   likely suspects are `$FF98`'s LPR field and the field-length/LPF interaction — **and MAME's source is
+   the cheap way in, as it was for S-01** (`record_full_body_scanline` and whatever advances the row
+   index). ★★ Until then, **the 16-colour result is "splits correctly, with a 6.7% vertical stretch of
+   unknown origin."**
+2. ★★★★ **Fix or replace the row-signature instrument's positional reading**, or retire it in favour of
+   S-02's absolute decode extended to 16 colours (which needs all 16 palette entries calibrated).
+3. ★★★★★ **Stage 2 (FIRQ) and §4D are UNTOUCHED** and remain the binding question for message boxes.
+4. ★★ **A pool row is still owed** for S-01 §7.3's finding, now with a second instance in S-02 §7.1.
+
+---
+
 # S-02 — Where does the data below the switch come from?
 
 ★★★★★ **ANSWERED: §1.1 CASE 1. The video address counter KEEPS RUNNING.** Below the switch each row

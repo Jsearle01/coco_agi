@@ -128,7 +128,7 @@ s01_mmu:
 *                   switch consume a different number of bytes than rows above, and the displayed
 *                   byte VALUE says which source row arrived. Recoverable from the pixels because
 *                   the four palette entries are set to four distinct colours (stage 1b).
-                bsr     s01_do_fill
+                lbsr    s01_do_fill             ; ★ long: the 16-colour fill pushed this past 127 bytes
 
 * ── Step 3: mode ────────────────────────────────────────────────────────────────────────────
                 ldd     #$8000+S01_VRES_320
@@ -182,6 +182,25 @@ s01_not_static:
 * ★★★★ Now col0..col3 are the DISPLAYED palette and colA/colB are only the flip, so the two concerns
 * are separable: S-02 needs four distinct displayed colours AND a changing register value, and it
 * gets the second by flipping an entry that 4-colour mode never displays (see s01_palreg).
+* ★★★★★ AT 16 COLOURS ALL SIXTEEN ENTRIES MUST BE SET, AND THE FIRST 16-COLOUR RUN PROVED IT.
+* Only indices 0-3 were initialised, so 4-15 held whatever DECB had left -- and with the row-number
+* fill, two colliding entries make two CONSECUTIVE SOURCE ROWS render identically. That injected
+* spurious "2"s into the rows-per-source-row measurement above the boundary, which is the region the
+* control depends on.
+* ★★★★ It biased AGAINST the finding rather than for it (it makes the wide region look like the narrow
+* one), so the conclusion held -- **but a measurement with a known contaminant gets cleaned, not
+* explained.** Sixteen distinct 6-bit values, so no two indices can render alike.
+                lda     s01_big
+                beq     s01_pal4
+                ldx     #s01_pal16
+                ldy     #$FFB0
+                ldb     #16
+s01_p16:        lda     ,x+
+                sta     ,y+
+                decb
+                bne     s01_p16
+                bra     s01_pal_done
+s01_pal4:
                 lda     s01_col0
                 sta     $FFB0
                 lda     s01_col1
@@ -190,6 +209,7 @@ s01_not_static:
                 sta     $FFB2
                 lda     s01_col3
                 sta     $FFB3
+s01_pal_done:
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 
 * ★ Enable VBORD as a POLLABLE source. IEN stays 0, so this latches status without vectoring.
@@ -207,7 +227,7 @@ s01_not_static:
 * identified it**, after two hypotheses about the palette had already been spent.
 * ★★★ Stated as a rule for this file: **nothing here relies on implicit fall-through into the loop.**
 * An inserted subroutine must not be able to change control flow, and one `bra` buys that permanently.
-                bra     s01_loop
+                lbra    s01_loop                ; ★ long, for the same reason
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -228,7 +248,91 @@ s01_not_static:
 * colours off one row, then poke s01_fillm=1 and s01_refill=1 and measure. **Same session, same palette
 * state, no cross-run assumption** -- which matters because S-01's whole mess came from comparing runs.
 * ★★ The fill costs ~200k cycles (~7 frames) and the guest simply misses those VBORDs.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ §4A: THE 16-COLOUR BUFFER IS FILLED THROUGH A MOVING WINDOW, SO ALL-RAM IS NEVER ENTERED
+* AND THE 6809's VECTORS STAY IN ROM.
+*
+* ★★★★★ THE OBSERVATION THAT MAKES THIS FREE: **VOFFSET addresses PHYSICAL RAM, not the CPU's logical
+* space** [gfx.s:206-215, and S-01 confirmed $E800 -> physical $74000 empirically]. The GIME fetches
+* the framebuffer without going through the MMU, so the buffer NEVER has to be visible to the CPU all
+* at once -- only the bytes being WRITTEN do.
+* ★★★★ So a 30,720-byte buffer lives at physical $74000-$7B7FF (blocks $3A,$3B,$3C,$3D) and is filled
+* in one pass through logical $4000-$7FFF, remapping slots 2 and 3 at the seam. **Logical $4000-$7FFF
+* is RAM under every map**, so nothing is written into ROM territory, $FFDF is never touched, and
+* $FFF0-$FFFF keeps its ROM vectors.
+* ★★★★★ THAT DISPOSES OF §1.2's TRAP BY AVOIDING IT RATHER THAN MANAGING IT. The alternative -- all-RAM
+* with vectors in RAM -- makes an NMI through garbage indistinguishable from "the mode does not work",
+* which is the false negative this series exists to prevent. **Nothing here can produce that failure.**
+* ★★★ Code at $3000 is in slot 1 (block $39) and is never remapped; DECB's low RAM is slot 0. Only
+* slots 2 and 3 move, and they are restored before the routine returns so the host's framebuffer
+* readback still sees the buffer's start.
+* ★★ The seam is crossed ONCE: 30,720 < 32,768, so the check fires a single time.
+s01_fill16:
+                lda     #$3A
+                sta     $FFA2
+                lda     #$3B
+                sta     $FFA3
+                ldx     #$4000
+                ldu     #30720                  ; bytes remaining
+                clrb                            ; B = source row number
+                ldy     #160                    ; bytes remaining in this row (160 B/row at $1E)
+* ★★★★★ THE MODE DECISION IS HOISTED OUT OF THE LOOP, and that is not tidiness -- it is why this runs
+* at all. The first version re-read s01_fillm AND s01_fillb on every one of 30,720 bytes: ~50 cycles a
+* byte, **over 50 frames**, so the sample was taken before the guest had reached its loop and
+* `s01_frames` read 0. ★★★ The liveness witness named the guest rather than the display for the third
+* time in this series, which is exactly what it is for.
+                lda     s01_fillm
+                bne     s01_f16_rows
+* ---- constant fill: A holds the byte for the whole loop ----
+                lda     s01_fillb
+s01_f16_clp:
+                cmpx    #$8000
+                blo     s01_f16_cok
+                pshs    a
+                lda     #$3C
+                sta     $FFA2
+                lda     #$3D
+                sta     $FFA3
+                puls    a
+                ldx     #$4000
+s01_f16_cok:
+                sta     ,x+
+                leau    -1,u
+                cmpu    #0
+                bne     s01_f16_clp
+                bra     s01_f16_done
+* ---- row-number fill: B is the row, Y counts down the row's 160 bytes ----
+* ★★ B and Y carry ACROSS the seam, because 16,384 / 160 = 102.4 and a source row straddles it.
+s01_f16_rows:
+                cmpx    #$8000
+                blo     s01_f16_rok
+                lda     #$3C
+                sta     $FFA2
+                lda     #$3D
+                sta     $FFA3
+                ldx     #$4000
+s01_f16_rok:
+                tfr     b,a                     ; this row's value
+                sta     ,x+
+                leay    -1,y                    ; ★ LEAY sets Z; LEAU does not, hence cmpu below
+                bne     s01_f16_rnext
+                ldy     #160
+                incb
+s01_f16_rnext:
+                leau    -1,u
+                cmpu    #0
+                bne     s01_f16_rows
+s01_f16_done:
+                lda     #$3A                    ; ★ restore, so $4000 shows the buffer's start again
+                sta     $FFA2
+                lda     #$3B
+                sta     $FFA3
+                rts
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+
 s01_do_fill:
+                lda     s01_big
+                bne     s01_fill16              ; ★ 16-colour: 30,720 B through a moving window
                 lda     s01_fillm
                 bne     s01_fill_rows
                 ldx     #S01_FB
@@ -423,6 +527,11 @@ s01_palreg:     fcb     $B1             ; ★ low byte of the palette register t
 s01_fillm:      fcb     0               ; 0 = constant s01_fillb, 1 = row N filled with N
 s01_fillb:      fcb     $55             ; the constant: $55 = flat index 1, $0F = a 4-pixel stripe
 s01_refill:     fcb     0               ; ★ host sets to 1; the guest refills and clears it (an ack)
+s01_big:        fcb     0               ; ★ 0 = 15,360 B (4-colour); 1 = 30,720 B (16-colour, S-03)
+* ★★★ Sixteen DISTINCT CoCo3 palette bytes, so no two indices can render as the same colour. That is
+* a requirement of the row-signature measurement, not decoration -- see the note at the palette init.
+s01_pal16:      fcb     $00,$09,$12,$1B,$24,$2D,$36,$3F
+                fcb     $07,$0E,$15,$1C,$23,$2A,$31,$38
 s01_voff:       fdb     S01_VOFF        ; ★ $FF9D/$FF9E -- physical address >> 3; host-poked and swept
 s01_dly:        fdb     0               ; delay iterations after VBORD, 8 CPU cycles each
 s01_dly2:       fdb     0               ; ★ 0 = one split. Otherwise: back to WIDE after this delay

@@ -51,6 +51,9 @@ local VSWEEP  = (os.getenv("S01_VSWEEP") or "") ~= ""
 local ROWMAP  = (os.getenv("S01_ROWMAP") or "") ~= ""
 local DLY2    = tonumber(os.getenv("S01_DLY2") or "0")
 local DLY3    = tonumber(os.getenv("S01_DLY3") or "0")
+-- ★★★★★ S-03: the 16-colour buffer is 30,720 B and is filled through a moving MMU window, so all-RAM
+-- is never entered and the vectors stay in ROM. See s01_fill16.
+local BIG     = tonumber(os.getenv("S01_BIG") or "0")
 
 -- ★★ The delay sweep. 8 CPU cycles per iteration; a frame is ~29,830 cycles at 1.79 MHz, of which
 -- ~8,000 is vertical blank. So 0..3600 in steps covers blank plus the whole active field.
@@ -89,7 +92,7 @@ end
 for _, n in ipairs({"entry", "s01_mode", "s01_colA", "s01_colB", "s01_dly", "s01_frames",
                     "s01_fillm", "s01_fillb", "s01_vrest", "s01_vresb", "s01_refill",
                     "s01_col0", "s01_col1", "s01_col2", "s01_col3", "s01_palreg",
-                    "s01_dly2", "s01_dly3"}) do
+                    "s01_dly2", "s01_dly3", "s01_big"}) do
     if not SYM[n] then print("★★★ map lacks " .. n); m:exit(); return end
 end
 
@@ -247,6 +250,40 @@ local function decode_row(buf, y, pxw)
 end
 -- ═══════════════════════════════════════════════════════════════════════════════════════════
 
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+-- ★★★★★ S-03: THE COUNTER QUESTION, ANSWERED WITHOUT ANY PALETTE CALIBRATION.
+-- At 16 colours a byte is TWO pixels, so decoding a row number to an absolute value needs a
+-- colour->index map for all sixteen entries. **But the question is a STRIDE, not a value.**
+-- ★★★★ With the row-number fill every byte of source row N holds N, so all that is needed is: how
+-- many CONSECUTIVE DISPLAYED ROWS share the same content? Above the switch the stride is 160 B/row
+-- = one source row per displayed row, so the answer must be 1. Below it the stride is 80 B/row, so
+-- two displayed rows fall inside one source row and the answer must be 2.
+-- ★★★★★ **"1 above, 2 below, with no discontinuity at the boundary" is case 1**, and it is readable
+-- from raw pixels with no knowledge of the palette at all.
+-- ★★★ The signature is the row's FIRST 16 RASTER COLUMNS. Consecutive source rows differ by 1, so
+-- their low nibble differs, and the low nibble falls inside the first 16 columns in BOTH modes --
+-- which a single sampled column does not, because the column that holds a given nibble MOVES when
+-- the pixel width changes. ★★ That trap is why this reads a span and not a point.
+local function row_sig(buf, y)
+    local o = y * SW * 4 + 1
+    return buf:sub(o, o + 63)          -- 16 raster columns x 4 bytes
+end
+
+local function sig_runs(buf, y0, y1)
+    local runs, prev, n = {}, nil, 0
+    for y = y0, y1 do
+        local s = row_sig(buf, y)
+        if s == prev then n = n + 1
+        else
+            if prev ~= nil then runs[#runs+1] = n end
+            prev, n = s, 1
+        end
+    end
+    if prev ~= nil then runs[#runs+1] = n end
+    return runs
+end
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+
 local PROFILE_ROWS = { 30, 50, 70, 90, 110, 130, 150, 170, 190, 210 }
 local function row_profile(buf)
     local out = {}
@@ -269,6 +306,7 @@ end
 -- ── the run ─────────────────────────────────────────────────────────────────────────────────
 local frame, state, step, si, held = 0, "wait_ok", 0, 1, {}
 local results = {}
+local s02_f0 = nil   -- s01_frames at the moment the refill was acknowledged
 
 _G._s01 = emu.add_machine_frame_notifier(function()
     frame = frame + 1
@@ -291,6 +329,7 @@ _G._s01 = emu.add_machine_frame_notifier(function()
             if VSWEEP then wr16(SYM.s01_voff, SWEEP[1]); wr16(SYM.s01_dly, 0)
             else           wr16(SYM.s01_voff, VOFF);     wr16(SYM.s01_dly, SWEEP[1]) end
             -- ★★★★ §4C's two extra splits. Zero means one split, exactly as S-01 ran.
+            prog:write_u8(SYM.s01_big, BIG)
             wr16(SYM.s01_dly2, DLY2)
             wr16(SYM.s01_dly3, DLY3)
             -- ═══════════════════════════════════════════════════════════════════════════════
@@ -345,7 +384,15 @@ _G._s01 = emu.add_machine_frame_notifier(function()
             if ROWMAP then
                 w("  ★ S-02 ROW MAP: phase 1 = calibration fill $1B, phase 2 = row-number fill")
                 w("    (palette and fill were poked BEFORE handover -- the init consumes them once)")
-                state, step = "s02_cal", 0
+                if BIG then
+                    -- ★★★★ 16 colours: the signature instrument needs no colour->index map, so the
+                    -- calibration phase is skipped and the row-number fill goes straight in.
+                    prog:write_u8(SYM.s01_fillm, 1)
+                    prog:write_u8(SYM.s01_refill, 1)
+                    state, step = "s02_wait_refill", 0
+                else
+                    state, step = "s02_cal", 0
+                end
             elseif EYE then
                 w("  ★ EYE RUN: holding dly=%d, no sweep, normal speed. Close the window when done.",
                   SWEEP[1])
@@ -419,14 +466,32 @@ _G._s01 = emu.add_machine_frame_notifier(function()
         return
     end
 
+    -- ═══════════════════════════════════════════════════════════════════════════════════════
+    -- ★★★★★ WAIT FOR THE GUEST TO COMPLETE LOOP ITERATIONS, NOT FOR A FRAME COUNT. The guest clears
+    -- s01_refill BEFORE it starts filling, so the ack says "request received", not "fill finished" --
+    -- and at 16 colours the fill is 30,720 bytes at ~40 cycles each, **about 41 frames**. A fixed
+    -- 60-frame wait after the ack sampled a half-filled buffer and read `s01_frames = 0`, which is
+    -- exactly what an unfinished fill looks like.
+    -- ★★★★ `s01_frames` only ticks at the END of an iteration, so requiring it to RISE is a positive
+    -- signal that the fill returned and the loop is running again. **That is an acknowledgement; a
+    -- frame count is an assumption**, and this is the third time in the series that the difference
+    -- has mattered.
     if state == "s02_wait_refill" then
         if prog:read_u8(SYM.s01_refill) ~= 0 then
-            if step > 600 then
+            if step > 900 then
                 w("★★★ the guest never acknowledged the refill -- STOP"); m:exit()
             end
             return
         end
-        if step < 60 then return end              -- the fill itself takes ~7 frames; settle after
+        s02_f0 = s02_f0 or rd16(SYM.s01_frames)
+        if rd16(SYM.s01_frames) < s02_f0 + 3 then
+            if step > 1200 then
+                w("★★★ the refill never completed: s01_frames stuck at %d -- STOP",
+                  rd16(SYM.s01_frames)); m:exit()
+            end
+            return
+        end
+        w("  refill acknowledged and %d loop iterations completed since", 3)
         state, step = "s02_read", 0
         return
     end
@@ -456,6 +521,23 @@ _G._s01 = emu.add_machine_frame_notifier(function()
             end
             w("   w=%d: %s", pw, table.concat(parts, "  "))
         end
+        -- ═══════════════════════════════════════════════════════════════════════════════════
+        -- ★★★★★ S-03's calibration-free reading: displayed rows per source row, as run lengths
+        -- down the screen. 1 above the boundary, 2 below, and a clean transition between them is
+        -- case 1. Works at any colour depth because it compares raw pixels to raw pixels.
+        local runs = sig_runs(buf, 25, 217)
+        local ones, twos, other, obad = 0, 0, 0, {}
+        for _, n in ipairs(runs) do
+            if n == 1 then ones = ones + 1
+            elseif n == 2 then twos = twos + 1
+            else other = other + 1; if #obad < 8 then obad[#obad+1] = n end end
+        end
+        w("   displayed rows per source row, top to bottom: %s",
+          table.concat(runs, ","))
+        w("   -> runs of 1: %d   runs of 2: %d   anything else: %d%s",
+          ones, twos, other,
+          other > 0 and ("  [" .. table.concat(obad, ",") .. "]") or "")
+        -- ═══════════════════════════════════════════════════════════════════════════════════
         -- ★★★ and the transition profile of the SAME frame, to locate the boundary independently
         local pr = {}
         for _, e in ipairs(row_profile(buf)) do pr[#pr+1] = string.format("%d:%d", e[1], e[2]) end
