@@ -46,6 +46,11 @@ local VOFF    = tonumber(os.getenv("S01_VOFF") or "59392")   -- $E800
 -- in it. With a constant fill in a static mode, the RIGHT value is the only one that makes every
 -- sampled row patterned and equal -- so this finds it by measurement rather than by a third derivation.
 local VSWEEP  = (os.getenv("S01_VSWEEP") or "") ~= ""
+-- ★★★★★ S-02: the row-map run. Two phases in one session -- calibrate colour->index from a $1B fill,
+-- then refill with the row-number pattern and read every scanline back. See the decode above.
+local ROWMAP  = (os.getenv("S01_ROWMAP") or "") ~= ""
+local DLY2    = tonumber(os.getenv("S01_DLY2") or "0")
+local DLY3    = tonumber(os.getenv("S01_DLY3") or "0")
 
 -- ★★ The delay sweep. 8 CPU cycles per iteration; a frame is ~29,830 cycles at 1.79 MHz, of which
 -- ~8,000 is vertical blank. So 0..3600 in steps covers blank plus the whole active field.
@@ -82,7 +87,9 @@ do
     fh:close()
 end
 for _, n in ipairs({"entry", "s01_mode", "s01_colA", "s01_colB", "s01_dly", "s01_frames",
-                    "s01_fillm", "s01_fillb", "s01_vrest", "s01_vresb"}) do
+                    "s01_fillm", "s01_fillb", "s01_vrest", "s01_vresb", "s01_refill",
+                    "s01_col0", "s01_col1", "s01_col2", "s01_col3", "s01_palreg",
+                    "s01_dly2", "s01_dly3"}) do
     if not SYM[n] then print("★★★ map lacks " .. n); m:exit(); return end
 end
 
@@ -194,6 +201,52 @@ local function row_runs(buf, y, maxruns)
     return runs, order
 end
 
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+-- ★★★★★ S-02: DECODE THE ROW-NUMBER FILL BACK TO A SOURCE ROW.
+-- `s01_fillm = 1` fills row N with byte value N, and at 2 bits per pixel that byte is four palette
+-- indices: (N>>6)&3, (N>>4)&3, (N>>2)&3, N&3. So reading four pixels off a displayed row and mapping
+-- each colour to its index reconstructs N -- **which source row arrived on this scanline.**
+-- ★★★★ THE COLOUR->INDEX MAP IS MEASURED, NOT DERIVED. Predicting the RGB for a CoCo3 palette byte
+-- would import an assumption about MAME's conversion that nothing checks; instead the guest is filled
+-- with $1B (indices 0,1,2,3) and the four colours are read off the screen in the SAME session.
+-- ★★★ BOTH PIXEL WIDTHS ARE DECODED AND BOTH PRINTED. A row's width is 2 raster columns per pixel at
+-- 320-wide and 4 at 160-wide, and rather than assume where the boundary is, each row is decoded both
+-- ways: above the switch the w=2 column reads as a clean sequence, below it the w=4 column does. The
+-- table then shows the boundary rather than depending on knowing it [S-01 §7.3: do not build the
+-- answer into the instrument].
+local CAL = {}          -- colour (4-byte string) -> palette index 0..3
+local CAL_N = 0
+
+local function calibrate(buf, y)
+    -- $1B = %00 01 10 11 -> pixels 0,1,2,3 at 320-wide, each 2 raster columns
+    CAL, CAL_N = {}, 0
+    local base = y * SW * 4 + 1
+    local seen = {}
+    for k = 0, 3 do
+        local o = base + (k * 2) * 4
+        local v = buf:sub(o, o + 3)
+        if seen[v] then return false, k end      -- two indices rendering alike: unusable
+        seen[v] = true
+        CAL[v] = k
+        CAL_N = CAL_N + 1
+    end
+    return CAL_N == 4
+end
+
+local function decode_row(buf, y, pxw)
+    local base = y * SW * 4 + 1
+    local b = 0
+    for k = 0, 3 do
+        local col = k * pxw + (pxw // 2)         -- the centre of pixel k
+        local o = base + col * 4
+        local idx = CAL[buf:sub(o, o + 3)]
+        if idx == nil then return nil end         -- a colour outside the calibrated four
+        b = b * 4 + idx
+    end
+    return b
+end
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+
 local PROFILE_ROWS = { 30, 50, 70, 90, 110, 130, 150, 170, 190, 210 }
 local function row_profile(buf)
     local out = {}
@@ -237,6 +290,35 @@ _G._s01 = emu.add_machine_frame_notifier(function()
             -- ★ In a VOFFSET sweep the sweep list IS the VOFFSET list and the delay stays put.
             if VSWEEP then wr16(SYM.s01_voff, SWEEP[1]); wr16(SYM.s01_dly, 0)
             else           wr16(SYM.s01_voff, VOFF);     wr16(SYM.s01_dly, SWEEP[1]) end
+            -- ★★★★ §4C's two extra splits. Zero means one split, exactly as S-01 ran.
+            wr16(SYM.s01_dly2, DLY2)
+            wr16(SYM.s01_dly3, DLY3)
+            -- ═══════════════════════════════════════════════════════════════════════════════
+            -- ★★★★★ EVERY PARAMETER THE GUEST'S **INIT** READS MUST BE POKED BEFORE PC IS SET.
+            -- The first cut poked the S-02 palette and fill AFTER the handover, so the init had
+            -- already run the fill and written the palette from the DEFAULTS -- and the calibration
+            -- read four black pixels, because the guest had filled with $55 and set index 1 to $3F
+            -- while the host believed it had asked for $1B and four distinct colours.
+            -- ★★★★ It is a race, not a typo: the guest starts executing the instant PC is set, and
+            -- the host's next writes land some cycles into the init. **A poke after handover only
+            -- works for values the LOOP re-reads** -- s01_dly, s01_voff, s01_refill -- and never for
+            -- ones the init consumes once.
+            if ROWMAP then
+                prog:write_u8(SYM.s01_fillm, 0)
+                prog:write_u8(SYM.s01_fillb, 0x1B)   -- indices 0,1,2,3 in one byte
+                -- ★★★★★ FOUR DISTINCT DISPLAYED COLOURS, and the FLIP moved to an undisplayed entry.
+                -- The screen only stays current while a palette value changes (measured: a changing
+                -- $FF99 alone is NOT enough), but the decode needs the displayed four to hold still.
+                -- $FFB8 is not rendered in 4-colour mode, so flipping it satisfies both.
+                prog:write_u8(SYM.s01_col0, 0x00)    -- black
+                prog:write_u8(SYM.s01_col1, 0x09)    -- blue
+                prog:write_u8(SYM.s01_col2, 0x12)    -- green
+                prog:write_u8(SYM.s01_col3, 0x3F)    -- white
+                prog:write_u8(SYM.s01_palreg, 0xB8)
+                prog:write_u8(SYM.s01_colA, 0x3F)
+                prog:write_u8(SYM.s01_colB, 0x00)
+            end
+            -- ═══════════════════════════════════════════════════════════════════════════════
             cpu.state["PC"].value = SYM.entry
             w("S-01 rev B  stage %d (%s)  %d bytes at $%04X  screen %dx%d",
               MODE, MODE == 0 and "PALETTE -- the control" or "HRES", #blob, SYM.entry, SW, SH)
@@ -260,7 +342,11 @@ _G._s01 = emu.add_machine_frame_notifier(function()
               prog:read_u8(SYM.s01_colA), prog:read_u8(SYM.s01_colB),
               prog:read_u8(SYM.s01_fillm), prog:read_u8(SYM.s01_fillb))
             w("  DECB ready at frame %d, handed over to $%04X", frame, SYM.entry)
-            if EYE then
+            if ROWMAP then
+                w("  ★ S-02 ROW MAP: phase 1 = calibration fill $1B, phase 2 = row-number fill")
+                w("    (palette and fill were poked BEFORE handover -- the init consumes them once)")
+                state, step = "s02_cal", 0
+            elseif EYE then
                 w("  ★ EYE RUN: holding dly=%d, no sweep, normal speed. Close the window when done.",
                   SWEEP[1])
                 state, step = "eye", 0
@@ -275,6 +361,111 @@ _G._s01 = emu.add_machine_frame_notifier(function()
     end
 
     step = step + 1
+
+    -- ═══════════════════════════════════════════════════════════════════════════════════════
+    -- ★★★★★ S-02: WHERE DOES THE DATA BELOW THE SWITCH COME FROM?
+    -- Phase 1 fills with $1B and calibrates colour->index. Phase 2 pokes the row-number fill, waits
+    -- for the guest to ACKNOWLEDGE the refill by clearing the flag, and reads every scanline back.
+    -- ★★★★ The refill is acknowledged rather than assumed: a table decoded off the PREVIOUS fill is
+    -- L-92's defect and would look like a perfectly ordinary answer.
+    -- ═══════════════════════════════════════════════════════════════════════════════════════
+    if state == "s02_cal" then
+        if step < 45 then return end
+        local buf = grab()
+        local ok, dup = calibrate(buf, 40)
+        -- ★★★ Print the four colours whether it passes or fails. The first failure said only
+        -- "indices 1 render alike", which named the symptom and not the datum -- and the datum
+        -- (two entries holding the same palette byte) is what identified the cause immediately.
+        local shown = {}
+        for k = 0, 3 do
+            local o = 40 * SW * 4 + 1 + (k * 2) * 4
+            local v = buf:sub(o, o + 3)
+            shown[#shown+1] = string.format("px%d=%02X%02X%02X", k,
+              v:byte(3) or 0, v:byte(2) or 0, v:byte(1) or 0)
+        end
+        w("  calibration (fill $1B at y=40): %s", table.concat(shown, " "))
+        -- ★★★ The raw row and the framebuffer beside it, because "four black pixels" is a symptom
+        -- shared by a wrong palette, a wrong fill, and a screen that is not showing the framebuffer.
+        -- Printing all three separates them in one look instead of another round of hypotheses.
+        do
+            local runs, order = row_runs(buf, 40, 12)
+            w("    y=40 runs %s | colours %s", table.concat(runs, ","), table.concat(order, " "))
+            local fb = {}
+            for i = 0, 5 do fb[#fb+1] = string.format("%02X", prog:read_u8(0x4000 + i)) end
+            w("    framebuffer $4000.. = %s   (expect 1B 1B 1B ...)", table.concat(fb, " "))
+            w("    guest palette bytes: col0=$%02X col1=$%02X col2=$%02X col3=$%02X palreg=$%02X",
+              prog:read_u8(SYM.s01_col0), prog:read_u8(SYM.s01_col1), prog:read_u8(SYM.s01_col2),
+              prog:read_u8(SYM.s01_col3), prog:read_u8(SYM.s01_palreg))
+            w("    guest fillm=%d fillb=$%02X  frames=%d",
+              prog:read_u8(SYM.s01_fillm), prog:read_u8(SYM.s01_fillb), rd16(SYM.s01_frames))
+            -- ★★★★★ WHERE IS THE GUEST? `frames = 0` says the loop never completed an iteration, and
+            -- that is consistent with a crash, a spin in the VBORD wait, and never reaching the loop
+            -- at all. The PC distinguishes all three in one read, and guessing between them has
+            -- already cost two rounds.
+            w("    guest PC=$%04X S=$%04X   (loop $%04X, vb wait $%04X, do_fill $%04X, palwr $%04X)",
+              cpu.state["PC"].value, cpu.state["S"].value,
+              SYM.s01_loop or 0, SYM.s01_vb or 0, SYM.s01_do_fill or 0, SYM.s01_palwr or 0)
+        end
+        if not ok then
+            w("★★★ CALIBRATION FAILED: pixel %s renders the same as an earlier one -- two palette",
+              tostring(dup))
+            w("    entries hold the same value, so the row-number decode cannot be unambiguous. STOP.")
+            m:exit(); return
+        end
+        w("  -> 4 distinct colours mapped to indices 0..3")
+        prog:write_u8(SYM.s01_fillm, 1)
+        prog:write_u8(SYM.s01_refill, 1)
+        state, step = "s02_wait_refill", 0
+        return
+    end
+
+    if state == "s02_wait_refill" then
+        if prog:read_u8(SYM.s01_refill) ~= 0 then
+            if step > 600 then
+                w("★★★ the guest never acknowledged the refill -- STOP"); m:exit()
+            end
+            return
+        end
+        if step < 60 then return end              -- the fill itself takes ~7 frames; settle after
+        state, step = "s02_read", 0
+        return
+    end
+
+    if state == "s02_read" then
+        local buf = grab()
+        w("")
+        w("── §4A: which SOURCE ROW arrives on each displayed scanline ──")
+        w("   fill: row N holds byte value N in all 80 of its bytes; decoded from 4 pixels/row")
+        w("   w=2 is the 320-wide reading (2 raster columns per pixel); w=4 is the 160-wide reading")
+        -- compress consecutive rows that decode to the same source row, per width
+        for _, pw in ipairs({ 2, 4 }) do
+            local parts, runstart, prev = {}, nil, nil
+            for y = 25, 217 do
+                local d = decode_row(buf, y, pw)
+                if d ~= prev then
+                    if prev ~= nil then
+                        parts[#parts+1] = string.format("y%d-%d=%s", runstart, y - 1,
+                          prev == nil and "?" or tostring(prev))
+                    end
+                    runstart, prev = y, d
+                end
+            end
+            if prev ~= nil or runstart then
+                parts[#parts+1] = string.format("y%d-%d=%s", runstart or 25, 217,
+                  prev == nil and "?" or tostring(prev))
+            end
+            w("   w=%d: %s", pw, table.concat(parts, "  "))
+        end
+        -- ★★★ and the transition profile of the SAME frame, to locate the boundary independently
+        local pr = {}
+        for _, e in ipairs(row_profile(buf)) do pr[#pr+1] = string.format("%d:%d", e[1], e[2]) end
+        w("   transition profile (same frame): %s", table.concat(pr, "  "))
+        w("   guest frames %d", rd16(SYM.s01_frames))
+        local fh = io.open(OUT .. "/s02_rowmap.txt", "w")
+        if fh then fh:write(table.concat(log, "\n") .. "\n"); fh:close() end
+        m:exit()
+        return
+    end
 
     -- ★★ The eye run reports the boundary ONCE, a second after handover, so the number Jay is
     -- looking at and the number in the log are the same observation -- then it stays out of the way.

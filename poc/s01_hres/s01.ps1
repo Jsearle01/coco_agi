@@ -39,7 +39,12 @@ param(
   # text screen), which is why the stale part was identical. **If MAME does not rasterise a screen it
   # is not displaying, scr:pixel() reads something that is not the emulated frame.** This is the arm
   # that tests it, and it is a one-switch experiment rather than a theory.
-  [switch]$Render
+  [switch]$Render,
+  # ★★★★★ -RowMap: S-02. Calibrates colour->index, then reads the row-number fill back and reports
+  # which SOURCE ROW arrives on each displayed scanline -- §3.2's address-counter question.
+  [switch]$RowMap,
+  [int]   $Dly2    = 0,
+  [int]   $Dly3    = 0
 )
 $ErrorActionPreference = "Stop"
 $env:PATH = "C:\Users\jayse\DEV\cmd;C:\Users\jayse\DEV\mingw64\opt\bin;" + $env:PATH
@@ -70,7 +75,10 @@ $env:S01_FILLB = "$FillB"
 $env:S01_VREST = "$VresT"
 $env:S01_VRESB = "$VresB"
 $env:S01_VOFF  = "$Voff"
+$env:S01_DLY2  = "$Dly2"
+$env:S01_DLY3  = "$Dly3"
 if ($VSweep) { $env:S01_VSWEEP = "1" } else { Remove-Item env:S01_VSWEEP -ErrorAction SilentlyContinue }
+if ($RowMap) { $env:S01_ROWMAP = "1" } else { Remove-Item env:S01_ROWMAP -ErrorAction SilentlyContinue }
 if ($Eye) { $env:S01_EYE = "1"; $env:S01_SWEEP = "$Dly" }
 else      { Remove-Item env:S01_EYE -ErrorAction SilentlyContinue
             if ($Sweep) { $env:S01_SWEEP = $Sweep }

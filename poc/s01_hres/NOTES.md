@@ -15,6 +15,8 @@ unexamined for 61 tasks because nobody wrote down what it meant [§8].
 | **Stage 0 — the control (mid-frame PALETTE change)** | ★★★★★ **PASSED.** Measured and eye-confirmed. |
 | **Stage 1 — mid-frame HRES change** | ★★★★★ **PASSED.** Resolution halves below the write, ratio 2.01, boundary tracks the delay. |
 | **Stage 2 — precision / jitter (FIRQ)** | Not reached. |
+| **S-02 — where the data below the switch comes from** | ★★★★★ **ANSWERED: the counter KEEPS RUNNING (§1.1 case 1) — a single linear buffer works.** |
+| **S-02 §4C — do 2 more splits land in one frame?** | ★★★★★ **YES. Three boundaries, four bands. N splits cost N writes.** |
 
 > ★★★★★ **A MID-FRAME HRES CHANGE HOLDS UNDER MAME.** The screen renders 320-wide above the write and
 > 160-wide below it; the horizontal period doubles exactly (**159 → 79 transitions per row, ratio
@@ -78,6 +80,121 @@ numeric and one human, of the same frame.**
 
 ★★ Incidental, and confirmed empirically rather than derived: **`$FFB1 = $09` renders BLUE and
 `$3F` renders WHITE** on the RGB monitor profile.
+
+---
+
+---
+
+# S-02 — Where does the data below the switch come from?
+
+★★★★★ **ANSWERED: §1.1 CASE 1. The video address counter KEEPS RUNNING.** Below the switch each row
+consumes 40 bytes instead of 80, and the counter continues from exactly where the wide rows left it.
+**A single linear buffer works; the picture area and the text area are contiguous with a stride change
+at the boundary. This is the good case, and it makes the layout almost free.**
+
+★★★★★ **AND THREE BOUNDARIES LAND IN ONE FRAME** (§4C), so a 320-wide message box inside a 160-wide
+picture is achievable: **N splits cost N writes.**
+
+## §4A — the table, read off the screen
+
+Fill: row *N* holds byte value *N* in all 80 of its bytes, so a displayed row reports **which 80-byte
+block** it read. Decoded from 4 pixels per row; the colour→index map was calibrated in the same session
+from a `$1B` fill (indices 0,1,2,3 → black, blue, green, white — four distinct, verified before use).
+
+**ABOVE the boundary — the control (§4A(2)), and it passes:**
+
+```
+w=2 (the 320-wide reading):  y25=1  y26=2  y27=3 ... y121=97  y122=98
+```
+
+★★★★★ **Exactly +1 per displayed row, unbroken over 98 rows.** The rows above read as themselves, so
+the instrument is sound and what follows can be trusted. ★★ The offset is `src = y - 24` (the first
+active scanline shows source row 1, not 0) — noted, not chased; it does not affect the stride question.
+
+**BELOW the boundary:**
+
+```
+w=4 (the 160-wide reading):  y123-124=99   y125-126=100  y127-128=101  y129-130=102 ...
+                             y211-212=143  y213-214=144  y215=145
+```
+
+★★★★★ **The source row advances by one every TWO displayed rows, and it continues from 98 to 99 without
+a break.** Two 40-byte rows consume one 80-byte block — which is the counter running on at the new
+stride and nothing else.
+
+★★★★ **The arithmetic agrees with the screen**, which is the check that matters: 95 narrow rows × 40 B
+= 3,800 B = 47.5 blocks, so the last value should be ≈ 99 + 47 = 146, and the screen says 145.
+
+**§4A(3) — the boundary row:** ★★★ **WHOLE.** y=123 decodes as the first half of the `99` pair. Not
+split, not skipped, not duplicated.
+
+## §4B — which of the three it is
+
+★★★★★ **Case 1, unambiguously.** Case 2 (counter restarts or is re-derived from VOFFSET per field)
+would have shown the values below the boundary restarting near 0; they continue from 98. Case 3
+(a partial line, a skipped row, an offset by the difference) would have shown a discontinuity at the
+boundary; there is none. ★★ **The byte arithmetic and the screen agree, so there is no disagreement to
+report as a finding.**
+
+## §4C — do a second and third split land?
+
+★★★★★ **YES.** With one frame and three writes (`dly 1200 / dly2 700 / dly3 700`):
+
+```
+row transitions  30:159 | 50:79  70:79 | 90:159 110:159 130:159 | 150:79 170:79 190:79 210:79
+band                320 |     160     |          320           |             160
+```
+
+**Four bands, three boundaries, at the three delays asked for** (≈y39, y88, y137 predicted from the
+delays; the band edges bracket all three). ★★★★ **So the message-box problem is a PRECISION question,
+not a feasibility one** — which is the outcome §4C said would matter: 160-wide is a picture area AGI
+can actually put windows in.
+
+★★★ The palette flip at each split is invisible by construction — the stripe fill `$0F` uses indices 0
+and 3 and the flip writes index 1 — **so the only thing that can change a run length here is HRES.**
+
+★★★★★ **EYE-CONFIRMED (AC-5), at normal speed, against an expectation stated before the run** — four
+horizontal bands alternating fine and double-width stripes, fine at the top. **Jay: *"that's what i
+see."*** ★★★ **Every result in S-01 and S-02 now carries two independent confirmations of the same
+frame: a host-side number and a person.**
+
+## ★★★★★ A CORRECTION TO S-01 §7.3, now properly isolated
+
+S-01 concluded that the bitmap stays current only while a **palette** value changes. ★★★★ **The arm that
+would have separated the two was missing**: the working run changed *both* the palette and `$FF99`. It
+has now been run — **`$FF99` changing while the palette is held constant leaves the screen broken** — so
+**a changing palette value is required, and `$FF99` traffic is not a substitute.** S-01's attribution was
+right; it was under-tested, and the test that could have falsified it is the one S-01 §7.3 says to run.
+
+★★★ **This is what `s01_palreg` exists for**: the flip is pointed at `$FFB8`, which 4-colour mode never
+displays, so S-02 gets a refreshing bitmap *and* four stable decodable colours. **Those two requirements
+collide on `$FFB1` and the coupling had to be broken.**
+
+## ★★★★ Four defects in the instrument, which was untested code by definition (§3.1)
+
+★★★ Recorded because §3.1 predicted them and because the *shape* of two is worth carrying:
+
+1. ★★★★ **The palette was coupled to the flip.** Index 1 took its init value from `s01_colA` and index 3
+   from `s01_col3`; both defaulted to `$3F`, so two indices rendered identically. **Calibration refused
+   to run**, which is the behaviour wanted — but the first failure message named the symptom
+   (*"indices 1 render alike"*) and not the datum. Printing the four colours identified it at once.
+2. ★★★★★ **A subroutine placed in a fall-through path, twice.** `s01_palwr` sat immediately after
+   `s01_bot_hres`'s `bsr` to it, so control fell back in and ran `puls b,pc` against nothing. Moving it
+   put it in the **init's** implicit fall-through into `s01_loop` instead — so the init ran the fill
+   twice and `rts`-ed into `$8006`. ★★★ **The cure is not a better position but an explicit `bra
+   s01_loop`**: the init reached the loop by falling through, which was correct only while nothing sat
+   between them.
+3. ★★★★ **The host poked parameters the guest's INIT consumes AFTER setting PC.** A race, not a typo:
+   the guest starts executing immediately and the init had already filled and set the palette from the
+   defaults. **A poke after handover works only for values the LOOP re-reads.**
+4. ★★ **Short branches out of reach** once the extra-split block was added; made long rather than
+   marginally short.
+
+★★★★★ **What found 2 and 3 was `s01_frames = 0` beside a correct framebuffer and a correct palette** —
+the liveness witness naming the *guest* rather than the display — **and then the PC and S.** Two
+hypotheses about the palette had already been spent by then. ★★★ **S=$2F08, eight bytes above its
+initial value, is what said "a return with nothing pushed"**, and that is a datum no amount of staring
+at the screen would have produced.
 
 ---
 

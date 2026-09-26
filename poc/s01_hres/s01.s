@@ -128,29 +128,7 @@ s01_mmu:
 *                   switch consume a different number of bytes than rows above, and the displayed
 *                   byte VALUE says which source row arrived. Recoverable from the pixels because
 *                   the four palette entries are set to four distinct colours (stage 1b).
-                lda     s01_fillm
-                bne     s01_fill_rows
-                ldx     #S01_FB
-                lda     s01_fillb
-s01_fill:
-                sta     ,x+
-                cmpx    #S01_FBEND
-                bne     s01_fill
-                bra     s01_fill_done
-s01_fill_rows:
-                ldx     #S01_FB
-                clrb                            ; B = row number, 0..191
-s01_fr_row:
-                tfr     b,a                     ; every byte of this row carries the row number
-                ldy     #80                     ; 80 bytes per row at $FF99=$15
-s01_fr_byte:
-                sta     ,x+
-                leay    -1,y
-                bne     s01_fr_byte
-                incb
-                cmpx    #S01_FBEND
-                bne     s01_fr_row
-s01_fill_done:
+                bsr     s01_do_fill
 
 * ── Step 3: mode ────────────────────────────────────────────────────────────────────────────
                 ldd     #$8000+S01_VRES_320
@@ -195,19 +173,42 @@ s01_not_static:
                 sta     $FFD9                   ; 1.79 MHz
 
 * ── Step 8: palette LAST (Constraint B) ─────────────────────────────────────────────────────
-* ★★ FOUR DISTINCT ENTRIES, not two. Stage 0 only needs index 1, but stage 1's stripe uses index 3
-* and stage 1b recovers a byte value from all four, so every entry is host-settable and distinct.
-                clr     $FFB0                   ; index 0 = black (the background/border)
-                lda     s01_colA
-                sta     $FFB1                   ; index 1 = the register stage 0 flips
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ ALL FOUR ENTRIES ARE HOST-SET INDEPENDENTLY OF THE FLIPPING PAIR [S-02]. They used to be
+* entangled: index 1 took its init value from s01_colA (the flip's "top" colour) and index 3 from
+* s01_col3, and with the defaults BOTH were $3F -- so two palette indices rendered identically and
+* the row-number decode could not tell them apart. **Calibration caught it and refused to run**,
+* which is the behaviour wanted, but the cause was this coupling.
+* ★★★★ Now col0..col3 are the DISPLAYED palette and colA/colB are only the flip, so the two concerns
+* are separable: S-02 needs four distinct displayed colours AND a changing register value, and it
+* gets the second by flipping an entry that 4-colour mode never displays (see s01_palreg).
+                lda     s01_col0
+                sta     $FFB0
+                lda     s01_col1
+                sta     $FFB1
                 lda     s01_col2
                 sta     $FFB2
                 lda     s01_col3
                 sta     $FFB3
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 
 * ★ Enable VBORD as a POLLABLE source. IEN stays 0, so this latches status without vectoring.
                 lda     #$08
                 sta     $FF92
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ AN EXPLICIT BRANCH TO THE LOOP, AND IT IS HERE BECAUSE ITS ABSENCE COST TWO ROUNDS OF
+* DEBUGGING. The init used to reach s01_loop by FALLING THROUGH, which was correct only while nothing
+* sat between them. Converting the fill to a subroutine put `s01_do_fill` in that gap, so the init
+* fell into the fill, ran it a second time, and executed its `rts` with nothing on the stack --
+* returning to $8006 with S eight bytes ABOVE its initial value.
+* ★★★★ The symptom was `s01_frames = 0` beside a correct framebuffer and a correct palette, and the
+* liveness witness is what named the guest rather than the display [§2W]. **The PC and S are what
+* identified it**, after two hypotheses about the palette had already been spent.
+* ★★★ Stated as a rule for this file: **nothing here relies on implicit fall-through into the loop.**
+* An inserted subroutine must not be able to change control flow, and one `bra` buys that permanently.
+                bra     s01_loop
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * THE LOOP. Per frame: wait for the vertical border, assert the TOP state, burn s01_dly, assert
@@ -218,11 +219,84 @@ s01_not_static:
 * 1.79 MHz, of which the vertical blank is ~8,000 and the 192 active lines ~21,800, so the useful
 * sweep is roughly s01_dly = 0 .. 3,700.
 * ═══════════════════════════════════════════════════════════════════════════════════════════
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE FILL AS A SUBROUTINE, AND A HOST-TRIGGERED REFILL, SO CALIBRATION AND MEASUREMENT HAPPEN
+* IN ONE SESSION [S-02 §4A]. Reading the row-number fill back requires knowing which on-screen colour
+* is which palette INDEX, and deriving that from the CoCo3 palette byte would import an assumption
+* about MAME's RGB conversion that nothing would check.
+* ★★★★ So the host calibrates empirically: fill with $1B (= indices 0,1,2,3 in one byte), read the four
+* colours off one row, then poke s01_fillm=1 and s01_refill=1 and measure. **Same session, same palette
+* state, no cross-run assumption** -- which matters because S-01's whole mess came from comparing runs.
+* ★★ The fill costs ~200k cycles (~7 frames) and the guest simply misses those VBORDs.
+s01_do_fill:
+                lda     s01_fillm
+                bne     s01_fill_rows
+                ldx     #S01_FB
+                lda     s01_fillb
+s01_fill:
+                sta     ,x+
+                cmpx    #S01_FBEND
+                bne     s01_fill
+                rts
+* ★★★ Row N is filled with the byte value N, in all 80 of its bytes. So a displayed row reports WHICH
+* 80-BYTE BLOCK it read, and that is the granularity the question needs: if the address counter keeps
+* running at 40 B/row below the switch, consecutive displayed rows advance by half a block -- the same
+* value twice, then +1. **That signature distinguishes §1.1's cases without needing byte precision.**
+s01_fill_rows:
+                ldx     #S01_FB
+                clrb                            ; B = row number, 0..191
+s01_fr_row:
+                tfr     b,a                     ; every byte of this row carries the row number
+                ldy     #80                     ; 80 bytes per row at $FF99=$15 -- the FILL's stride
+s01_fr_byte:
+                sta     ,x+
+                leay    -1,y
+                bne     s01_fr_byte
+                incb
+                cmpx    #S01_FBEND
+                bne     s01_fr_row
+                rts
+
+* ★★★★★ THE FLIP TARGETS A HOST-SELECTABLE PALETTE REGISTER, and that is what lets S-02 exist.
+* The screen only stays current while some palette value CHANGES (measured: a changing $FF99 alone is
+* not enough), but the row-number decode needs the four DISPLAYED entries to hold still and be
+* distinct. Those two requirements collide on $FFB1.
+* ★★★★ 4-colour mode displays indices 0-3 only, so $FFB4-$FFBF are free: S-02 points s01_palreg at
+* $B8 and flips an entry nothing renders. The screen keeps refreshing, the displayed palette is
+* constant, and the decode works. Stage 0 and stage 1 leave it at $B1 and behave exactly as before.
+* ★ A = the value to write; B and X are scratch.
+*
+* ★★★★★ AND IT LIVES HERE, BESIDE THE OTHER SUBROUTINES, BECAUSE ITS FIRST HOME WAS INSIDE THE LOOP's
+* FALL-THROUGH PATH. `s01_bot_hres` ended with `bsr s01_palwr` and the subroutine was the next thing in
+* memory, so after returning the CPU fell straight back INTO it and executed `puls b,pc` against a
+* return address nothing had pushed. ★★★★ The guest died on its first loop iteration and the symptom
+* was `s01_frames = 0` with a correct framebuffer and a correct palette -- the liveness witness naming
+* the guest rather than the display, which is exactly what it is for [§2W].
+* ★★ Mode 0's paths happened to survive it because both end in an explicit `bra`; only the mode-1
+* bottom branch fell through. **A subroutine placed in a fall-through path is a bug that spares
+* whichever caller happens to branch away.**
+s01_palwr:
+                pshs    b
+                ldb     s01_palreg
+                ldx     #$FF00
+                abx
+                sta     ,x
+                puls    b,pc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+
 s01_loop:
 s01_vb:
                 lda     $FF92                   ; read = status + ack
                 bita    #$08                    ; VBORD?
                 beq     s01_vb
+
+* ★ Host-requested refill, serviced once and acknowledged by clearing the flag, so the host can tell
+* the refill actually happened rather than assuming it.
+                lda     s01_refill
+                beq     s01_norefill
+                clr     s01_refill
+                bsr     s01_do_fill
+s01_norefill:
 
 * ★★★ VOFFSET IS RE-WRITTEN EVERY FRAME, so the host can sweep it on a running guest. Without this
 * the register keeps its init value and poking s01_voff would change nothing -- a sweep that moves a
@@ -237,7 +311,7 @@ s01_vb:
                 tsta                            ; ★ NOT `bne` off the cmpa -- mode 0 leaves Z clear
                 bne     s01_top_hres            ;   there and would have taken the HRES branch
                 lda     s01_colA
-                sta     $FFB1
+                bsr     s01_palwr
                 bra     s01_wait
 s01_top_hres:
 * ★★★★★ WRITTEN AS A PAIR WITH `std $FF98`, EXACTLY AS THE INIT AND gfx.s DO, AND THAT IS THE
@@ -257,8 +331,11 @@ s01_top_hres:
 * register write forces it would look like. ★★★ With s01_colA = s01_colB the palette does not change,
 * so this adds the register TRAFFIC without adding a visual variable: if the screen then renders
 * fully, the refresh is driven by palette writes and that is a MAME idiom worth recording.
+* ★★★★★ MEASURED SINCE: the refresh IS driven by a changing palette value. The arm that was missing
+* -- $FF99 changing while the palette stays constant -- was run and the screen stayed broken, so it
+* is not `$FF99` traffic that keeps the bitmap current. **A CHANGING PALETTE VALUE IS REQUIRED.**
                 lda     s01_colA
-                sta     $FFB1
+                bsr     s01_palwr
 
 * ---- the delay that places the boundary ----
 s01_wait:
@@ -274,21 +351,56 @@ s01_switch:
                 tsta
                 bne     s01_bot_hres
                 lda     s01_colB
-                sta     $FFB1
+                bsr     s01_palwr
                 bra     s01_tick
 s01_bot_hres:
                 lda     #$80                    ; ★★★★★ THE THING UNDER TEST, as a paired write
                 ldb     s01_vresb
                 std     $FF98
                 lda     s01_colB                ; ★ the paired palette write -- see the note above
-                sta     $FFB1
+                bsr     s01_palwr
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ TWO MORE SPLITS, IF THE HOST ASKS FOR THEM [S-02 §4C]. MAME records $FF98/$FF99 per scanline,
+* so N splits should cost N writes and be no harder structurally than one -- but "should" is not
+* measured, and AGI needs it: message boxes and positioned `display` text live INSIDE the picture area
+* (P6.62 put KQ3's credit scroll at rows 13-18), so a usable split needs 320 back for a box's rows and
+* 160 below it. **That is three boundaries in one frame, not one.**
+* ★★★★ Zero in s01_dly2 skips both, so mode 1 behaves exactly as it did for S-01's stage 1.
+* ★★★ The palette flip at each split is INVISIBLE here by construction: the stripe fill $0F uses
+* indices 0 and 3, and the flip writes index 1. So it keeps the bitmap refreshing without adding a
+* visual variable -- **the only thing that can change the run lengths is HRES.**
+                ldx     s01_dly2
+                beq     s01_split_done
+s01_d2:
+                leax    -1,x
+                bne     s01_d2
+                lda     #$80                    ; back to the WIDE mode
+                ldb     s01_vrest
+                std     $FF98
+                lda     s01_colA
+                bsr     s01_palwr
+                ldx     s01_dly3
+                beq     s01_split_done
+s01_d3:
+                leax    -1,x
+                bne     s01_d3
+                lda     #$80                    ; and narrow again
+                ldb     s01_vresb
+                std     $FF98
+                lda     s01_colB
+                lbsr    s01_palwr
+s01_split_done:
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 
 * ---- liveness, read by the host ----
+* ★★ LONG branches back to the loop. The extra-split block pushed these past 127 bytes and the
+* assembler said so; they are long now rather than marginally short, because the next block added
+* here would break them again. One extra byte each, on a path taken once per frame.
 s01_tick:
                 inc     s01_frames+1
-                bne     s01_loop
+                lbne    s01_loop
                 inc     s01_frames
-                bra     s01_loop
+                lbra    s01_loop
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * HOST-POKED PARAMETERS AND HOST-READ WITNESS. Addresses are resolved from the assembler's map by
@@ -300,12 +412,21 @@ s01_vrest:      fcb     $15             ; TOP $FF99 -- 320x192x4, 80 B/row
 s01_vresb:      fcb     $0D             ; BOTTOM $FF99 -- 160x192x4, 40 B/row; also mode 2's value
 s01_colA:       fcb     $3F             ; TOP colour -- white
 s01_colB:       fcb     $09             ; BOTTOM colour -- NOT black, so it differs from the border
+s01_col0:       fcb     $00             ; ★ the DISPLAYED palette, independent of the flipping pair
+s01_col1:       fcb     $3F             ;   index 1 -- stage 0/1 overwrite it via the flip
 s01_col2:       fcb     $12             ; palette index 2
 s01_col3:       fcb     $3F             ; palette index 3 -- the stripe's bright half
+s01_palreg:     fcb     $B1             ; ★ low byte of the palette register the FLIP writes.
+                                        ;   $B1 = index 1 (stage 0/1). S-02 uses $B8, which 4-colour
+                                        ;   mode never displays, so the flip refreshes the bitmap
+                                        ;   without disturbing the four decodable colours.
 s01_fillm:      fcb     0               ; 0 = constant s01_fillb, 1 = row N filled with N
 s01_fillb:      fcb     $55             ; the constant: $55 = flat index 1, $0F = a 4-pixel stripe
+s01_refill:     fcb     0               ; ★ host sets to 1; the guest refills and clears it (an ack)
 s01_voff:       fdb     S01_VOFF        ; ★ $FF9D/$FF9E -- physical address >> 3; host-poked and swept
 s01_dly:        fdb     0               ; delay iterations after VBORD, 8 CPU cycles each
+s01_dly2:       fdb     0               ; ★ 0 = one split. Otherwise: back to WIDE after this delay
+s01_dly3:       fdb     0               ; ★ and narrow again after this one -- three boundaries
 s01_frames:     fdb     0               ; ★ incremented once per frame by the guest
 
                 end     entry
