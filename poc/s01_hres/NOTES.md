@@ -190,12 +190,32 @@ on — **the jitter is in the reading, not in the accumulated time.**
 frames, in every arm. **The guest keeps up exactly.** ★★ This is the BASELINE a FIRQ arm must be
 compared against, and no FIRQ arm exists yet, so **no cost for the handler is claimed.**
 
+### ★★★★★ AC-3 — EYE GATE, and it CONFIRMS the jitter is PERCEPTIBLE
+
+**Normal speed (99.67%, 94 seconds ≈ 5,600 frames), 16 colours, three boundaries, against an
+expectation stated before the run** — four bands, and the specific thing to judge named in advance as
+the third band's top edge at y≈88/89.
+
+★★★★★ **Jay: *"it doesn't move constantly, but i can see it moving at times."***
+
+★★★★★ **That is the measurement, in words: 90.12% at y=89, 9.88% at y=88 — not constant, visible at
+times.** ★★★★ **The eye and the host-side distribution agree on the same frame**, and the eye adds the
+one thing the number could not: **it is PERCEPTIBLE.** ★★★ A 10% one-scanline deviation could have been
+below the threshold of notice; it is not.
+
+★★ This is what the eye gate is for and why S-03's absence of one was worth flagging as unmet: **the
+number establishes the magnitude and the eye establishes whether it matters.**
+
 ### What this means for the message-box case
 
-★★★★★ **A box edge that moves by one scanline on 10% of frames would shimmer.** ★★★★ **So FIRQ pacing
-is now MOTIVATED BY A MEASUREMENT rather than assumed** — it is precisely the fix for a boundary placed
-by a cycle count near a line edge, because it anchors the write to a hardware event. ★★★ **One boundary
-needs no help at all.**
+★★★★★ **A box edge that moves by one scanline on 10% of frames DOES shimmer — confirmed by eye, not
+predicted.** ★★★★ **So FIRQ pacing is motivated by a measurement AND by an observation** — it is
+precisely the fix for a boundary placed by a cycle count near a line edge, because it anchors the write
+to a hardware event. ★★★ **One boundary needs no help at all** (10,800 of 10,800 frames).
+
+> ★★★★★ **THE SPLIT DIVIDES CLEANLY INTO TWO CASES, and they have different answers:**
+> **a SINGLE 320/160 split is rock steady and needs nothing.** **A message box — three boundaries under
+> cycle-counted pacing — has a VISIBLE defect and needs hardware pacing.**
 
 ★★ **The instrument for §4D is stronger than three separate distributions**: the whole band pattern is
 compared as one string, so **a frame where two boundaries moved in compensating directions would still
