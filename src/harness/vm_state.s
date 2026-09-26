@@ -425,6 +425,29 @@ vm_sf_set:      ora     ,x
                 puls    a,b,pc
 
 * vm_ctrl_get: A = controller number -> A = 0 or 1  (same packing as flags)
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE FOURTH SITE OF GROUP A's SHIFT LOOP, AND P6.102 WALKED PAST IT [T-P0-157 §4C].
+* Group A replaced this exact construct in vm_getflag and vm_setflag and **was scoped by ROUTINE
+* NAME**; vm_ctrl_get uses the same packing, the same 12-cycle-per-bit loop and the same
+* pshs/puls pair, twenty lines below the table that fixes it.
+* ★★★ `vm_cg_sh` shows up in the interpret label profile in its own right, so the loop was
+* measurable and nobody looked. **Third of P6.102's four causes to have a second site.**
+*
+* ★★★★★ AND IT IS **NOT TAKEN**, BECAUSE ITS FAULT ARM CANNOT BE MADE TO GO RED [§1.4 criterion 4;
+* §6's stop trigger fired]. -DVM_CTRL_FAULT indexes the mask table one entry high -- the off-by-one
+* an indexed lookup actually makes -- and the nine-title gate reports **0 divergent cycles of 600 on
+* every title, and again on the parser arm with input fed to five of them.**
+* ★★★★★ THE REASON IS STRUCTURAL, NOT A GAP IN THE CORPUS: no controller bit is ever SET in any gate
+* arm, and `0 AND mask` is 0 for every mask. **A wrong bit index is invisible while every byte is
+* zero.** vm_ctrl_get IS called -- 120 samples in the interpret profile -- it simply always answers 0.
+* ★★★★ SO THE MEASUREMENT EXISTS AND THE LICENCE DOES NOT: the change is worth **0.00050 s/cycle =
+* 0.251% of a cycle, 0.65% of the interpret stage** [T-P0-157, measured against -DVM_CTRL_MASKTABLE].
+* It is left OPT-IN so the work is recoverable, and the default is unchanged.
+* ★★★ To take it, the gate needs an arm in which a controller is set -- `set.key` plus a posted key
+* that maps to it -- and that is a gate task, not a licence to ship on a green that proves nothing.
+* ★★ This is §4E's hole in the same shape one task later, found this time BEFORE shipping rather
+* than after: P6.102's VM_FAULT passed on 3 of 9 titles; this one passes on 9 of 9.
+                ifndef  VM_CTRL_MASKTABLE
 vm_ctrl_get:
                 pshs    b
                 tfr     a,b
@@ -446,6 +469,39 @@ vm_cg_got:      anda    ,s+
                 lda     #1
 vm_cg_out:      tsta
                 puls    b,pc
+                else
+* ★★ AN EXACT MIRROR OF vm_getflag, deliberately: the packing is identical, so the code should be
+* too, and a reader comparing the two should find nothing to reconcile. B carries the bit for `abx`
+* and the packed byte is held on the stack across the mask fetch.
+vm_ctrl_get:
+                pshs    b
+                tfr     a,b
+                andb    #7
+                lsra
+                lsra
+                lsra
+                ldx     #VM_CTRL
+                lda     a,x                     ; the packed byte
+                pshs    a
+* ★★★★★ THE FAULT ARM: index the mask table one entry high, so every controller reads the NEXT
+* controller's bit. ★★★ It is the fault an indexed lookup actually makes -- a table and an
+* off-by-one arrive together -- and unlike a wrecked build it keeps running, so the gate has to
+* notice a wrong VALUE rather than a corpse [§2W.3, and the two marker arms in P6.102 that could
+* only halt].
+                ifdef   VM_CTRL_FAULT
+                ldx     #vm_bitmask+1
+                else
+                ldx     #vm_bitmask
+                endc
+                abx                             ; X -> vm_bitmask[bit]
+                lda     ,x
+                anda    ,s+
+                beq     vm_cg_out
+                lda     #1
+vm_cg_out:      tsta
+                puls    b,pc
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 
 * vm_obj: A = object number -> X = its record.  ★ CLAMPED, not wrapped: an out-of-range object
 * number is a desynchronised stream, and wrapping would write a real object's fields.

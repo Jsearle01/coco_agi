@@ -627,6 +627,35 @@ p3b_box	src/harness/p3b_probe.s	build/p3b_probe_text.bin	-DHAL_GFX_MODE_SERVICE 
 # ★★ rck_seen is printed on every run: a green from a checker that performed zero verifications is
 # not a green, and the host says ZERO VERIFICATIONS in as many words when it happens.
 #
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ THE MOJIBAKE GATE IS RED ON A CLEAN TREE, AND ITS REPAIR IS DESTRUCTIVE [T-P0-157 §4F].
+# ★★★★★ `fix_mojibake.py --check` FALSE-POSITIVES on the two-character sequence U+00D7 U+2013 --
+# a MULTIPLICATION SIGN followed by an EN DASH, as in a ratio written "2.8<times><en dash>4.7<times>".
+# **Spelled in codepoints, not pasted: writing those two characters into this file would make the
+# manifest itself fail the check**, which is §2J.7's trap for the fourth time.
+# ★★★★★ AND THE REPAIR REWRITES IT. `fix_mojibake.py <file>` turns U+00D7 U+2013 into U+05D6
+# (HEBREW LETTER ZAYIN) plus a stray U+00D7 -- it did that to reports/20260926-104500-p6-101-*.md,
+# a correct file, and the damage was only caught by reading the diff. **run_gates.sh prints
+# "repair with: python harness/tools/fix_mojibake.py <file>", so following the gate's own advice
+# destroys content.**
+# ★★★★ THE CAUSE: the tool reverses a run and keeps the result if it decodes as valid UTF-8. Two
+# characters can satisfy that BY ACCIDENT -- cp1252-encoding U+00D7 U+2013 gives the bytes D7 96,
+# which is a well-formed two-byte sequence. "Decodes as valid UTF-8" is necessary and not sufficient.
+# ★★★ SHOWN BOTH WAYS from codepoints [§2W]: it still flags and correctly repairs a damaged U+2605,
+# and still ignores a proper U+2605. The detector is sound on real damage; the acceptance test is
+# what is too weak. A candidate narrowing is to require the run to be >= 3 characters, or to require
+# its first character to be one of the cp1252 lead mis-decodes (U+00C2 / U+00C3 / U+00E2).
+# ★★★★★ NOT FIXED HERE: §2J.7 is a CLAUDE.md-level gate and this is Jay's ruling. **PRESENTED
+# 2026-09-26 AND NOT YET RULED ON.** Until then the suite cannot go green and AC-6/AC-10-class
+# evidence is unavailable -- which is exactly §2M.8's condition for a gate getting switched off.
+#
+# ★★★★★ AND THE REASON IT SURVIVED A WHOLE TASK: T-P0-156 NEVER RAN THE SUITE. Its 25.1 listed
+# `fix_mojibake.py --check` over the SIX FILES IT TOUCHED and read as discharging §2J.7, which the
+# rule defines as **every tracked text file**. ★★★ Third instance of the scope disease in two tasks,
+# after VM_FAULT's corpus and the parser arm's 9-announced/8-run, and the only one of the three I
+# committed myself.
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+#
 # ★★★★★ FAULT ARM SCOPE: -DVM_FAULT IS EXPECTED TO FAIL 6 OF THE 9, NOT 9 OF THE 9 [T-P0-156 §4E].
 # Kingquest2 188/600 · Kingquest3 73/600 · SpaceQuest-1 519/600 · SpaceQuest-2 218/600 ·
 # larry1 372/600 · MixedUpMotherGoose 1/600.  Kingquest1, PoliceQuest1 and BlackCauldron report

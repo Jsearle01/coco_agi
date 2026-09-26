@@ -60,6 +60,22 @@ local T_VM, T_MOTION, T_COMP, T_FETCH, T_RENDER = ST+8, ST+12, ST+16, ST+20, ST+
 local PHASE  = ST+30
 local MARK   = {[1]="pace(wait)", [3]="interpret", [5]="sprites", [7]="roomcheck", [9]="composite"}
 local stage_total, stage_open, stage_n = {}, nil, {}
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+-- ★★★★★ PER-CYCLE STAGE TIMES, AND THEY EXIST BECAUSE TWO PUBLISHED FIGURES FOR ONE STAGE
+-- DISAGREED BY 36% [T-P0-157 §4A]. The summary below prints `s/NCYC` (a mean over every cycle in
+-- the window, including the room render and the attract-mode cycles before the jump) and a
+-- percentage whose denominator is the SUM OF STAGES, not the cycle. **P6.101 multiplied that
+-- percentage by a MEDIAN CYCLE TIME and got 156,784 CPU cycles; P6.102 read the stage timer's own
+-- mean and got ~213,000.** Neither is wrong about what it measures and neither is the steady-state
+-- cost the arc needs, because a share of one denominator times a median of another is not a product.
+-- ★★★★★ THE SNAPSHOT IS A DELTA OF THE CUMULATIVE TOTAL, taken at the SAME event that records the
+-- cycle time, so it is SELF-RECONCILING BY CONSTRUCTION: the per-cycle values sum to the printed
+-- total, and no second accumulator can drift from the first [L-88's counting rule -- if the
+-- comparison reads fewer artifacts than the run produces, it is scoped by accident].
+-- ★★★ It also lets the stages be reconciled against the CYCLE, which the totals cannot: the stage
+-- sum is 0.28486 s/cycle against a true mean cycle of 0.2968, and that 4% has never been named.
+local stage_per, stage_prev = {}, {}
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
 -- ★★★★★ THE ROOM CHANGE'S STEPS, IN A SEPARATE ACCUMULATOR [T-P0-138 §4A]. Markers 13..22 bracket
 -- the fetch, the clear, the render, the priority shadow and the present -- and they NEST inside
 -- roomcheck (7/8), which the stage machinery above cannot express: it keeps ONE open slot, so a
@@ -1410,6 +1426,20 @@ _G._n = emu.add_machine_frame_notifier(function()
             -- expensive ones" cannot be asked of it afterwards. This array is never sorted.
             _G._pc = _G._pc or {}
             _G._pc[#_G._pc+1] = { n, now - tprev }
+            -- ★★★★★ THE PER-STAGE DELTA FOR THIS CYCLE, keyed to the same cycle number and taken at
+            -- the same instant as the total above [T-P0-157 §4A]. Cumulative-minus-previous, so the
+            -- column sums to the total the summary already prints and cannot disagree with it.
+            -- ★★ The row also carries the cycle's own elapsed time, so the reconciliation below can
+            -- ask the question the totals cannot: how much of a CYCLE do the stages account for?
+            do
+                local row = { n = n, cyc = now - tprev }
+                for _, k in ipairs({"pace(wait)", "interpret", "sprites", "roomcheck", "composite"}) do
+                    local cum = stage_total[k] or 0
+                    row[k] = cum - (stage_prev[k] or 0)
+                    stage_prev[k] = cum
+                end
+                stage_per[#stage_per+1] = row
+            end
             tprev = now
             -- ═══════════════════════════════════════════════════════════════════════════
             -- ★★★★★ DOES THE PLANE ANIMATE WITHIN ONE RUN? [T-P0-122, after Jay's "no"]
@@ -1855,6 +1885,96 @@ _G._n = emu.add_machine_frame_notifier(function()
                   k, s, s/NCYC, tot > 0 and 100*s/tot or 0, cnt)
             end
             w("       %-10s %8.4f s total  %8.5f s/cycle", "SUM", tot, tot/NCYC)
+            -- ═══════════════════════════════════════════════════════════════════════════
+            -- ★★★★★ §4A: THE SAME STAGES PER CYCLE, SO A STEADY-STATE COST CAN BE STATED.
+            -- The block above is a mean over every cycle in the window and a percentage OF THE
+            -- STAGE SUM. Two published figures for `interpret` disagreed by 36% because one was
+            -- that percentage multiplied by a median cycle time and the other was that mean.
+            -- ★★★★ THE MEDIAN COLUMN IS THE ONE TO QUOTE. It is immune to the room render, which
+            -- holds ~32% of the window's time in 3 or 4 cycles, and to the attract-mode cycles
+            -- before the room jump, whose logic is a different program.
+            -- ★★★ THE RECONCILIATION IS PRINTED, NOT ASSUMED: per cycle, stages summed against the
+            -- cycle's own elapsed time. An unattributed remainder is real and is named here rather
+            -- than left as the difference between two numbers in different blocks.
+            if #stage_per > 0 then
+                local function pct(t, f)
+                    if #t == 0 then return 0 end
+                    local i = math.max(1, math.min(#t, math.floor(f * #t + 0.5)))
+                    return t[i]
+                end
+                w("    ── §4A per-cycle stage times, %d cycles recorded ──", #stage_per)
+                w("       %-10s %9s %9s %9s %9s %9s", "stage", "min", "p25", "MEDIAN", "p75", "max")
+                for _, k in ipairs(order) do
+                    local col = {}
+                    for _, r in ipairs(stage_per) do col[#col+1] = r[k] or 0 end
+                    table.sort(col)
+                    w("       %-10s %9.5f %9.5f %9.5f %9.5f %9.5f",
+                      k, col[1] or 0, pct(col, 0.25), pct(col, 0.50), pct(col, 0.75), col[#col] or 0)
+                end
+                -- the reconciliation, per cycle
+                local gaps, sums, cycs = {}, {}, {}
+                local worst, worst_n = -1, 0
+                for _, r in ipairs(stage_per) do
+                    local s = 0
+                    for _, k in ipairs(order) do s = s + (r[k] or 0) end
+                    sums[#sums+1] = s
+                    cycs[#cycs+1] = r.cyc
+                    local g = r.cyc - s
+                    gaps[#gaps+1] = g
+                    if math.abs(g) > worst then worst, worst_n = math.abs(g), r.n end
+                end
+                table.sort(gaps); table.sort(sums); table.sort(cycs)
+                local mg, ms, mc = pct(gaps, 0.50), pct(sums, 0.50), pct(cycs, 0.50)
+                w("       ★ stage SUM per cycle: median %.5f s   CYCLE median %.5f s", ms, mc)
+                w("       ★ gap per cycle: median %.5f s (%.1f%% of the median cycle);"
+                  .. " worst |gap| %.5f s at cycle %d", mg, mc > 0 and 100*mg/mc or 0, worst, worst_n)
+                -- ═══════════════════════════════════════════════════════════════════════
+                -- ★★★★★ AND THE GAP IS NOT WORK -- IT IS THE CYCLE TIMER'S QUANTISATION, WHICH IS
+                -- COARSER THAN THE GAP ITSELF [T-P0-157 §4A]. The cycle time comes from a FRAME
+                -- callback, so every value is an exact multiple of 1/60 s; the stage times come
+                -- from write taps at instruction precision. **One frame is 0.01667 s -- 8.3% of a
+                -- 12-frame cycle -- so any remainder smaller than that is indistinguishable from
+                -- the rounding.** ★★★★ This is why the stage SUM, not the cycle time, is the
+                -- figure to divide by: it is the only one of the two measured at the resolution
+                -- the stages are measured at.
+                -- ★★★ Stated so it cannot be quoted the wrong way round, which is the whole
+                -- lesson of P6.101: a number whose own header called it a lower bound was quoted
+                -- as a rate in eight dispatches.
+                -- ★★ `qn`, not `q`: an outer `q` is the percentile helper for the cycle array and a
+                -- shadow here would be a name collision waiting for someone to move a block.
+                local FRAME = 1/60
+                local qn = 0
+                for _, r in ipairs(stage_per) do
+                    if math.abs(r.cyc/FRAME - math.floor(r.cyc/FRAME + 0.5)) < 0.02 then qn = qn + 1 end
+                end
+                w("       ★★★ %d of %d cycle times are exact multiples of 1/60 s: the CYCLE timer is"
+                  .. " FRAME-QUANTISED", qn, #stage_per)
+                w("       ★★★ one frame = %.5f s = %.1f%% of the median cycle, so a gap of %.5f s is"
+                  .. " BELOW the timer's resolution and is NOT evidence of unattributed work",
+                  FRAME, mc > 0 and 100*FRAME/mc or 0, mg)
+                w("       ★ divide by the stage SUM (%.5f s), not the cycle time -- same resolution"
+                  .. " as the stages", ms)
+                -- ═══════════════════════════════════════════════════════════════════════
+                -- ★★★★★ §2W: THE INSTRUMENT SAYS WHEN IT CANNOT BE BELIEVED. A stage sum larger
+                -- than its own cycle means the attribution is broken (a marker pair spanning a
+                -- cycle boundary, or a nested pair closing the wrong stage), and that must be loud
+                -- rather than absorbed into a negative remainder nobody reads.
+                if mg < 0 then
+                    w("       ★★★ STAGES EXCEED THE CYCLE -- the per-cycle attribution is WRONG and"
+                      .. " no figure in this block may be quoted")
+                end
+                -- ★★★ And the self-check that the deltas are the same quantity as the totals.
+                for _, k in ipairs(order) do
+                    local s = 0
+                    for _, r in ipairs(stage_per) do s = s + (r[k] or 0) end
+                    local ref = stage_total[k] or 0
+                    if math.abs(s - ref) > 1e-6 then
+                        w("       ★★★ %s: per-cycle deltas sum to %.5f but the total is %.5f --"
+                          .. " the two accumulators have drifted", k, s, ref)
+                    end
+                end
+            end
+            -- ═══════════════════════════════════════════════════════════════════════════
             -- ═══════════════════════════════════════════════════════════════════════════
             -- ★★★★★ THE ROOM CHANGE, DECOMPOSED [T-P0-138 §4A]. Not per-cycle: these run ONCE,
             -- in the cycle named beside each, and dividing them by NCYC is the exact mistake

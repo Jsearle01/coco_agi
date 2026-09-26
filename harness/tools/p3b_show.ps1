@@ -317,6 +317,22 @@ param(
   [switch]$TicSlow,
   [switch]$SkipSlow,
   [switch]$MarkSlow,
+  # ★★★★★ T-P0-157's THREE BEFORE ARMS, and every one of them is a SECOND SITE of a cause P6.102
+  # already fixed somewhere else. The profile is what found them; the names are what hid them.
+  # -RlSlow         : vm_rl_loop spills the opcode to vm_op across the ip update (group B's cause)
+  # -CtrlMaskTable  : vm_ctrl_get indexes vm_bitmask instead of shifting (group A's cause at a
+  #                   fourth site). ★★★★★ THIS IS THE **AFTER** ARM, NOT A BEFORE ARM, AND THAT IS
+  #                   THE POINT: the change was measured at 0.251% of a cycle and NOT TAKEN, because
+  #                   -DVM_CTRL_FAULT stays green on all nine titles and on the parser arm -- no
+  #                   controller bit is ever set, so a wrong bit index is invisible. Opt-in until a
+  #                   gate exists that can see it [§1.4 criterion 4; vm_state.s at vm_ctrl_get].
+  # ★★★★★ THERE IS NO -RlMarkSlow. Applying group D's marker split to vm_rl_loop was tried and
+  # measured 609 CPU cycles per game cycle SLOWER: $FF is 84% of that chain's arrivals (116
+  # expressions of 138 fetches) and the existing order already exits on it first. The arm was
+  # deleted with the change -- an arm that switches between a build and a worse build is not
+  # evidence about anything. The arithmetic lives at the chain in vm_core.s.
+  [switch]$RlSlow,
+  [switch]$CtrlMaskTable,
   [switch]$SlowSteal,
   # ★★★★ -NoRemap IS the fault arm (-DRES_FAULT_NOREMAP): a theft takes the cheap path WITHOUT
   # re-mapping, so the walk reads through whatever the compositor left in slot 6. Expect a wrong
@@ -536,6 +552,8 @@ if ($FlagShiftLoop)   { $FLAGS += "-DVM_FLAG_SHIFTLOOP" }
 if ($TicSlow)         { $FLAGS += "-DVM_TIC_SLOW" }
 if ($SkipSlow)        { $FLAGS += "-DVM_SKIP_SLOW" }
 if ($MarkSlow)        { $FLAGS += "-DVM_MARK_SLOW" }
+if ($RlSlow)          { $FLAGS += "-DVM_RL_SLOW" }
+if ($CtrlMaskTable)   { $FLAGS += "-DVM_CTRL_MASKTABLE" }
 if ($CelStats) { $FLAGS += "-DP3B_CELSTATS" }
 if ($CelStatsNever)  { $FLAGS += "-DP3B_CELSTATS_NEVER" }
 if ($CelStatsAlways) { $FLAGS += "-DP3B_CELSTATS_ALWAYS" }

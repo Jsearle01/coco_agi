@@ -119,6 +119,11 @@ if ($env:VM_FAULT_SAID_PURE) { $ASMARGS += "-DVM_FAULT_SAID_PURE"; "★★★ FA
 # licenses believing the green run; the first is kept because it is the boundary's own arm.
 if ($env:VM_MARK_FAULT) { $ASMARGS += "-DVM_MARK_FAULT"; "★★★ FAULT INJECTED (-DVM_MARK_FAULT): vm_tic_mark's OR and NOT targets are swapped -- the VM runs, the state is wrong, this build is EXPECTED to FAIL" }
 if ($env:VM_MARK_FAULT_HALT) { $ASMARGS += "-DVM_MARK_FAULT_HALT"; "★★★ FAULT INJECTED (-DVM_MARK_FAULT_HALT): the marker boundary is \$FD, so \$FC falls into the test path and halts -- EXPECTED to FAIL, by cycle count rather than by divergence" }
+# ★★★★★ T-P0-157 §4C's two arms. VM_RL_FAULT reinstates L-37 -- the opcode read before `ldd vm_ip`
+# clobbers A -- and VM_CTRL_FAULT indexes the bit-mask table one entry high, which is the off-by-one
+# an indexed lookup actually makes. ★★ The scope of each is recorded when it is run, per §4E's rule.
+if ($env:VM_RL_FAULT) { $ASMARGS += "-DVM_RL_FAULT"; "★★★ FAULT INJECTED (-DVM_RL_FAULT): vm_rl_loop reads the opcode before the ip update, so A is clobbered [L-37] -- EXPECTED to FAIL" }
+if ($env:VM_CTRL_FAULT) { $ASMARGS += "-DVM_CTRL_FAULT"; "★★★ FAULT INJECTED (-DVM_CTRL_FAULT): vm_ctrl_get indexes vm_bitmask+1, so every controller reads the next one's bit -- EXPECTED to FAIL where a controller is tested" }
 # ★★★★★ VM_PROG_PREBUILT -- run a binary this script did NOT assemble [P6.11 AC-5]. The gain has
 # to be measured against a build of the PREVIOUS REVISION, because the knob that used to express
 # the before-state is retired: the loops read vm_objtop now, so "before" is a different program,

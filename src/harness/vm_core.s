@@ -85,8 +85,40 @@ vm_rl_loop:
 * set retflag, dispatched nothing, and the state diff reported cycle 1 with thirteen variables
 * at zero. The counter that named it was opcount=0 -- no command had EVER dispatched, which no
 * amount of staring at the resource layer would have explained [L-37].
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE SPILL IS GONE, AND THE COMMENT ABOVE STATED THE CONSTRAINT AS IF THE 6809 IMPOSED IT
+* [T-P0-157 §4C]. *"survives the ip update; A does not"* is true of the ORDER this routine used, not
+* of the processor: advance ip while D still holds it, and A is never live across the update.
+* X already points at the opcode and the `addd`/`std` do not disturb it, so `lda ,x` can simply
+* happen last. **16 cycles per command opcode, 138 of them per game cycle.**
+* ★★★★★ THIS IS GROUP B's DEFECT AT A SECOND SITE, and P6.102 fixed it by ROUTINE NAME rather than
+* by CAUSE -- its own report flagged this routine in §7.6 and left it. ★★★ vm_rl_loop is the
+* **#1 label in the interpret profile at 9.3%**, so the site left behind was the larger of the two.
+* ★★ The ip-clobber hazard the block above documents is UNCHANGED and still real: `ldd vm_ip`
+* overwrites A, so the opcode read must not sit between the load and the use. The reorder obeys
+* that rule rather than weakening it -- the read now happens AFTER the last use of D.
+                ifdef   VM_RL_SLOW
                 lda     ,x                      ; the opcode
-                sta     vm_op                   ; ★ survives the ip update; A does not
+                sta     vm_op                   ; the spill this arm exists to measure
+                else
+                ifdef   VM_RL_FAULT
+* ★★★★★ THE FAULT ARM, AND IT IS THE HISTORICAL BUG THIS ROUTINE's COMMENT DOCUMENTS [L-37]: read
+* the opcode FIRST, then let `ldd vm_ip` overwrite A. For any ip below 256 the high byte is zero, so
+* every opcode reads as $00 and every logic "returns" on its first instruction. ★★★ Chosen over an
+* invented fault because it is the failure the reorder must not reintroduce, and because L-37 records
+* what it looks like from the outside: opcount=0, thirteen variables at zero, cycle 1.
+                lda     ,x
+                ldd     vm_ip
+                addd    #1
+                std     vm_ip
+                else
+                ldd     vm_ip
+                addd    #1
+                std     vm_ip                   ; ★ ip advanced while D still holds ip
+                lda     ,x                      ; ★ only now is A free for the opcode
+                endc
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 
 * ★★ AN OPCODE TRACE, BUILD-GATED. Hand-tracing the bytecode against the reference was costing
 * more than the instrument: this records (ip, opcode) for the first VM_TRACE_MAX steps so the
@@ -96,24 +128,53 @@ vm_rl_loop:
 * ★ The 6809 indexes only by A, B or D -- `leax y,x` is not a form, and lwasm reports it as an
 * undefined symbol `y` rather than as a bad addressing mode.
                 ifdef   VM_TRACE
+                sta     vm_op                   ; ★ vmtr_rec clobbers A -- the ONLY reason to spill
                 clrb                            ; kind 0 = the outer interpreter loop
                 jsr     vmtr_rec
                 ldx     vm_code
                 ldd     vm_ip
                 leax    d,x
+                lda     vm_op
                 endc
-
+* ★★ NOTE FOR THE TRACE ARM, so it is not discovered as a bug: in the fast arm vmtr_rec is called
+* with ip ALREADY ADVANCED, in the slow arm with ip still at the opcode. vm_tic_loop's trace hook
+* has the same property since P6.102. **-DVM_TRACE is a diagnostic arm and not the gate**, and the
+* two arms are not expected to produce identical TRACES -- only identical STATE, which the gate
+* checks with the trace off.
+                ifdef   VM_RL_SLOW
                 ldd     vm_ip
                 addd    #1
                 std     vm_ip
                 lda     vm_op
+                endc
 
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THIS CHAIN IS ALREADY OPTIMAL AND I MADE IT SLOWER BEFORE MEASURING [T-P0-157 §4C, a
+* REJECTED change kept here with its arithmetic because the next reader will have the same idea].
+*
+* ★★★★★ I APPLIED GROUP D's TRICK HERE -- two of the three markers are >= $FE, so one unsigned
+* compare separates them -- ordering it so "a command" exited on a short branch taken: 10 cycles
+* against the chain's 15. **It measured 609 CPU cycles per game cycle SLOWER.**
+*
+* ★★★★★ BECAUSE A COMMAND IS NOT THE COMMON CASE, AND THE NUMBER SAYING SO WAS ALREADY IN HAND:
+* **116 if-expressions against 138 run_logic fetches** [P6.102's oracle count]. ★★★★ So `$FF` is
+* **84% of the opcodes this chain sees** and a real command is ~16%. The existing order tests $FF
+* FIRST and leaves on a TAKEN branch in **5 cycles**; mine sent it through `bhs` + `beq` + `bra`
+* for **11**. 116 x 6 slower against 22 x 5 faster = +586 predicted, +609 measured.
+*
+* ★★★★★ THE LESSON IS NOT "DON'T REORDER" -- IT IS THAT I TOOK THE COMMON CASE FROM THE CODE's
+* SHAPE INSTEAD OF FROM THE PROFILE. The block below the chain is the command path and is the
+* longest, so it READS like the main line; the data says it runs one time in six. ★★★ Group D's
+* identical change to vm_tic_loop DID pay -- and it paid because it was measured, not because the
+* reasoning was better. **Two applications of one idiom, opposite signs, same argument.**
+* ★★ Left exactly as it was. No arm, because there is nothing to switch between.
                 cmpa    #$FF
-                beq     vm_rl_if
+                beq     vm_rl_if                ; ★ 84% of arrivals leave HERE -- keep it first
                 cmpa    #$FE
                 beq     vm_rl_goto
                 tsta
                 beq     vm_rl_return
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 
 * ---- a command ---------------------------------------------------------------
                 sta     vm_op                   ; keep it for the handler and for halts
