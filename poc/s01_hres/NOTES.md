@@ -13,13 +13,36 @@ unexamined for 61 tasks because nobody wrote down what it meant [§8].
 | stage | result |
 |---|---|
 | **Stage 0 — the control (mid-frame PALETTE change)** | ★★★★★ **PASSED.** Measured and eye-confirmed. |
-| **Stage 1 — mid-frame HRES change** | ★★★★★ **NOT ANSWERED. The instrument is not trustworthy yet.** |
-| **Stage 2 — precision / jitter** | Not reached. |
+| **Stage 1 — mid-frame HRES change** | ★★★★★ **PASSED.** Resolution halves below the write, ratio 2.01, boundary tracks the delay. |
+| **Stage 2 — precision / jitter (FIRQ)** | Not reached. |
 
-★★★★★ **160-wide is neither opened nor closed by this run.** Stage 0's pass means MAME *can* answer
-the question; the stage-1 measurement is not sound enough to report an answer. **This is explicitly
-NOT the §7 "stage 1 fails" outcome**, which would have closed 160-wide — that outcome requires a
-working instrument and this one is not.
+> ★★★★★ **A MID-FRAME HRES CHANGE HOLDS UNDER MAME.** The screen renders 320-wide above the write and
+> 160-wide below it; the horizontal period doubles exactly (**159 → 79 transitions per row, ratio
+> 2.01**) and **the boundary tracks the poked delay** across six delays, so the register write is what
+> places it. Per §7 this is the *"stages 1 and 2 pass"* branch minus stage 2: **the 160-wide picture
+> becomes a live option**, with the §3.4 caveat that two GIME revisions exist and MAME models one —
+> **"worth building on", never "proven".**
+
+★★★ **The measurement, verbatim** (`-Stage 1 -VresT $15 -VresB $0D`, stripe fill, `VOFF=$E800`):
+
+```
+dly   1400 1800 2200 2600 3000 3400
+first 160-wide row y=   70   90  110  150  170  210     <- boundary tracks the delay
+ratio               2.01 2.01 2.01 2.01 2.01 2.01     <- the resolution HALVES, every time
+row profile at dly=2400:  30:159 50:159 70:159 90:159 110:159 | 130:79 150:79 170:79 190:79 210:79
+raw runs at dly=2400:     y=30 4,4,4,4,...   y=110 4,4,4,4,...   y=210 8,8,8,8,...
+```
+
+★★★★ **The run lengths are the proof, not the counts.** `$0F` is indices 0,0,3,3 at 2 bits per pixel;
+at 320-wide each pixel is 2 raster columns, so two pixels of a colour give **runs of 4**, and at
+160-wide each pixel is 4 columns, giving **runs of 8**. Both appear, on the same frame, split at the
+scanline the write landed on.
+
+★★★★★ **EYE-CONFIRMED at 99.99% speed** (§2U.2), `dly 2400`: fine stripes above the boundary, stripes
+of double the width below it. **Jay, watching: *"thats exactly what i saw"***, against a stated
+expectation given before the run. ★★★ **Both stages therefore carry two independent confirmations —
+a host-side number and a human — of the same frame**, which is the standard the first draft of this
+note could not meet for stage 1.
 
 ---
 
@@ -58,7 +81,13 @@ numeric and one human, of the same frame.**
 
 ---
 
-## ★★★★★ CORRECTION — two claims in the first draft of this note are WITHDRAWN
+## ★★★★★ CORRECTION — three claims in earlier drafts of this note are WITHDRAWN
+
+0. ★★★★★ **"Stage 1 NOT ANSWERED / the instrument is not trustworthy" is WITHDRAWN. Stage 1 PASSES.**
+   The arm was broken by my own control (see *What unblocked stage 1*), not by the model. ★★★ The
+   caution that accompanied it was still the right call at the time: **reporting a stage-1 failure then
+   would have closed 160-wide on an instrument that was wrong**, which is exactly what §7 guards
+   against.
 
 **Written after a second session of work. The first draft's stage-1 account was itself built on a
 broken sampler, and two of its conclusions are wrong.**
@@ -110,7 +139,50 @@ could report the raw observation can only tell you that something is wrong, neve
 
 ---
 
-## Stage 1 — STILL NOT ANSWERED, and now the reason is precise
+## ★★★★★ What unblocked stage 1: reading MAME's source, and finding my own test invalid
+
+**Eight black-box hypotheses were spent before the answer came from twenty lines of emulator source.**
+`src/mame/trs/gime.cpp`:
+
+```cpp
+case 0x09:   //  $FF99 Video Resolution Register
+    if (xorval & 0x60)       // xorval = old ^ new; 0x60 is bits 5-6 = LPF only
+        update_geometry();
+    break;
+```
+
+★★★ So **an HRES change (bits 2-4) triggers nothing at write time** — which is why a static `$FF99`
+sweep looked inert. But the rendering path does not read the register live:
+
+```cpp
+update_value(&m_scanlines[physical_scanline].m_ff99_value, m_gime_registers[0x09]);
+update_value(&m_scanlines[physical_scanline].m_ff98_value, m_gime_registers[0x08]);
+...
+else if (scanline->m_ff98_value & 0x80)   /* GIME graphics */  else  /* GIME text */
+```
+
+★★★★★ **`$FF98` AND `$FF99` ARE RECORDED PER SCANLINE, and every scanline renders from its own
+recorded copy** — including whether it is graphics or text. **That is why a mid-frame HRES change
+works at all, and it is the mechanism §3.1 said was undocumented.**
+
+★★★★★ **AND `update_value` ONLY ACTS WHEN THE VALUE CHANGES — WHICH INVALIDATED MY OWN HYPOTHESIS
+TEST.** Hypothesis 6 was *"the bitmap only refreshes on palette writes"*, and I tested it by adding
+`$FFB1` traffic to mode 1 **with `ColA == ColB` so as not to introduce a visual variable.** Equal
+colours mean the value never changes, so `update_value` never fires — **I removed the very thing the
+hypothesis was about and recorded it as eliminated.** The moment mode 1 ran with `colA ≠ colB`, the
+whole screen rendered correctly and stage 1 answered on the first attempt.
+
+> ★★★★★ **The lesson is not "read the source sooner", though that was worth three hours. It is that a
+> control which holds a variable constant can silently delete the mechanism under test** — and an
+> eliminated hypothesis is only eliminated if the test could have confirmed it.
+
+★★★ Why stage 0 worked throughout while every other arm looked broken: **stage 0 flips a palette
+register between two DIFFERENT values twice per frame**, so `update_value` fires and the frame is kept
+current. Nothing else in the spike changed a register value at all.
+
+---
+
+## The dead end, kept because the reasoning is reusable
 
 > ★★★★★ **THE ISOLATION, and it is clean: mode 0 renders the framebuffer PERFECTLY. Mode 1 — whose
 > only additional act is writing `$FF99` — renders DECB's text screen above and below a band of
@@ -220,32 +292,33 @@ this — it establishes that consecutive reads agree, not that what they agree o
 
 ---
 
-## What is owed before stage 1 can be answered
+## What is still owed
 
-★★★★★ **The next step is to read MAME's own `$FF99` write handler**, because eight black-box
-hypotheses have been spent and the ninth should not be another guess. The question to answer from the
-source is narrow: **what does `gime_device`'s `$FF99` write do to the screen state, and why would
-writing an unchanged value disturb it?** That is one file and it converts this from guesswork into a
-fact — and it also settles whether the behaviour is a modelling artefact (in which case MAME cannot
-answer stage 1 and 160-wide stays OPEN pending hardware, per §7) or a faithful model of something the
-GIME really does (in which case stage 1 has its answer).
+★★★★★ **§3.2 IS UNANSWERED AND IT IS THE ONE THE SPIKE CALLED "MOST LIKELY TO BITE."** The video
+address counter advances by the current mode's line length — 80 bytes at 320-wide, 40 at 160 — so rows
+below the switch consume a different number of bytes than rows above, and **where the text area's data
+comes from after the switch decides the whole buffer layout.** The instrument for it is built and
+unused: `s01_fillm = 1` fills row *N* with byte value *N*, and since the four palette entries are
+distinct the displayed byte value says which source row arrived. **Nothing has been measured here, and
+no buffer layout should be designed until it has been.**
 
-★★★ Only then, in order:
+★★★★ **Stage 2 — precision and jitter**, per §4: FIRQ off the horizontal-border interrupt, and the
+question of whether the boundary holds steady over minutes or drifts by a scanline. ★★ Partial
+evidence already exists: every sweep point reported *"steady across samples"* over 4 consecutive
+frames, and in stage 0 **2 of 19 delays jittered by one scanline**, which is what a write landing on a
+line boundary should do. **That is not minutes of stability and it is not a FIRQ-paced boundary.**
 
-1. **Re-run the two static endpoints** (`$15` and `$0D`) and require them to differ — a 320-wide
-   screen gives run lengths of 4 and a 160-wide screen must give 8. **That is the pass condition, and
-   it is now a raw observation rather than a transition count.**
-2. **Then the mid-frame flip**, against both endpoints.
-3. ★★ **Stage 1b, §3.2** — the row-number fill (`s01_fillm = 1`) is implemented and never used: row
-   *N* filled with byte value *N* lets the displayed byte value say which source row arrived below the
-   switch, which is the address-counter question. **Nothing has been learned about it.**
-4. ★ **The 16-colour pair `$1E`/`$16`** is the port's real target and is deliberately untested: a
-   16-colour buffer is 30,720 bytes and would cross `$8000` into ROM territory, forcing all-RAM mode
-   and putting the interrupt vectors in RAM. **A 4-colour pass would still need confirming there.**
+★★★ **The 16-colour pair `$1E`/`$16`**, which is the port's real target and is deliberately untested: a
+16-colour buffer is 30,720 bytes and would cross `$8000` into ROM territory, forcing all-RAM mode and
+putting the interrupt vectors in RAM. **A 4-colour pass still needs confirming there**, and the mode
+pair is already host-poked so it needs no reassembly — only a buffer that fits.
 
-★★★★★ **What must NOT happen: reporting "stage 1 failed" and closing 160-wide on this evidence.** §7
-makes that outcome contingent on a trustworthy instrument, and an arm that breaks when a register is
-written its own existing value is not one.
+★★ **The `$FFDF` divergence** (all-RAM not written) will have to be revisited if the 16-colour buffer
+forces it; the reason it was skipped is recorded at the end of this note.
+
+★ **And if it ever matters on silicon:** §3.4's caveat is unchanged. Two GIME revisions, the later
+changed video timings, a scanline-counter fault on both, and certain HRES values corrupt video on the
+'86 part. **MAME models one behaviour.**
 
 ---
 

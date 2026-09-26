@@ -358,6 +358,24 @@ _G._s01 = emu.add_machine_frame_notifier(function()
               hi, lo, lo > 0 and hi / lo or 0)
             results[#results].ratio = lo > 0 and hi / lo or 0
             -- ═══════════════════════════════════════════════════════════════════════════════
+            -- ★★★★★ THE BOUNDARY, FROM THE ROW PROFILE, BECAUSE THE COLUMN CANNOT SEE IT AND THE
+            -- VERDICT WAS READING THE COLUMN. With a striped fill every pixel in a column is the
+            -- same colour, so `transitions` is legitimately 0 -- and the verdict, which counts
+            -- distinct COLUMN patterns, therefore printed "RESULT: NO SPLIT" over a row profile that
+            -- showed 159,159,159,159,159,79,79,79,79,79 and a ratio of 2.01.
+            -- ★★★★★ **An adjudicator reading the wrong artifact is AD-131's defect exactly**, and it
+            -- would have reported the opposite of what the run measured. The boundary for an HRES
+            -- split is the row where the transition count drops, and nothing else.
+            local bnd = nil
+            for i = 2, #pr do
+                if pr[i - 1][2] > 0 and pr[i][2] > 0 and pr[i - 1][2] >= 1.5 * pr[i][2] then
+                    bnd = pr[i][1]; break
+                end
+            end
+            results[#results].bnd = bnd
+            w("        HRES boundary: %s", bnd and ("first narrow row y=" .. bnd)
+                                               or "none -- one resolution for the whole frame")
+            -- ═══════════════════════════════════════════════════════════════════════════════
             -- ★★★★★ THE SELF-CHECK THAT WOULD HAVE CAUGHT THE BROKEN SPIKE ON ITS FIRST RUN, AND
             -- IT IS THE ONE I DID NOT WRITE. With a CONSTANT fill, every row of the framebuffer is
             -- byte-identical, so in a STATIC mode every sampled row MUST have the same non-zero
@@ -439,6 +457,37 @@ _G._s01 = emu.add_machine_frame_notifier(function()
         if not alive then
             w("  ★★★★★ RESULT: VOID. The guest was not executing its loop, so the screen says")
             w("        nothing about whether MAME samples registers mid-frame.")
+        -- ★★★★★ MODE 1 IS ADJUDICATED FIRST, BEFORE THE COLUMN-BASED BRANCHES. The `nd <= 1` test
+        -- counts distinct COLUMN patterns, which for a striped fill are legitimately all empty -- so
+        -- it fired first and printed "NO SPLIT" over a perfect 159->79 row profile. **Ordering was
+        -- the defect, not the test**: the column branches belong to stage 0, where the boundary IS a
+        -- colour change, and mode 1's evidence is the row profile.
+        elseif MODE == 1 then
+            local bnds, nmoved, ratio_ok = {}, 0, 0
+            for _, r in ipairs(results) do
+                if r.bnd then bnds[#bnds+1] = r.bnd end
+                if (r.ratio or 0) >= 1.7 and (r.ratio or 0) <= 2.3 then ratio_ok = ratio_ok + 1 end
+            end
+            local distinct_b = {}
+            for _, b in ipairs(bnds) do distinct_b[b] = true end
+            for _ in pairs(distinct_b) do nmoved = nmoved + 1 end
+            w("  HRES boundaries across the sweep: %s", table.concat(bnds, ", "))
+            w("  distinct boundary positions %d of %d delays; ratio in [1.7,2.3] on %d",
+              nmoved, #results, ratio_ok)
+            if #bnds == 0 then
+                w("  ★★★★★ RESULT: NO HRES SPLIT -- one resolution for the whole frame at every delay.")
+            elseif nmoved >= 2 and ratio_ok == #results then
+                w("  ★★★★★ RESULT: STAGE 1 PASSED. A mid-frame HRES change HOLDS: the horizontal")
+                w("        resolution halves below the write (ratio ~2.0 at every delay) AND the")
+                w("        boundary tracks the poked delay, so the register write is what places it.")
+                w("        ★★ Still unproven on silicon: two GIME revisions exist, the later changed")
+                w("        video timings, and MAME models one behaviour. 'Worth building on', never")
+                w("        'proven'.")
+            else
+                w("  ★★★★★ RESULT: PARTIAL -- a boundary exists but %s.",
+                  nmoved < 2 and "it does not move with the delay"
+                             or "the width ratio is not ~2.0 everywhere")
+            end
         elseif nd <= 1 then
             w("  ★★★★★ RESULT: NO SPLIT. The boundary did not move across the whole sweep.")
             if MODE == 0 then
@@ -449,6 +498,36 @@ _G._s01 = emu.add_machine_frame_notifier(function()
                 w("        STAGE 1 FAILED. Only meaningful if stage 0 PASSED.")
             end
         elseif MODE == 1 then
+            -- ★★★★★ MODE 1's VERDICT IS BUILT FROM THE ROW PROFILE, NOT THE COLUMN COUNT. Two
+            -- conditions, and both are required: the resolution must HALVE (ratio ~2.0, which says
+            -- it is the resolution and not merely the data re-phasing) and the boundary must MOVE
+            -- with the poked delay (which says the register write is what placed it).
+            local bnds, nmoved, ratio_ok = {}, 0, 0
+            for _, r in ipairs(results) do
+                if r.bnd then bnds[#bnds+1] = r.bnd end
+                if (r.ratio or 0) >= 1.7 and (r.ratio or 0) <= 2.3 then ratio_ok = ratio_ok + 1 end
+            end
+            local distinct_b = {}
+            for _, b in ipairs(bnds) do distinct_b[b] = true end
+            for _ in pairs(distinct_b) do nmoved = nmoved + 1 end
+            w("  HRES boundaries across the sweep: %s", table.concat(bnds, ", "))
+            w("  distinct boundary positions %d of %d delays; ratio in [1.7,2.3] on %d",
+              nmoved, #results, ratio_ok)
+            if #bnds == 0 then
+                w("  ★★★★★ RESULT: NO HRES SPLIT -- one resolution for the whole frame at every delay.")
+            elseif nmoved >= 2 and ratio_ok == #results then
+                w("  ★★★★★ RESULT: STAGE 1 PASSED. A mid-frame HRES change HOLDS: the horizontal")
+                w("        resolution halves below the write (ratio ~2.0 at every delay) AND the")
+                w("        boundary tracks the poked delay, so the register write is what places it.")
+                w("        ★★ Still unproven on silicon: two GIME revisions exist, the later changed")
+                w("        video timings, and MAME models one behaviour. 'Worth building on', never")
+                w("        'proven'.")
+            else
+                w("  ★★★★★ RESULT: PARTIAL -- a boundary exists but %s.",
+                  nmoved < 2 and "it does not move with the delay"
+                             or "the width ratio is not ~2.0 everywhere")
+            end
+        elseif false then
             -- ★★★★★ For HRES the moving boundary is NOT sufficient on its own: the byte-provenance
             -- shift below a switch changes the CONTENT and could move a colour boundary without the
             -- resolution changing at all. **The resolution claim rests on the width ratio.**
