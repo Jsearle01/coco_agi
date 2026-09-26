@@ -155,6 +155,52 @@ a flip register that is invisible at 4 colours and displayed at 16, and **it say
 whose display this spike never touched.** ★★★ It was flagged as a hypothesis with a cheap test rather
 than as a finding, which is the only reason it cost a paragraph instead of a task.
 
+## §4B / §4D — STAGE 2, measured on the busy-wait arm, and it stops at §6's fifth trigger
+
+★★★★★ **FIRQ WAS NOT BUILT, AND THAT IS DELIBERATE: the problem was measured first.** Building a
+hardware-paced boundary before establishing that the cycle-counted one drifts is how a task ends up
+proving its own premise.
+
+**§4B(1) — ONE boundary, 10,800 frames = 3 emulated minutes:**
+```
+distribution: y123 x10800     distinct patterns 1     MODE y123 (10800 of 10800 = 100.00%)
+frames deviating from the mode: 0 (0.00%)
+★ every sampled frame had exactly one readable boundary
+```
+★★★★★ **Perfectly steady. Zero deviation in three minutes.** ★★ §4B(2), tearing: **no frame failed to
+present exactly one readable boundary** — the reader rejects a frame whose top is already narrow or
+whose bottom is still wide, and none was.
+
+**§4D — THREE boundaries, same window:**
+```
+distribution: 39,88,138 x1067    39,89,138 x9733
+distinct patterns 2     MODE [39,89,138] (9733 of 10800 = 90.12%)
+```
+★★★★★ **The OUTER two boundaries are rock steady at y=39 and y=138. The MIDDLE one alternates between
+y=88 and y=89 on 9.88% of frames.** ★★★ §6's fifth trigger: **which, and where — the second of three,
+at the top of the middle band.**
+
+★★★★ **And that is the expected physics rather than a surprise**: the first boundary is anchored to
+VBORD, so its cycle count is measured from a hardware event; the second is placed by an accumulated
+busy-wait (`dly + dly2`) whose total lands near a scanline edge and therefore alternates. ★★★ The third
+is steady because its total cycle count is unchanged by which scanline the second write was *sampled*
+on — **the jitter is in the reading, not in the accumulated time.**
+
+**§4B(3) — CPU time:** ★★★ **1.000 guest loop iterations per frame**, sustained over 10,200 host
+frames, in every arm. **The guest keeps up exactly.** ★★ This is the BASELINE a FIRQ arm must be
+compared against, and no FIRQ arm exists yet, so **no cost for the handler is claimed.**
+
+### What this means for the message-box case
+
+★★★★★ **A box edge that moves by one scanline on 10% of frames would shimmer.** ★★★★ **So FIRQ pacing
+is now MOTIVATED BY A MEASUREMENT rather than assumed** — it is precisely the fix for a boundary placed
+by a cycle count near a line edge, because it anchors the write to a hardware event. ★★★ **One boundary
+needs no help at all.**
+
+★★ **The instrument for §4D is stronger than three separate distributions**: the whole band pattern is
+compared as one string, so **a frame where two boundaries moved in compensating directions would still
+show as a distinct pattern.** Only two patterns appeared.
+
 ---
 
 # S-03 — The 16-colour pair, and stage 2

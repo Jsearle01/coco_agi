@@ -49,7 +49,10 @@ param(
   [switch]$Big,
   # ★★★★★ -RowBase: S-04 §4A(1). Shifts the row numbering to separate a value artefact from a
   # position artefact. 0 is the S-03 baseline.
-  [int]   $RowBase = 0
+  [int]   $RowBase = 0,
+  # ★★★★★ -Stab N: S-04 §4B(1). Sample the boundary every frame for N frames and report the
+  # distribution. 3600 frames = 60 emulated seconds.
+  [int]   $Stab    = 0
 )
 $ErrorActionPreference = "Stop"
 $env:PATH = "C:\Users\jayse\DEV\cmd;C:\Users\jayse\DEV\mingw64\opt\bin;" + $env:PATH
@@ -84,6 +87,7 @@ $env:S01_DLY2  = "$Dly2"
 $env:S01_DLY3  = "$Dly3"
 $env:S01_BIG   = $(if ($Big) { "1" } else { "0" })
 $env:S01_ROWBASE = "$RowBase"
+$env:S01_STAB  = "$Stab"
 if ($VSweep) { $env:S01_VSWEEP = "1" } else { Remove-Item env:S01_VSWEEP -ErrorAction SilentlyContinue }
 if ($RowMap) { $env:S01_ROWMAP = "1" } else { Remove-Item env:S01_ROWMAP -ErrorAction SilentlyContinue }
 if ($Eye) { $env:S01_EYE = "1"; $env:S01_SWEEP = "$Dly" }

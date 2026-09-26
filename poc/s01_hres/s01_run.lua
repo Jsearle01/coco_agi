@@ -57,6 +57,8 @@ local BIG     = tonumber(os.getenv("S01_BIG") or "0")
 -- ★★★★★ S-04 §4A(1): shift the row numbering. If the repeats move with it they are an artefact of
 -- the byte VALUE; if they stay they are tied to a screen POSITION and are real.
 local ROWBASE = tonumber(os.getenv("S01_ROWBASE") or "0")
+-- ★★★★★ S-04 §4B: sample the boundary every frame for this many frames. 3600 = 60 emulated seconds.
+local STABN   = tonumber(os.getenv("S01_STAB") or "0")
 
 -- ★★ The delay sweep. 8 CPU cycles per iteration; a frame is ~29,830 cycles at 1.79 MHz, of which
 -- ~8,000 is vertical blank. So 0..3600 in steps covers blank plus the whole active field.
@@ -298,6 +300,49 @@ local function pixpair_runs(buf, y0, y1)
 end
 -- ═══════════════════════════════════════════════════════════════════════════════════════════
 
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+-- ★★★★★ S-04 §4B(1): THE BOUNDARY'S SCANLINE, CHEAPLY ENOUGH TO SAMPLE EVERY FRAME FOR MINUTES.
+-- A full row profile is 193 x 640 pixel reads and cannot run per frame for thousands of frames. But
+-- deciding whether ONE row is wide or narrow needs FOUR reads: with the $0F stripe the colour changes
+-- every 2 raster columns at 320-wide and every 4 at 160-wide, so **col2 == col0 means narrow.**
+-- ★★★★ A binary search then finds the boundary in ~8 row tests = ~32 reads per frame, which is nothing.
+-- ★★★ It assumes ONE boundary and is therefore only valid for the single-split case; §4D's three-way
+-- case needs a scan, and using this there would silently return one of the three.
+-- ★★ "Steady" is a number: min, max, mode, and how many frames deviate [§4B(1)].
+local function row_is_narrow(buf, y)
+    local o = y * SW * 4 + 1
+    return buf:sub(o, o + 3) == buf:sub(o + 2 * 4, o + 2 * 4 + 3)
+end
+
+local function find_boundary(buf)
+    -- ★ Guard the assumption rather than trust it: if the top is already narrow or the bottom is
+    -- still wide, the frame does not have the shape this search can read, and it says so.
+    if row_is_narrow(buf, 30) then return nil, "top already narrow" end
+    if not row_is_narrow(buf, 212) then return nil, "bottom still wide" end
+    local lo, hi = 30, 212                   -- lo is wide, hi is narrow
+    while hi - lo > 1 do
+        local mid = (lo + hi) // 2
+        if row_is_narrow(buf, mid) then hi = mid else lo = mid end
+    end
+    return hi, nil
+end
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+
+-- ★★★★★ S-04 §4D: THE BAND PATTERN, for the three-boundary case the binary search cannot read.
+-- A full scan is 193 rows x 4 pixel reads = ~772 reads per frame, which is affordable. The pattern is
+-- returned as the list of transition scanlines, so **"all three boundaries are steady" becomes "every
+-- frame produced the identical string"** -- a stronger statement than three separate distributions,
+-- because it also catches a frame where two boundaries move in compensating directions.
+local function band_pattern(buf)
+    local t, prev = {}, nil
+    for y = 30, 212 do
+        local n = row_is_narrow(buf, y)
+        if prev ~= nil and n ~= prev then t[#t+1] = y end
+        prev = n
+    end
+    return table.concat(t, ",")
+end
+
 local function sig_runs(buf, y0, y1)
     local runs, prev, n = {}, nil, 0
     for y = y0, y1 do
@@ -336,6 +381,7 @@ end
 local frame, state, step, si, held = 0, "wait_ok", 0, 1, {}
 local results = {}
 local s02_f0 = nil   -- s01_frames at the moment the refill was acknowledged
+local stab, stab_n, stab_bad, stab_frames = {}, 0, {}, {}
 
 _G._s01 = emu.add_machine_frame_notifier(function()
     frame = frame + 1
@@ -372,7 +418,10 @@ _G._s01 = emu.add_machine_frame_notifier(function()
             -- the host's next writes land some cycles into the init. **A poke after handover only
             -- works for values the LOOP re-reads** -- s01_dly, s01_voff, s01_refill -- and never for
             -- ones the init consumes once.
-            if ROWMAP then
+            if STABN > 0 then
+                w("  ★ S-04 §4B: sampling the boundary every frame for %d frames", STABN)
+                state, step = "stab", 0
+            elseif ROWMAP then
                 prog:write_u8(SYM.s01_fillm, 0)
                 prog:write_u8(SYM.s01_fillb, 0x1B)   -- indices 0,1,2,3 in one byte
                 -- ★★★★★ FOUR DISTINCT DISPLAYED COLOURS, and the FLIP moved to an undisplayed entry.
@@ -423,7 +472,10 @@ _G._s01 = emu.add_machine_frame_notifier(function()
               prog:read_u8(SYM.s01_colA), prog:read_u8(SYM.s01_colB),
               prog:read_u8(SYM.s01_fillm), prog:read_u8(SYM.s01_fillb))
             w("  DECB ready at frame %d, handed over to $%04X", frame, SYM.entry)
-            if ROWMAP then
+            if STABN > 0 then
+                w("  ★ S-04 §4B: sampling the boundary every frame for %d frames", STABN)
+                state, step = "stab", 0
+            elseif ROWMAP then
                 w("  ★ S-02 ROW MAP: phase 1 = calibration fill $1B, phase 2 = row-number fill")
                 w("    (palette and fill were poked BEFORE handover -- the init consumes them once)")
                 if BIG then
@@ -458,6 +510,71 @@ _G._s01 = emu.add_machine_frame_notifier(function()
     -- ★★★★ The refill is acknowledged rather than assumed: a table decoded off the PREVIOUS fill is
     -- L-92's defect and would look like a perfectly ordinary answer.
     -- ═══════════════════════════════════════════════════════════════════════════════════════
+    -- ═══════════════════════════════════════════════════════════════════════════════════════
+    -- ★★★★★ S-04 §4B: STABILITY. Sample the boundary EVERY FRAME and report the distribution.
+    -- ★★★★ Measured BEFORE building a FIRQ handler, deliberately: if the busy-wait boundary is already
+    -- steady over minutes then the handler solves a problem that does not exist, and building the fix
+    -- before measuring the problem is how a task ends up proving its own premise.
+    -- ★★★ The guest's own loop counter is read alongside, so §4B(3)'s "is the CPU still getting time"
+    -- is answered from the same run rather than a second one.
+    if state == "stab" then
+        if step <= SETTLE then return end
+        local buf = grab()
+        -- ★★★★ With extra splits asked for, the binary search cannot read the frame -- use the scan.
+        if DLY2 > 0 then
+            local pat = band_pattern(buf)
+            stab[pat] = (stab[pat] or 0) + 1
+            stab_n = stab_n + 1
+        else
+        local b, why = find_boundary(buf)
+        if b == nil then
+            stab_bad[why] = (stab_bad[why] or 0) + 1
+        else
+            stab[b] = (stab[b] or 0) + 1
+            stab_n = stab_n + 1
+        end
+        end
+        if step % 600 == 0 then
+            -- ★ liveness, every 10 emulated seconds, so a stalled guest cannot masquerade as a
+            -- perfectly steady boundary [§2W -- the stillest possible reading is a dead machine]
+            stab_frames[#stab_frames+1] = rd16(SYM.s01_frames)
+        end
+        if step < SETTLE + STABN then return end
+        -- ── report ──
+        local keys = {}
+        for k in pairs(stab) do keys[#keys+1] = k end
+        table.sort(keys)
+        local mode, modec = nil, -1
+        for _, k in ipairs(keys) do if stab[k] > modec then mode, modec = k, stab[k] end end
+        w("")
+        w("── §4B(1)%s stability: %d frames sampled ──",
+          DLY2 > 0 and "/§4D three-boundary" or " boundary", stab_n)
+        local parts = {}
+        for _, k in ipairs(keys) do
+            parts[#parts+1] = string.format("%s x%d", tostring(k), stab[k])
+        end
+        w("   distribution: %s", table.concat(parts, "   "))
+        w("   distinct patterns %d   MODE [%s] (%d of %d = %.2f%%)",
+          #keys, tostring(mode), modec, stab_n, stab_n > 0 and 100 * modec / stab_n or 0)
+        w("   frames deviating from the mode: %d (%.2f%%)",
+          stab_n - modec, stab_n > 0 and 100 * (stab_n - modec) / stab_n or 0)
+        local nb = 0
+        for k, v in pairs(stab_bad) do w("   ★★★ unreadable frames (%s): %d", k, v); nb = nb + v end
+        if nb == 0 then w("   ★ every sampled frame had exactly one readable boundary") end
+        -- ★★★ §4B(3): the guest's loop counter over the same window -- the honest measure of CPU time.
+        if #stab_frames >= 2 then
+            local d = stab_frames[#stab_frames] - stab_frames[1]
+            local sp = (#stab_frames - 1) * 600
+            w("   §4B(3) guest loop iterations: %d over %d host frames = %.3f per frame",
+              d, sp, d / sp)
+            w("      (no FIRQ handler installed in this arm -- this is the BASELINE to compare against)")
+        end
+        local fh = io.open(OUT .. "/s04_stability.txt", "w")
+        if fh then fh:write(table.concat(log, "\n") .. "\n"); fh:close() end
+        m:exit()
+        return
+    end
+
     if state == "s02_cal" then
         if step < 45 then return end
         local buf = grab()
