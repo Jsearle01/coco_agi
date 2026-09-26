@@ -240,8 +240,25 @@ s01_vb:
                 sta     $FFB1
                 bra     s01_wait
 s01_top_hres:
-                lda     s01_vrest               ; ★ host-poked, so the 16-colour pair $1E/$16 can
-                sta     $FF99                   ;   be tried without reassembling
+* ★★★★★ WRITTEN AS A PAIR WITH `std $FF98`, EXACTLY AS THE INIT AND gfx.s DO, AND THAT IS THE
+* EXPERIMENT. A lone `sta $FF99` from this loop broke the display in every arm -- even when the value
+* written was IDENTICAL to the one the init had already set, and even when the write landed in
+* vertical blank. That cannot be real GIME behaviour, so the suspect is the difference from the
+* known-good path: gfx.s:203-204 writes `ldd #$8015 / std $FF98`, touching VMODE and VRES together,
+* and this loop touched VRES alone.
+* ★★★ A = $80 is VMODE's BP bit (graphics), B is the VRES value, so one `std` restates both.
+                lda     #$80
+                ldb     s01_vrest               ; ★ host-poked, so the 16-colour pair $1E/$16 can
+                std     $FF98                   ;   be tried without reassembling
+* ★★★★★ AND A PALETTE WRITE ALONGSIDE IT, WHICH IS AN EXPERIMENT AND NOT A FLOURISH. Stage 0 is the
+* only arm that renders a correct full-screen graphics picture, and the only thing it does that no
+* other arm does is write $FFB1 twice per frame. Every other arm shows a MIX -- the framebuffer in a
+* middle band, DECB's text screen above and below -- which is what a bitmap only refreshed where a
+* register write forces it would look like. ★★★ With s01_colA = s01_colB the palette does not change,
+* so this adds the register TRAFFIC without adding a visual variable: if the screen then renders
+* fully, the refresh is driven by palette writes and that is a MAME idiom worth recording.
+                lda     s01_colA
+                sta     $FFB1
 
 * ---- the delay that places the boundary ----
 s01_wait:
@@ -260,8 +277,11 @@ s01_switch:
                 sta     $FFB1
                 bra     s01_tick
 s01_bot_hres:
-                lda     s01_vresb               ; ★★★★★ THE THING UNDER TEST
-                sta     $FF99
+                lda     #$80                    ; ★★★★★ THE THING UNDER TEST, as a paired write
+                ldb     s01_vresb
+                std     $FF98
+                lda     s01_colB                ; ★ the paired palette write -- see the note above
+                sta     $FFB1
 
 * ---- liveness, read by the host ----
 s01_tick:

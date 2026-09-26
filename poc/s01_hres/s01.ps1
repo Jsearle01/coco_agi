@@ -32,7 +32,14 @@ param(
   # a third time. Use with -Stage 2 and a constant fill: the correct VOFFSET is the only one whose
   # self-check passes. -Voff sets it for every other run.
   [switch]$VSweep,
-  [int]   $Voff    = 0xE800
+  [int]   $Voff    = 0xE800,
+  # ★★★★★ -Render: drop `-video none`. The static sweep produced row counts that were IDENTICAL
+  # across all eight video modes at the top of the screen and mode-dependent lower down, which is
+  # what a partially-rendered bitmap looks like -- and every run shares the same prior content (DECB's
+  # text screen), which is why the stale part was identical. **If MAME does not rasterise a screen it
+  # is not displaying, scr:pixel() reads something that is not the emulated frame.** This is the arm
+  # that tests it, and it is a one-switch experiment rather than a theory.
+  [switch]$Render
 )
 $ErrorActionPreference = "Stop"
 $env:PATH = "C:\Users\jayse\DEV\cmd;C:\Users\jayse\DEV\mingw64\opt\bin;" + $env:PATH
@@ -81,7 +88,8 @@ if ($Eye) {
     exit 0
 }
 
-C:\mame\mame.exe coco3 -video none -sound none -window -nomaximize -skip_gameinfo -nothrottle `
+$vid = if ($Render) { @() } else { @("-video", "none") }
+C:\mame\mame.exe coco3 @vid -sound none -window -nomaximize -skip_gameinfo -nothrottle `
     -seconds_to_run $Seconds -rompath C:/mame/roms -cfg_directory harness\mame-cfg `
     -autoboot_script C:/Users/jayse/DEV/coco_agi/poc/s01_hres/s01_run.lua -autoboot_delay 0
 

@@ -58,9 +58,93 @@ numeric and one human, of the same frame.**
 
 ---
 
-## Stage 1 — NOT ANSWERED, and the reason is the instrument
+## ★★★★★ CORRECTION — two claims in the first draft of this note are WITHDRAWN
 
-Stage 1 was built, run, and **its output must not be believed.** The chain of findings, in order:
+**Written after a second session of work. The first draft's stage-1 account was itself built on a
+broken sampler, and two of its conclusions are wrong.**
+
+1. ★★★★★ **`VOFFSET = $EA00` is WITHDRAWN. The correct value is `$E800` — the DERIVED one.**
+   `physical $74000 >> 3` was right all along and the `$1000` discrepancy never existed. The `$EA00`
+   "all rows patterned" result was an artefact of the per-pixel sampler and **is not reproducible**:
+   the same value set directly gives a broken profile, and it only ever looked right as step 6 of a
+   7-step sweep. ★★★ **`gfx.s`'s formula is not implicated and its open VOFFSET debt is untouched by
+   this spike.** The proof that `$E800` is correct is below and it is unambiguous.
+2. ★★★★ **"The instrument cannot display a static 160-wide screen" is too broad.** The instrument
+   displays a 320-wide screen *perfectly*. What it cannot do is produce a trustworthy display in any
+   arm that writes `$FF99`, which is a narrower and more specific problem.
+
+★★★ **The first draft's stage 0 account needed no correction.**
+
+---
+
+## ★★★★★ The sampler was the first real defect, and fixing it changed the answers
+
+**`scr:pixel(x, y)` was called 640 times per row — 640 separate reads of a bitmap that changes
+between them.** It produced results that were not reproducible: the same binary, VOFFSET and `$FF99`
+gave "all rows 159" in one invocation and "72, 66, 66 then flat" in another, and rows 30/50/70 read
+**identically across all eight video modes** — a number that does not move when the mode changes is
+not measuring the mode.
+
+★★★★ **The fix is `scr:pixels()`** (MAME 0.281), which returns the whole frame as one 611,840-byte
+string — 640 × 239 × 4 — so every pixel in a profile comes from **the same frame by construction**.
+Pixels are compared as 4-byte substrings, which also removes a byte-order assumption nothing checked.
+
+★★★★★ **And the second defect was reading a DERIVED number instead of the raw datum.** A transition
+*count* of 66 is consistent with the stripe pattern, with DECB's text screen, and with garbage. Run
+lengths distinguish them in one look, and the moment they were printed the whole picture resolved:
+
+```
+STAGE 0, $0F stripe fill, VOFF=$E800  ($0F = indices 0,0,3,3 at 2bpp)
+  y= 30 runs 4,4,4,4,4,4,4,4,...  colours 00000000 00FFFFFF
+  y=110 runs 4,4,4,4,4,4,4,4,...  colours 00000000 00FFFFFF
+  y=210 runs 4,4,4,4,4,4,4,4,...  colours 00000000 00FFFFFF
+```
+
+★★★★★ **Perfectly regular runs of 4, black and white, on every row.** Two pixels of index 0 then two
+of index 3, each pixel two raster columns wide at 320-wide on a 640 raster — **exactly the
+prediction.** ★★★★ **This is the proof that `VOFF=$E800` is correct and that the whole display path
+works**: framebuffer, MMU map, VOFFSET, palette and mode, end to end.
+
+★★★ §2W.3's rule, learned the expensive way: *a diagnostic that reports a derived number where it
+could report the raw observation can only tell you that something is wrong, never what.*
+
+---
+
+## Stage 1 — STILL NOT ANSWERED, and now the reason is precise
+
+> ★★★★★ **THE ISOLATION, and it is clean: mode 0 renders the framebuffer PERFECTLY. Mode 1 — whose
+> only additional act is writing `$FF99` — renders DECB's text screen above and below a band of
+> framebuffer. The guest is alive in both (`s01_frames` 20 → 88).**
+
+★★★★★ **And it happens even when the value written is IDENTICAL to the one already set, and even when
+the write lands in vertical blank.** Writing `$FF99 = $15` over an existing `$15`, during blanking,
+breaks the display.
+
+> ★★★★★ **That is incoherent as a GIME behaviour, which is exactly why stage 1 cannot be called a
+> FAILURE.** A real GIME cannot be disturbed by writing a register the value it already holds. So the
+> fault is in this arm or in how MAME handles `$FF99` writes generally — and **until that is
+> distinguished, "a mid-frame HRES change does not hold" is not a claim this spike has earned.**
+
+### Eight hypotheses tested and eliminated
+
+★★★ Recorded because a hypothesis killed by measurement is worth as much as the one that lands, and
+because the next person should not re-run these:
+
+| # | hypothesis | verdict |
+|---|---|---|
+| 1 | `-video none` stops MAME rasterising | **NO** — identical with `-Render` |
+| 2 | the screen needs time to settle | **NO** — identical at 291 guest frames |
+| 3 | per-pixel sampling tears the bitmap | ★★★★ **YES, a real defect** — fixed with `scr:pixels()`, and it changed the numbers |
+| 4 | the MMU map / task register was wrong | **NO** — all eight task-0 slots pinned, then task 0 selected; no change |
+| 5 | VOFFSET was wrong (`$EA00` not `$E800`) | **NO** — `$E800` is correct, proven by the run-length dump |
+| 6 | the bitmap only refreshes on palette writes | **NO** — adding `$FFB1` traffic to mode 1 changed nothing |
+| 7 | `$FF99` must be written paired with `$FF98` via `std`, as `gfx.s` does | **NO** — the paired write behaves identically |
+| 8 | the write must avoid the active display | **NO** — `dly=0` (blanking) and `dly=2400` (mid-active) are byte-identical |
+
+★★ Mode 1 also renders `$FF99 = $15` and `$FF99 = $0D` **byte-identically**, which on its own says the
+writes are not reaching the video path in the way the model expects.
+
+### The first draft's chain, kept because the reasoning was sound even where the conclusion moved
 
 ### 1. A uniform fill did not render uniformly
 
@@ -136,24 +220,32 @@ this — it establishes that consecutive reads agree, not that what they agree o
 
 ---
 
-## What is owed before stage 1 can be re-run
+## What is owed before stage 1 can be answered
 
-1. ★★★★★ **Make the sampler read a settled frame, and prove it can fail.** Sample from a
-   vblank/frame-complete callback rather than inside the frame notifier, then **re-run the eight-mode
-   static sweep: the pass condition is that `$15` and `$1D` give different, stable, repeatable row
-   counts and that a constant fill renders constantly.** Until that is green, nothing about HRES is
-   measurable here.
-2. ★★★★ **Then re-derive VOFFSET.** The `$1000` discrepancy may be entirely an artefact of (1); if it
-   survives a fixed sampler it is a real finding about `gfx.s`'s formula and belongs in the HAL's
-   open-debt item, not in this spike.
-3. ★★★ **Only then stage 1**, with the stripe fill, against **both** static endpoints.
-4. ★★ **Stage 1b, §3.2** — the row-number fill (`s01_fillm = 1`) is implemented and unused: row *N*
-   filled with byte value *N* lets the displayed byte value say which source row arrived below the
-   switch, which is the address-counter question. **Nothing has been learned about it yet.**
-5. ★ **The 16-colour pair `$1E`/`$16`** is the port's real target and is deliberately untested here:
-   a 16-colour buffer is 30,720 bytes and would cross `$8000` into ROM territory, forcing all-RAM
-   mode and putting the interrupt vectors in RAM. **A 4-colour pass would still need confirming
-   there.**
+★★★★★ **The next step is to read MAME's own `$FF99` write handler**, because eight black-box
+hypotheses have been spent and the ninth should not be another guess. The question to answer from the
+source is narrow: **what does `gime_device`'s `$FF99` write do to the screen state, and why would
+writing an unchanged value disturb it?** That is one file and it converts this from guesswork into a
+fact — and it also settles whether the behaviour is a modelling artefact (in which case MAME cannot
+answer stage 1 and 160-wide stays OPEN pending hardware, per §7) or a faithful model of something the
+GIME really does (in which case stage 1 has its answer).
+
+★★★ Only then, in order:
+
+1. **Re-run the two static endpoints** (`$15` and `$0D`) and require them to differ — a 320-wide
+   screen gives run lengths of 4 and a 160-wide screen must give 8. **That is the pass condition, and
+   it is now a raw observation rather than a transition count.**
+2. **Then the mid-frame flip**, against both endpoints.
+3. ★★ **Stage 1b, §3.2** — the row-number fill (`s01_fillm = 1`) is implemented and never used: row
+   *N* filled with byte value *N* lets the displayed byte value say which source row arrived below the
+   switch, which is the address-counter question. **Nothing has been learned about it.**
+4. ★ **The 16-colour pair `$1E`/`$16`** is the port's real target and is deliberately untested: a
+   16-colour buffer is 30,720 bytes and would cross `$8000` into ROM territory, forcing all-RAM mode
+   and putting the interrupt vectors in RAM. **A 4-colour pass would still need confirming there.**
+
+★★★★★ **What must NOT happen: reporting "stage 1 failed" and closing 160-wide on this evidence.** §7
+makes that outcome contingent on a trustworthy instrument, and an arm that breaks when a register is
+written its own existing value is not one.
 
 ---
 

@@ -125,10 +125,32 @@ local SW, SH = scr.width, scr.height
 -- **So the transition count along a row should HALVE below the boundary: ~160 above, ~80 below.**
 -- ★★★ A ratio near 2.0 is the pass. A ratio near 1.0 means the write was not honoured, whatever
 -- else the screen does.
-local function row_trans(y)
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+-- ★★★★★ ONE ATOMIC BITMAP READ, NOT 640 SEPARATE pixel() CALLS, AND THE REBUILD IS THE WHOLE
+-- POINT [T-P0-157-adjacent; §2W]. The first sampler called scr:pixel(x, y) once per pixel, which
+-- is 640 reads per row of a bitmap the emulator may rewrite between them. It produced results that
+-- were NOT REPRODUCIBLE: the same binary, the same VOFFSET and the same $FF99 gave "all rows 159"
+-- in one invocation and "72, 66, 66 then flat" in another, and rows 30/50/70 read IDENTICALLY
+-- across all eight video modes -- a number that does not move when the mode changes is not
+-- measuring the mode.
+-- ★★★★ Two hypotheses were tested and BOTH WERE WRONG before this one: `-video none` (identical
+-- with rendering enabled) and settling time (identical at 141 guest frames). **Recorded because a
+-- hypothesis eliminated by measurement is worth as much as the one that lands.**
+-- ★★★★★ scr:pixels() returns the entire frame as one string -- 640 x 239 x 4 = 611,840 bytes -- so
+-- every pixel in a profile comes from THE SAME FRAME by construction. MAME 0.281.
+-- ★★★ Pixels are compared as 4-byte substrings rather than decoded: the question is only whether
+-- two pixels DIFFER, and not decoding removes a byte-order assumption that nothing would check.
+local function grab()
+    local s, w0, h0 = scr:pixels()
+    return s, w0 or SW, h0 or SH
+end
+
+local function row_trans(buf, y)
     local n, prev = 0, nil
+    local base = y * SW * 4 + 1
     for x = 0, SW - 1 do
-        local p = scr:pixel(x, y) or 0
+        local o = base + x * 4
+        local p = buf:sub(o, o + 3)
         if prev ~= nil and p ~= prev then n = n + 1 end
         prev = p
     end
@@ -137,18 +159,54 @@ end
 
 -- ★★ A profile down the screen, so the boundary is located by the row count rather than assumed
 -- from stage 0's delay-to-scanline mapping. Two instruments for one boundary [§2W].
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+-- ★★★★★ THE RAW DATUM, RUN-LENGTH ENCODED, BECAUSE A TRANSITION COUNT IS A LOSSY SUMMARY AND I
+-- HAVE BEEN DEBUGGING THE SUMMARY. A count of 66 is consistent with the stripe pattern, with the
+-- DECB text screen, and with garbage; the actual pixel values distinguish them in one look.
+-- **$0F at 2 bits per pixel is index 0,0,3,3 -- so at 320-wide on a 640 raster the run lengths must
+-- be a perfectly regular 4,4,4,4,... and at 160-wide a regular 8,8,8,8,...** Anything else is not
+-- this framebuffer, and the run lengths say which.
+-- ★★★ §2W.3: a diagnostic that reports a derived number where it could report the raw observation
+-- is a diagnostic that can only tell you that something is wrong, never what.
+local function row_runs(buf, y, maxruns)
+    local base = y * SW * 4 + 1
+    local runs, cur, prev = {}, 0, nil
+    for x = 0, SW - 1 do
+        local o = base + x * 4
+        local p = buf:sub(o, o + 3)
+        if prev == nil then prev, cur = p, 1
+        elseif p == prev then cur = cur + 1
+        else runs[#runs+1] = cur; prev, cur = p, 1
+              if #runs >= (maxruns or 24) then break end end
+    end
+    if #runs < (maxruns or 24) then runs[#runs+1] = cur end
+    -- the distinct pixel values seen, so "flat" can be told from "two colours alternating"
+    local seen, order = {}, {}
+    for x = 0, math.min(SW, 160) - 1 do
+        local o = base + x * 4
+        local v = buf:sub(o, o + 3)
+        if not seen[v] then
+            seen[v] = true
+            order[#order+1] = string.format("%02X%02X%02X%02X",
+              v:byte(4) or 0, v:byte(3) or 0, v:byte(2) or 0, v:byte(1) or 0)
+        end
+    end
+    return runs, order
+end
+
 local PROFILE_ROWS = { 30, 50, 70, 90, 110, 130, 150, 170, 190, 210 }
-local function row_profile()
+local function row_profile(buf)
     local out = {}
-    for _, y in ipairs(PROFILE_ROWS) do out[#out+1] = { y, row_trans(y) } end
+    for _, y in ipairs(PROFILE_ROWS) do out[#out+1] = { y, row_trans(buf, y) } end
     return out
 end
 
-local function transitions()
+local function transitions(buf)
     local x = SW // 2
     local t, prev = {}, nil
     for y = 0, SH - 1 do
-        local p = scr:pixel(x, y) or 0
+        local o = (y * SW + x) * 4 + 1
+        local p = buf:sub(o, o + 3)
         if prev ~= nil and p ~= prev then t[#t+1] = { y, prev, p } end
         prev = p
     end
@@ -184,6 +242,23 @@ _G._s01 = emu.add_machine_frame_notifier(function()
               MODE, MODE == 0 and "PALETTE -- the control" or "HRES", #blob, SYM.entry, SW, SH)
             w("  colA=$%02X colB=$%02X  sweep %d values  settle %d frames, sample %d",
               COL_A, COL_B, #SWEEP, SETTLE, SAMPLES)
+            -- ★★★★★ ECHO EVERY PARAMETER AS RECEIVED. The same VOFFSET produced a clean profile when
+            -- reached by a sweep and a broken one when set directly, which is impossible if both
+            -- paths deliver the same value -- so the value each path actually delivers is printed
+            -- rather than assumed. Two hypotheses about the SCREEN were already eliminated; this
+            -- tests the boring one about the HOST that should have been checked first.
+            w("  as received: vsweep=%s voff=$%04X vrest=$%02X vresb=$%02X fillm=%d fillb=$%02X"
+              .. "  guest s01_voff now $%04X",
+              tostring(VSWEEP), VOFF, VREST, VRESB, FILLM, FILLB, rd16(SYM.s01_voff))
+            -- ★★★★★ READ THE PARAMETERS BACK OUT OF THE GUEST. Everything above is what the HOST
+            -- believes it sent; this is what the guest will actually execute on. Stage 1 renders
+            -- differently from stage 0 while doing a strict superset of stage 0's register writes,
+            -- so the remaining suspect is the VALUE reaching $FF99 -- and a poke to a mis-resolved
+            -- symbol would look exactly like this [§2W.3: resolve, do not assume].
+            w("  guest holds: mode=%d vrest=$%02X vresb=$%02X colA=$%02X colB=$%02X fillm=%d fillb=$%02X",
+              prog:read_u8(SYM.s01_mode), prog:read_u8(SYM.s01_vrest), prog:read_u8(SYM.s01_vresb),
+              prog:read_u8(SYM.s01_colA), prog:read_u8(SYM.s01_colB),
+              prog:read_u8(SYM.s01_fillm), prog:read_u8(SYM.s01_fillb))
             w("  DECB ready at frame %d, handed over to $%04X", frame, SYM.entry)
             if EYE then
                 w("  ★ EYE RUN: holding dly=%d, no sweep, normal speed. Close the window when done.",
@@ -205,7 +280,8 @@ _G._s01 = emu.add_machine_frame_notifier(function()
     -- looking at and the number in the log are the same observation -- then it stays out of the way.
     if state == "eye" then
         if step == 60 then
-            local t = transitions()
+            local buf = grab()
+            local t = transitions(buf)
             local ys = {}
             for _, e in ipairs(t) do ys[#ys+1] = tostring(e[1]) end
             w("  boundary sample at handover+60 frames: %d transitions at y=[%s]  guest frames %d",
@@ -213,7 +289,7 @@ _G._s01 = emu.add_machine_frame_notifier(function()
             w("  (active display is y=25..217 = 192 lines, measured in the stage-0 sweep)")
             if MODE == 1 then
                 local parts = {}
-                for _, e in ipairs(row_profile()) do
+                for _, e in ipairs(row_profile(buf)) do
                     parts[#parts+1] = string.format("%d:%d", e[1], e[2])
                 end
                 w("  row transitions (halving = the resolution changed): %s",
@@ -231,7 +307,8 @@ _G._s01 = emu.add_machine_frame_notifier(function()
     end
 
     if state == "sample" then
-        held[#held+1] = { transitions(), rd16(SYM.s01_frames) }
+        local buf = grab()
+        held[#held+1] = { transitions(buf), rd16(SYM.s01_frames), buf }
         if step < SAMPLES then return end
         -- ★★★ Report every sampled frame's transition list, not a summary: "steady" is a claim
         -- about frames agreeing and it cannot be made from one of them.
@@ -259,11 +336,17 @@ _G._s01 = emu.add_machine_frame_notifier(function()
           VSWEEP and "VOFF " or "dly  ",
           dly, rows[1][2], rows[1][1], rows[#rows][3],
           same and "steady across samples" or "★★★ JITTERING between samples")
-        -- ★★★★★ For stage 1 the row profile IS the result; the column above only locates a boundary.
-        -- ★★★ Mode 2 needs it too and the first cut gated on MODE==1, so the two STATIC reference
-        -- runs printed no profile at all -- the one number they exist to produce.
+        -- ★★★★★ THE RAW ROWS PRINT FOR EVERY MODE INCLUDING STAGE 0, because stage 0 is the one arm
+        -- KNOWN GOOD -- Jay watched it -- and the only way to tell what is wrong with the others is
+        -- to compare their raw pixels against a run that is known to be in graphics mode. A working
+        -- reference is only useful if the same instrument is pointed at it.
+        for _, y in ipairs({ 30, 110, 210 }) do
+            local runs, order = row_runs(held[#held][3], y, 16)
+            w("        y=%3d runs %s | colours %s", y,
+              table.concat(runs, ","), table.concat(order, " "))
+        end
         if MODE ~= 0 then
-            local pr, parts = row_profile(), {}
+            local pr, parts = row_profile(held[#held][3]), {}
             local hi, lo = 0, 9999
             for _, e in ipairs(pr) do
                 parts[#parts+1] = string.format("%d:%d", e[1], e[2])
