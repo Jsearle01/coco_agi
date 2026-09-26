@@ -24,6 +24,20 @@ THE DEFINITION, exactly as P6.91's report SS5 records it:
     driver polls and a disk burst moves the screen for reasons that are not animation;
   * rate = events / (frames / 60).
 
+★★★★★ AND THE WARNING BELOW WAS IGNORED FOR EIGHT DISPATCHES [T-P0-155].  This header has said
+"a lower bound on anything per-object" since T-P0-148, and P6.91's report said the figure "must
+never be quoted as an equality".  The Orchestrator then used 5.23 and 5.87 as Sierra's per-second
+rate in eight consecutive dispatches, and P6.94's "~3x more sensitive per object" is a ratio
+against that floor.  Jay's eye caught it: "the ego animates and moves MUCH faster than the
+difference would suggest."
+
+★★★★★ THE FIX IS NOT A BETTER EVENT RATE, IT IS A DIFFERENT OBSERVABLE: the MODAL INTERVAL between
+event STARTS, in frames.  Coalescing can only LENGTHEN a gap, so the mode is an upper bound on the
+update interval and a LOWER bound on the rate.  Measured 3-4 frames across five windows in three
+recordings = 15-20 updates/second, against the 5.23 this rate reported for the same window.
+★★★ Use `--window` and take the modal gap when you need a RATE.  This file's events/second is for
+comparing one window with another under the SAME instrument, and for nothing else.
+
 WHAT IT IS NOT, AND THE REPORT MUST SAY SO.
   ** A LOWER BOUND ON ANYTHING PER-OBJECT. **  A 16x10 lattice undersamples: a small sprite can
 move several pixels and trip no sample point at all, and two objects updating in the same frame

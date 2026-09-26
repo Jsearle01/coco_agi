@@ -45,6 +45,32 @@
 # ★★★ The standing spread is the instrument's own limit: a small chicken trips one of 160 sample
 # points only when it overlaps one. **Only the walking figure is tight enough to quote as a level.**
 #
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ T-P0-155: EVERY EVENTS/SECOND FIGURE BELOW IS A LOWER BOUND AND WAS QUOTED AS A RATE.
+# ★★★★★ THE TOOL'S OWN HEADER SAYS SO -- "a lower bound on anything per-object" -- AND P6.91 WROTE
+# "must never be quoted as an equality". **It was then used as their per-second rate in eight
+# consecutive dispatches**, including P6.94's "~3x more sensitive per object", which is therefore a
+# ratio against a floor.
+#
+# ★★★★★ THE NON-COALESCING MEASUREMENT: the MODAL INTERVAL BETWEEN VISUAL UPDATES, in frames.
+# Coalescing can only LENGTHEN an apparent gap, so the mode is an UPPER bound on their update
+# interval and hence a LOWER bound on their rate:
+#     P6.94 pen walking   4 frames = 15.0 updates/s      P6.94 pen standing   4 fr = 15.0/s
+#     P6.94 starting room 3 frames = 20.0 updates/s      P6.91 walking        3 fr = 20.0/s
+#     Jay's 2026-09-26 run 3 frames = 20.0 updates/s
+#   52-62% of all event gaps are multiples of 4 in the pen; the 8/12/16 gaps are cycles the
+#   16x10 lattice MISSED, which is exactly why the event rate read 5.23 instead of 15.
+#
+# ★★★★★ SO THEIR RATE IS 15-20 UPDATES/SECOND, NOT 5.23. Ours is 4.28 moving (14.0 frames) and
+# 5.45 standing (11.0 frames) -- both sides frame-quantised, so the ratio is in the same units:
+# **2.8x to 4.7x, centred near 3.5x.** ★★★ Jay's eye was right and the instrument was wrong.
+#
+# ★★★★★ AND THE RATIO CANNOT BE IN THE DRAWING PATH: their WHOLE cycle is 89,489-119,318 CPU
+# cycles; our `interpret` stage ALONE is 156,784. **Even with free drawing we would be slower.**
+# ★★★★ `interpret` is 37.5% of a cycle and HAS NEVER BEEN PROFILED [flagged P6.97 §7(3), P6.99
+# §8(5), not taken].
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+#
 # ★★★★★ THE COMPARISON THAT IS VALID IS EACH SIDE AGAINST ITSELF, THEN THE RATIOS:
 #     Sierra walking:  >=5.87 near-empty -> 5.23 with 2 chickens   =  -10.9%
 #     Ours standing:     15.0 no sprites ->  4.99 with 4 sprites   =  -66.7%
