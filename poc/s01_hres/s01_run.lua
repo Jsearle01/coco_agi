@@ -1,0 +1,406 @@
+-- poc/s01_hres/s01_run.lua -- Spike S-01 rev B driver. Waits for DECB's OK prompt, pokes s01.bin,
+-- sweeps the delay, and reports the BOUNDARY SCANLINE per delay value.
+--
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+-- ★★★★★ MEASURED FROM THE HOST, NOT FROM A SCREENSHOT [§5]. The result of this spike is a table
+-- of (delay -> boundary scanline), because "the boundary is steady" and "the boundary moves with
+-- the delay" are numbers, and judging a picture cannot produce either. A snapshot is taken as well,
+-- for Jay, because the mode difference is obvious to an eye and tedious to describe.
+--
+-- ★★★★★ THE SWEEP IS THE POINT. A single band in a plausible place could be an accident of the
+-- emulator's frame compositing. **A boundary whose scanline is a monotone function of a delay the
+-- host pokes cannot be.** So the pass condition is not "there is a band", it is "the band MOVES".
+--
+-- ★★★★★ AND THE LIVENESS WITNESS IS READ EVERY TIME [§2W]. A screen with no boundary and a guest
+-- that crashed before its first flip are the same picture. s01_frames rises once per guest frame;
+-- a flat screen with a rising counter is a real negative, a stalled counter is a broken spike.
+--
+-- ★★★ Symbols come from the assembler's MAP, parsed by name. P6.3's stall dump printed an offset
+-- of 33,849 into a 34-byte string because three symbol addresses were hard-coded and had gone
+-- stale by two bytes [§2W.3]; nothing here is hard-coded but $0400 (DECB's text screen) and
+-- $A7D0-$A7E0 (its prompt poll), both of which belong to the ROM and not to this spike.
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+
+local BIN     = os.getenv("S01_BIN")    or "build/s01/s01.bin"
+local MAP     = os.getenv("S01_MAP")    or "build/s01/s01.map"
+local OUT     = os.getenv("S01_OUT")    or "build/s01"
+local MODE    = tonumber(os.getenv("S01_MODE")   or "0")     -- 0 = palette control, 1 = HRES
+local COL_A   = tonumber(os.getenv("S01_COLA")   or "63")    -- white
+local COL_B   = tonumber(os.getenv("S01_COLB")   or "9")     -- a mid colour, NOT black
+local SETTLE  = tonumber(os.getenv("S01_SETTLE") or "8")     -- frames to hold each delay
+local SAMPLES = tonumber(os.getenv("S01_SAMPLES")or "4")     -- frames sampled per delay
+local OK_TMO  = tonumber(os.getenv("S01_OK_FRAMES") or "1800")
+local FILLM   = tonumber(os.getenv("S01_FILLM")  or "0")     -- 0 = constant byte, 1 = row number
+local FILLB   = tonumber(os.getenv("S01_FILLB")  or "85")    -- $55 = flat index 1
+local VREST   = tonumber(os.getenv("S01_VREST")  or "21")    -- $15 = 320x192x4
+local VRESB   = tonumber(os.getenv("S01_VRESB")  or "13")    -- $0D = 160x192x4
+-- ★★★★★ S01_EYE: HOLD ONE DELAY AND DO NOT SWEEP, SO A PERSON CAN WATCH IT [§2U.2 -- an eye gate
+-- nobody can watch at 2000% is not an eye gate]. The run pokes the parameters, hands over, prints
+-- the boundary once so the number and the picture are the same observation, and then leaves the
+-- machine alone until the window is closed. No verdict is computed: the verdict of an eye run is
+-- Jay's, and §3 forbids this file forming an opinion about what is on the screen.
+local EYE     = (os.getenv("S01_EYE") or "") ~= ""
+local VOFF    = tonumber(os.getenv("S01_VOFF") or "59392")   -- $E800
+-- ★★★★★ S01_VSWEEP: sweep VOFFSET instead of the delay. The framebuffer readback proved the fill is
+-- correct while the screen disagreed, so the display path is at fault and VOFFSET is the assumption
+-- in it. With a constant fill in a static mode, the RIGHT value is the only one that makes every
+-- sampled row patterned and equal -- so this finds it by measurement rather than by a third derivation.
+local VSWEEP  = (os.getenv("S01_VSWEEP") or "") ~= ""
+
+-- ★★ The delay sweep. 8 CPU cycles per iteration; a frame is ~29,830 cycles at 1.79 MHz, of which
+-- ~8,000 is vertical blank. So 0..3600 in steps covers blank plus the whole active field.
+local SWEEP = {}
+do
+    local s = os.getenv("S01_SWEEP")
+    if s then
+        for v in s:gmatch("%d+") do SWEEP[#SWEEP+1] = tonumber(v) end
+    else
+        for v = 0, 3600, 200 do SWEEP[#SWEEP+1] = v end
+    end
+end
+
+local m    = manager.machine
+local cpu  = m.devices[":maincpu"]
+local prog = cpu.spaces["program"]
+local scr  = m.screens[":screen"]
+
+local log = {}
+local function w(fmt, ...)
+    local s = select("#", ...) > 0 and string.format(fmt, ...) or fmt
+    print(s); log[#log+1] = s
+end
+
+-- ── symbols ─────────────────────────────────────────────────────────────────────────────────
+local SYM = {}
+do
+    local fh = io.open(MAP, "r")
+    if not fh then print("★★★ no map at " .. MAP); m:exit(); return end
+    for line in fh:lines() do
+        local n, v = line:match("^Symbol:%s+(%S+)%s+%(.-%)%s+=%s+(%x+)$")
+        if n then SYM[n] = tonumber(v, 16) end
+    end
+    fh:close()
+end
+for _, n in ipairs({"entry", "s01_mode", "s01_colA", "s01_colB", "s01_dly", "s01_frames",
+                    "s01_fillm", "s01_fillb", "s01_vrest", "s01_vresb"}) do
+    if not SYM[n] then print("★★★ map lacks " .. n); m:exit(); return end
+end
+
+local function rd16(a) return prog:read_u8(a) * 256 + prog:read_u8(a + 1) end
+local function wr16(a, v) prog:write_u8(a, v // 256); prog:write_u8(a + 1, v % 256) end
+
+-- ── the DECB readiness check, the established form ──────────────────────────────────────────
+-- ★★★ "OK" at the START OF A ROW *and* the CPU parked in DECB's prompt poll, sustained three
+-- frames. A pattern search over uninitialised RAM went green early once and that is the direction
+-- that hides the problem [p3b_run.lua:874-901, and Jay: "you still are not getting to the basic
+-- prompt"]. Reused rather than reinvented.
+local ok_streak = 0
+local function decb_ready()
+    local seen = false
+    for row = 0, 15 do
+        local b = 0x0400 + row * 32
+        if prog:read_u8(b) == 0x4F and prog:read_u8(b + 1) == 0x4B then seen = true; break end
+    end
+    local pc = cpu.state["PC"].value
+    if seen and pc >= 0xA7D0 and pc <= 0xA7E0 then ok_streak = ok_streak + 1 else ok_streak = 0 end
+    return ok_streak >= 3
+end
+
+-- ── the column sampler ──────────────────────────────────────────────────────────────────────
+-- ★★★★ A COLUMN, not a lattice. The boundary is horizontal by construction, so one column at the
+-- screen's midpoint carries the whole answer at full vertical resolution -- 160 lattice points
+-- over 239 rows could not resolve a scanline, which is the quantity in dispute.
+-- ★★ Transitions are returned as (y, from, to) so the three expected regions (border, top band,
+-- bottom band) are distinguishable from the two that a same-colour bottom band would give.
+local SW, SH = scr.width, scr.height
+
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+-- ★★★★★ STAGE 1 NEEDS A DIFFERENT MEASUREMENT AND STAGE 0's WOULD HAVE REPORTED NOTHING. A
+-- palette change alters COLOUR, which a column of pixels shows directly. **An HRES change alters
+-- PIXEL WIDTH and leaves every colour alone**, so on a flat field it is invisible and even on a
+-- patterned one a vertical column can pass straight through it.
+-- ★★★★ THE OBSERVABLE IS THE HORIZONTAL PERIOD. With the framebuffer filled with $0F -- two pixels
+-- of index 0 then two of index 3, at 2 bits per pixel -- the on-screen period is 8 raster columns
+-- at 320 wide and 16 at 160 wide, because the GIME stretches 160 pixels across the same raster.
+-- **So the transition count along a row should HALVE below the boundary: ~160 above, ~80 below.**
+-- ★★★ A ratio near 2.0 is the pass. A ratio near 1.0 means the write was not honoured, whatever
+-- else the screen does.
+local function row_trans(y)
+    local n, prev = 0, nil
+    for x = 0, SW - 1 do
+        local p = scr:pixel(x, y) or 0
+        if prev ~= nil and p ~= prev then n = n + 1 end
+        prev = p
+    end
+    return n
+end
+
+-- ★★ A profile down the screen, so the boundary is located by the row count rather than assumed
+-- from stage 0's delay-to-scanline mapping. Two instruments for one boundary [§2W].
+local PROFILE_ROWS = { 30, 50, 70, 90, 110, 130, 150, 170, 190, 210 }
+local function row_profile()
+    local out = {}
+    for _, y in ipairs(PROFILE_ROWS) do out[#out+1] = { y, row_trans(y) } end
+    return out
+end
+
+local function transitions()
+    local x = SW // 2
+    local t, prev = {}, nil
+    for y = 0, SH - 1 do
+        local p = scr:pixel(x, y) or 0
+        if prev ~= nil and p ~= prev then t[#t+1] = { y, prev, p } end
+        prev = p
+    end
+    return t
+end
+
+-- ── the run ─────────────────────────────────────────────────────────────────────────────────
+local frame, state, step, si, held = 0, "wait_ok", 0, 1, {}
+local results = {}
+
+_G._s01 = emu.add_machine_frame_notifier(function()
+    frame = frame + 1
+
+    if state == "wait_ok" then
+        if decb_ready() then
+            -- ★ Poke the image and the parameters, then take the machine.
+            local fh = io.open(BIN, "rb")
+            if not fh then w("★★★ no binary at %s", BIN); m:exit(); return end
+            local blob = fh:read("*a"); fh:close()
+            for i = 1, #blob do prog:write_u8(SYM.entry + i - 1, blob:byte(i)) end
+            prog:write_u8(SYM.s01_mode, MODE)
+            prog:write_u8(SYM.s01_colA, COL_A)
+            prog:write_u8(SYM.s01_colB, COL_B)
+            prog:write_u8(SYM.s01_fillm, FILLM)
+            prog:write_u8(SYM.s01_fillb, FILLB)
+            prog:write_u8(SYM.s01_vrest, VREST)
+            prog:write_u8(SYM.s01_vresb, VRESB)
+            -- ★ In a VOFFSET sweep the sweep list IS the VOFFSET list and the delay stays put.
+            if VSWEEP then wr16(SYM.s01_voff, SWEEP[1]); wr16(SYM.s01_dly, 0)
+            else           wr16(SYM.s01_voff, VOFF);     wr16(SYM.s01_dly, SWEEP[1]) end
+            cpu.state["PC"].value = SYM.entry
+            w("S-01 rev B  stage %d (%s)  %d bytes at $%04X  screen %dx%d",
+              MODE, MODE == 0 and "PALETTE -- the control" or "HRES", #blob, SYM.entry, SW, SH)
+            w("  colA=$%02X colB=$%02X  sweep %d values  settle %d frames, sample %d",
+              COL_A, COL_B, #SWEEP, SETTLE, SAMPLES)
+            w("  DECB ready at frame %d, handed over to $%04X", frame, SYM.entry)
+            if EYE then
+                w("  ★ EYE RUN: holding dly=%d, no sweep, normal speed. Close the window when done.",
+                  SWEEP[1])
+                state, step = "eye", 0
+            else
+                state, step = "settle", 0
+            end
+        elseif frame > OK_TMO then
+            w("★★★ no OK prompt after %d frames -- the machine never got to DECB", frame)
+            m:exit()
+        end
+        return
+    end
+
+    step = step + 1
+
+    -- ★★ The eye run reports the boundary ONCE, a second after handover, so the number Jay is
+    -- looking at and the number in the log are the same observation -- then it stays out of the way.
+    if state == "eye" then
+        if step == 60 then
+            local t = transitions()
+            local ys = {}
+            for _, e in ipairs(t) do ys[#ys+1] = tostring(e[1]) end
+            w("  boundary sample at handover+60 frames: %d transitions at y=[%s]  guest frames %d",
+              #t, table.concat(ys, ","), rd16(SYM.s01_frames))
+            w("  (active display is y=25..217 = 192 lines, measured in the stage-0 sweep)")
+            if MODE == 1 then
+                local parts = {}
+                for _, e in ipairs(row_profile()) do
+                    parts[#parts+1] = string.format("%d:%d", e[1], e[2])
+                end
+                w("  row transitions (halving = the resolution changed): %s",
+                  table.concat(parts, "  "))
+            end
+            local fh = io.open(OUT .. "/s01_eye" .. MODE .. ".txt", "w")
+            if fh then fh:write(table.concat(log, "\n") .. "\n"); fh:close() end
+        end
+        return
+    end
+
+    if state == "settle" then
+        if step >= SETTLE then state, step, held = "sample", 0, {} end
+        return
+    end
+
+    if state == "sample" then
+        held[#held+1] = { transitions(), rd16(SYM.s01_frames) }
+        if step < SAMPLES then return end
+        -- ★★★ Report every sampled frame's transition list, not a summary: "steady" is a claim
+        -- about frames agreeing and it cannot be made from one of them.
+        local dly = SWEEP[si]
+        local rows = {}
+        for _, h in ipairs(held) do
+            local parts = {}
+            for _, t in ipairs(h[1]) do parts[#parts+1] = tostring(t[1]) end
+            rows[#rows+1] = { table.concat(parts, ","), #h[1], h[2] }
+        end
+        local same = true
+        for i = 2, #rows do if rows[i][1] ~= rows[1][1] then same = false end end
+        -- ★★★★★ LIVENESS IS MEASURED WITHIN ONE SAMPLE POINT, NOT ACROSS SWEEP ROWS, BECAUSE THE
+        -- ACROSS-ROWS VERSION COULD NOT FAIL -- AND COULD NOT PASS -- ON A ONE-VALUE SWEEP [§2W].
+        -- The first cut compared results[1].frames with results[#results].frames; with a single
+        -- delay those are the SAME ROW, so the test read `x > x`, declared the guest STALLED and
+        -- printed RESULT: VOID over a run whose counter had reached 20. **A liveness check that a
+        -- live guest cannot pass is worse than none, because it voids real results.**
+        -- ★★★ This compares the counter at the first and last frame of THIS delay's sample window,
+        -- which rises for any running guest regardless of how many delays are swept.
+        local rose = rows[#rows][3] > rows[1][3]
+        results[#results+1] = { dly = dly, ys = rows[1][1], n = rows[1][2],
+                                frames = rows[#rows][3], steady = same, rose = rose }
+        w("  %s %5d  transitions %d at y=[%s]  guest frames %5d  %s",
+          VSWEEP and "VOFF " or "dly  ",
+          dly, rows[1][2], rows[1][1], rows[#rows][3],
+          same and "steady across samples" or "★★★ JITTERING between samples")
+        -- ★★★★★ For stage 1 the row profile IS the result; the column above only locates a boundary.
+        -- ★★★ Mode 2 needs it too and the first cut gated on MODE==1, so the two STATIC reference
+        -- runs printed no profile at all -- the one number they exist to produce.
+        if MODE ~= 0 then
+            local pr, parts = row_profile(), {}
+            local hi, lo = 0, 9999
+            for _, e in ipairs(pr) do
+                parts[#parts+1] = string.format("%d:%d", e[1], e[2])
+                if e[2] > hi then hi = e[2] end
+                if e[2] < lo and e[2] > 0 then lo = e[2] end
+            end
+            w("        row transitions  %s", table.concat(parts, "  "))
+            w("        widest %d  narrowest %d  ratio %.2f  (2.00 = the resolution halved)",
+              hi, lo, lo > 0 and hi / lo or 0)
+            results[#results].ratio = lo > 0 and hi / lo or 0
+            -- ═══════════════════════════════════════════════════════════════════════════════
+            -- ★★★★★ THE SELF-CHECK THAT WOULD HAVE CAUGHT THE BROKEN SPIKE ON ITS FIRST RUN, AND
+            -- IT IS THE ONE I DID NOT WRITE. With a CONSTANT fill, every row of the framebuffer is
+            -- byte-identical, so in a STATIC mode every sampled row MUST have the same non-zero
+            -- transition count. A zero row, or rows that disagree, means the display is not showing
+            -- this framebuffer -- and no statement about HRES can be made from it.
+            -- ★★★★ It runs on mode 2 (static) with fillm=0, which is exactly the reference run, so
+            -- the instrument is checked by the same pass that produces the baseline [§2W].
+            -- ═══════════════════════════════════════════════════════════════════════════════
+            -- ★★★★★ READ THE FRAMEBUFFER BACK. This is what separates the two hypotheses the
+            -- broken self-check leaves open -- "the fill never happened" and "the display is
+            -- pointed somewhere else" -- and they call for completely different fixes. A screen
+            -- that disagrees with the buffer is a VOFFSET/MMU fault; a buffer that disagrees with
+            -- itself is a fill fault. ★★★ Guessing between them is what §2H's first check forbids.
+            do
+                local probe, bad = {}, 0
+                for _, a in ipairs({0x4000, 0x5000, 0x6000, 0x7000, 0x7BFF}) do
+                    local v = prog:read_u8(a)
+                    probe[#probe+1] = string.format("$%04X=$%02X", a, v)
+                    if v ~= FILLB then bad = bad + 1 end
+                end
+                w("        framebuffer readback (expect $%02X): %s  -> %s",
+                  FILLB, table.concat(probe, " "),
+                  bad == 0 and "FILL IS CORRECT -- any screen mismatch is the DISPLAY path"
+                           or string.format("★★★ %d of 5 WRONG -- the FILL is at fault", bad))
+            end
+            local zero, disagree = 0, false
+            for _, e in ipairs(pr) do
+                if e[2] == 0 then zero = zero + 1 end
+                if math.abs(e[2] - pr[1][2]) > 8 then disagree = true end
+            end
+            if MODE == 2 and FILLM == 0 then
+                if zero > 0 or disagree then
+                    w("        ★★★★★ SPIKE BROKEN: a constant fill in a STATIC mode must render every")
+                    w("              row alike, and %d of %d rows are blank%s. The display is NOT",
+                      zero, #pr, disagree and " and the counts disagree" or "")
+                    w("              showing this framebuffer -- VOFFSET, the MMU map or the fill is")
+                    w("              wrong. NOTHING may be concluded about HRES from this run.")
+                    results[#results].self_ok = false
+                else
+                    w("        ★ self-check: all %d sampled rows patterned and within tolerance --", #pr)
+                    w("          the display IS showing this framebuffer (VOFFSET + MMU confirmed)")
+                    results[#results].self_ok = true
+                end
+            end
+        end
+        si = si + 1
+        if si > #SWEEP then
+            state = "done"
+        else
+            -- ★ VOFFSET takes effect at the guest's next init only if written at init; it is read
+            -- every frame here instead, so poking it mid-run is enough and no relaunch is needed.
+            if VSWEEP then wr16(SYM.s01_voff, SWEEP[si]) else wr16(SYM.s01_dly, SWEEP[si]) end
+            state, step = "settle", 0
+        end
+        return
+    end
+
+    if state == "done" then
+        -- ═══════════════════════════════════════════════════════════════════════════════════
+        -- ★★★★★ THE VERDICT, AND IT IS COMPUTED RATHER THAN EYEBALLED. Stage 0 passes only if the
+        -- boundary MOVED as the delay swept. A fixed set of transitions across every delay means
+        -- the register write is not being sampled during the scan, whatever the screen looks like.
+        -- ═══════════════════════════════════════════════════════════════════════════════════
+        local distinct, first = {}, nil
+        -- ★ alive if the counter rose inside ANY sample window (see the note at `rose`).
+        local alive = false
+        for _, r in ipairs(results) do if r.rose then alive = true end end
+        for _, r in ipairs(results) do
+            distinct[r.ys] = (distinct[r.ys] or 0) + 1
+            first = first or r.ys
+        end
+        local nd = 0; for _ in pairs(distinct) do nd = nd + 1 end
+        w("")
+        w("── verdict ──")
+        w("  distinct transition patterns across %d delays: %d", #results, nd)
+        w("  guest liveness: s01_frames %d -> %d  (%s)",
+          results[1].frames, results[#results].frames,
+          alive and "RUNNING" or "★★★ STALLED -- this spike is broken, not the GIME")
+        if not alive then
+            w("  ★★★★★ RESULT: VOID. The guest was not executing its loop, so the screen says")
+            w("        nothing about whether MAME samples registers mid-frame.")
+        elseif nd <= 1 then
+            w("  ★★★★★ RESULT: NO SPLIT. The boundary did not move across the whole sweep.")
+            if MODE == 0 then
+                w("        STAGE 0 FAILED -> MAME renders from frame-start register state and")
+                w("        CANNOT answer this class of question. 160-wide stays OPEN, pending")
+                w("        hardware. This is NOT a close [§7].")
+            else
+                w("        STAGE 1 FAILED. Only meaningful if stage 0 PASSED.")
+            end
+        elseif MODE == 1 then
+            -- ★★★★★ For HRES the moving boundary is NOT sufficient on its own: the byte-provenance
+            -- shift below a switch changes the CONTENT and could move a colour boundary without the
+            -- resolution changing at all. **The resolution claim rests on the width ratio.**
+            local best = 0
+            for _, r in ipairs(results) do if (r.ratio or 0) > best then best = r.ratio end end
+            w("  best width ratio across the sweep: %.2f", best)
+            if best >= 1.7 then
+                w("  ★★★★★ RESULT: STAGE 1 PASSED. A mid-frame HRES change is honoured -- the")
+                w("        boundary moves with the delay AND the horizontal period nearly doubles")
+                w("        below it, which is the resolution and not merely the data.")
+                w("        ★★ Still unproven on silicon: two GIME revisions exist, the later changed")
+                w("        video timings, and MAME models one behaviour [§3.4]. 'Worth building on',")
+                w("        never 'proven'.")
+            else
+                w("  ★★★★★ RESULT: A BOUNDARY MOVED BUT THE RESOLUTION DID NOT CHANGE (ratio %.2f).",
+                  best)
+                w("        That is a CONTENT shift, not an HRES change -- the address counter")
+                w("        re-phasing below the write would do exactly this. Stage 1 FAILS on its")
+                w("        own terms and the distinction is the whole point of measuring width.")
+            end
+        else
+            w("  ★★★★★ RESULT: THE BOUNDARY MOVES with the poked delay (%d distinct patterns).", nd)
+            if MODE == 0 then
+                w("        STAGE 0 PASSED -> MAME samples video registers during the scan, so an")
+                w("        HRES result from it is worth having. Proceed to stage 1.")
+            else
+                w("        STAGE 1: a mid-frame HRES change is honoured by the model. Still")
+                w("        unproven on silicon -- two GIME revisions exist [§3.4].")
+            end
+        end
+        -- a snapshot for Jay (§5); never interpreted here (§3)
+        local ok = pcall(function() m.video:snapshot() end)
+        w("  snapshot: %s", ok and "written to MAME's snap directory" or "unavailable")
+        local fh = io.open(OUT .. "/s01_stage" .. MODE .. ".txt", "w")
+        if fh then fh:write(table.concat(log, "\n") .. "\n"); fh:close() end
+        m:exit()
+    end
+end)
