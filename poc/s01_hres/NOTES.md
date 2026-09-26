@@ -175,7 +175,39 @@ past a 15,360-byte buffer — an edge, not a pattern.
 about **9 occurrences**, so 193 scanlines display ~184 source rows. **A ~4-5% vertical compression in
 the upper two thirds of the frame.**
 
-### What it is not, and what was checked
+### ★★★★★ CHASED, AND IT TURNED UP A SEPARATE FINDING THE PROJECT SHOULD CARE ABOUT
+
+**VOFFSET's effective granularity in this path is 256 BYTES, not 8.** Sweeping it with no HRES change:
+
+```
+VOFF $E800  (+0 bytes)    1,1,1,1,1,1,2,...   runs of 1: 175  runs of 2: 9
+VOFF $E801  (+8 bytes)    1,1,1,1,1,1,2,...   IDENTICAL
+VOFF $E810  (+128 bytes)  1,1,1,1,1,1,2,...   IDENTICAL
+VOFF $E820  (+256 bytes)  1,1,1,1,1,2,...     SHIFTED by one row
+```
+
+★★★★★ **`+8` and `+128` are byte-identical; only `+256` moves anything. So the register's low 5 bits
+are ignored and the framebuffer can only be positioned on a 256-byte boundary.**
+
+★★★★ That fits MAME's fetch expression, which is worth recording in full because `gfx.s` does not have it:
+
+```cpp
+offset += get_data((m_video_position + ((base_offset + offset) & 0xff)) | bank_512k, &data, &mode);
+//  base_offset = m_legacy_video ? 0 : (m_gime_registers[0x0f] & 0x7f) * 2;   <-- $FF9F, HOFFSET
+```
+
+**The COLUMN offset supplies the low byte of every fetch address, and `$FF9F` (HOFFSET) is added into
+it.** ★★★ So `$FF9F` is not merely "required to be 0" as `gfx.s:221-223` has it — **it participates in
+the fetch address on every byte**, and a nonzero value shifts the whole picture horizontally within a
+256-byte window.
+
+★★★★★ **THIS IS THE KIND OF THING `gfx.s`'s UNDISCHARGED VOFFSET DEBT IS ABOUT** (*"inferred from
+disassembly; NOT verified… discharge by sentinel test"*). ★★★ **It does not contradict `physical >> 3`
+— S-01 proved `$E800` → physical `$74000` — it says the low bits of that quotient do not reach the
+hardware.** ★★ A port that ever needs finer than 256-byte framebuffer placement cannot have it.
+**Carried as a finding for the HAL, not applied here** (§4A/§6: nothing under `src/`).
+
+### What the row repeat is not, and what was checked
 
 ★★★ MAME's mechanism is `m_video_position += pitch` gated on `++m_line_in_row >= get_lines_per_row()`,
 and **`get_lines_per_row()` returns 1 for LPR = 000** (`$FF98 & 0x07` cases 0x00 and 0x01 both give 1).
