@@ -344,6 +344,18 @@ vm_v0_out:      puls    cc,d,x,y,pc
 * advances there.
 
 * vm_getflag: A = flag number -> A = 0 or 1, Z set when clear
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE BIT MASK COMES FROM A TABLE, NOT A SHIFT LOOP [T-P0-156 §4B].
+* ★★★★★ `lda #1` then `tstb / beq / asla / decb / bra` is **12 cycles PER BIT** -- 5 cycles for
+* bit 0 and **89 for bit 7**, averaging ~47 over a uniform bit distribution. ★★★★ `ldx #vm_bitmask
+* / abx / lda ,x` is **10 cycles flat**, so it saves ~39 on average and 79 at worst.
+* ★★★ `abx` is B + X -> X, inherent, 3 cycles, and B already holds the bit number -- no zero-extend
+* and no index arithmetic. **This is the shape the 6809 has for exactly this.**
+* ★★ vm_getflag is 6.7% of the interpret stage and vm_gf_sh alone is 3.0% [P6.102], so ~45% of the
+* routine was building a mask it could have looked up.
+* ★★★★ -DVM_FLAG_SHIFTLOOP is the BEFORE arm, so the change is one variable [P6.84's rule].
+vm_bitmask      fcb     1,2,4,8,$10,$20,$40,$80
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 vm_getflag:
                 pshs    b
                 tfr     a,b
@@ -354,6 +366,7 @@ vm_getflag:
                 ldx     #VM_FLAGS
                 lda     a,x
                 pshs    a
+                ifdef   VM_FLAG_SHIFTLOOP
                 lda     #1
 vm_gf_sh:       tstb
                 beq     vm_gf_got
@@ -361,6 +374,12 @@ vm_gf_sh:       tstb
                 decb
                 bra     vm_gf_sh
 vm_gf_got:      anda    ,s+
+                else
+                ldx     #vm_bitmask
+                abx                             ; X -> vm_bitmask[bit]
+                lda     ,x
+                anda    ,s+
+                endc
                 beq     vm_gf_out
                 lda     #1
 vm_gf_out:      tsta
@@ -371,17 +390,30 @@ vm_setflag:
                 pshs    a,b
                 tfr     a,b
                 andb    #7
+* ★★★★ THE MASK IS FETCHED BEFORE X IS COMMITTED TO THE FLAG BYTE, so no save/restore is needed:
+* B holds the bit on entry here and the mask on exit, and A still holds the flag number for the
+* three `lsra`s below. ★★★ Doing it after `leax a,x` would have cost a pshs/puls x pair (14 cycles)
+* to free X for the table [T-P0-156].
+                ifndef  VM_FLAG_SHIFTLOOP
+                ldx     #vm_bitmask
+                abx
+                ldb     ,x                      ; B = the mask
+                endc
                 lsra
                 lsra
                 lsra
                 ldx     #VM_FLAGS
                 leax    a,x                     ; X -> the byte
+                ifdef   VM_FLAG_SHIFTLOOP
                 lda     #1
 vm_sf_sh:       tstb
                 beq     vm_sf_got
                 asla
                 decb
                 bra     vm_sf_sh
+                else
+                tfr     b,a                     ; A = the mask
+                endc
 vm_sf_got:      ldb     1,s                     ; the requested value
                 bne     vm_sf_set
                 coma

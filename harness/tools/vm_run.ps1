@@ -87,12 +87,38 @@ if ($env:VM_MODELLED_FAULT) { $ASMARGS += "-DVM_MODELLED_FAULT"; "★★★ FAUL
 if ($env:VM_VBLCLOCK) { $ASMARGS += "-DVM_VBLCLOCK"; "★★★ VBL CLOCK ARM (-DVM_VBLCLOCK): VAR_SECONDS runs off real vertical sync -- known to crash before the first park" }
 # ★★ AC-3: build with a deliberate one-boundary error in vm_check_step, to show the gate can
 # fail. A gate that has never failed is an assertion about the harness, not about the VM.
-if ($env:VM_FAULT) { $ASMARGS += "-DVM_FAULT"; "FAULT INJECTED (-DVM_FAULT) -- this build is EXPECTED to fail AC-2" }
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ VM_FAULT's SCOPE, MEASURED, BECAUSE THE UNQUALIFIED WORDING MISLED ME [T-P0-156 §4E].
+# I ran this arm on Kingquest1 alone to show the gate could go red, and it printed **PASS,
+# byte-identical, 600 cycles** -- which reads exactly like a dead fault arm. vm_run.s:973 had
+# already named that outcome: *"NAMED, so a green run with VM_FAULT set would itself be the
+# finding."*
+# ★★★★★ IT IS NOT DEAD. Over all nine titles: **6 FAIL, 3 PASS.**
+#   Kingquest2 188/600 · SpaceQuest-1 519/600 · SpaceQuest-2 218/600 · larry1 372/600
+#   Kingquest3 73/600 · MixedUpMotherGoose 1/600  <-- ONE divergent cycle of 600
+#   Kingquest1, PoliceQuest1, BlackCauldron: 0/600, they never reach delta == -step in 600 cycles
+# ★★★★ SO THE FAULT'S SCOPE IS PART OF ITS DEFINITION, exactly as this file's own header says the
+# GATE's scope is [the VM_TITLES lesson twenty lines up]. Same disease, other face: there it was
+# a gate that ran a third of its corpus; here it is a fault that is unreachable on a third of it,
+# while the message promises failure without qualification.
+# ★★★ AND KINGQUEST1 IS THE WORST POSSIBLE DEFAULT for it -- the first title in the list, the one
+# a spot-check reaches for, and one of the three that cannot see it. MixedUpMotherGoose's 1/600
+# says how thin the margin is: a corpus one title smaller could have retired a live arm.
+# ★★ §2W's own words, and they are exact: *fault-detectability does not survive either the build
+# or the corpus changing* [L-62].
+if ($env:VM_FAULT) { $ASMARGS += "-DVM_FAULT"; "FAULT INJECTED (-DVM_FAULT): EXPECTED to fail 6 of the 9 -- Kingquest2/3, SpaceQuest-1/-2, larry1, MixedUpMotherGoose. Kingquest1, PoliceQuest1 and BlackCauldron PASS because they never reach delta == -step in 600 cycles [T-P0-156 §4E]. A green run on those three is NOT evidence the arm is dead." }
 if ($env:VM_PACEONLY) { $ASMARGS += "-DVM_PACEONLY"; "PACE-ONLY build (AC-7 split): interpret_cycle is not called" }
 # ★★★★ T-P0-060 AC-5: the WIRING's own fault. said() evaluated but its side effect not published,
 # so every later said() in the same cycle passes a guard that should have rejected it. This
 # build is EXPECTED to fail the state diff on any title whose script makes a line match.
 if ($env:VM_FAULT_SAID_PURE) { $ASMARGS += "-DVM_FAULT_SAID_PURE"; "★★★ FAULT INJECTED (-DVM_FAULT_SAID_PURE): said() treated as PURE -- this build is EXPECTED to FAIL" }
+# ★★★★★ T-P0-156 §4D: the marker split's TWO fault arms, and the pair is the point [§2W].
+# VM_MARK_FAULT_HALT moves the boundary, and fails by HALTING at cycle 1 -- evidence that the gate
+# notices a corpse. VM_MARK_FAULT swaps the OR and NOT targets, so the VM runs all 600 cycles and
+# the state is wrong -- evidence that the gate reads STATE on this path. The second is the one that
+# licenses believing the green run; the first is kept because it is the boundary's own arm.
+if ($env:VM_MARK_FAULT) { $ASMARGS += "-DVM_MARK_FAULT"; "★★★ FAULT INJECTED (-DVM_MARK_FAULT): vm_tic_mark's OR and NOT targets are swapped -- the VM runs, the state is wrong, this build is EXPECTED to FAIL" }
+if ($env:VM_MARK_FAULT_HALT) { $ASMARGS += "-DVM_MARK_FAULT_HALT"; "★★★ FAULT INJECTED (-DVM_MARK_FAULT_HALT): the marker boundary is \$FD, so \$FC falls into the test path and halts -- EXPECTED to FAIL, by cycle count rather than by divergence" }
 # ★★★★★ VM_PROG_PREBUILT -- run a binary this script did NOT assemble [P6.11 AC-5]. The gain has
 # to be measured against a build of the PREVIOUS REVISION, because the knob that used to express
 # the before-state is retired: the loops read vm_objtop now, so "before" is a different program,

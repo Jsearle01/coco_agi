@@ -626,5 +626,19 @@ p3b_box	src/harness/p3b_probe.s	build/p3b_probe_text.bin	-DHAL_GFX_MODE_SERVICE 
 # the bytecode. ★★★ That is the check that it detects the thing it was built for.
 # ★★ rck_seen is printed on every run: a green from a checker that performed zero verifications is
 # not a green, and the host says ZERO VERIFICATIONS in as many words when it happens.
+#
+# ★★★★★ FAULT ARM SCOPE: -DVM_FAULT IS EXPECTED TO FAIL 6 OF THE 9, NOT 9 OF THE 9 [T-P0-156 §4E].
+# Kingquest2 188/600 · Kingquest3 73/600 · SpaceQuest-1 519/600 · SpaceQuest-2 218/600 ·
+# larry1 372/600 · MixedUpMotherGoose 1/600.  Kingquest1, PoliceQuest1 and BlackCauldron report
+# 0/600 and PASS: the injected `ble`->`blt` needs delta == -step and they never reach it.
+# ★★★★★ I RAN IT ON KINGQUEST1 ALONE AND READ THE PASS AS A DEAD ARM. vm_run.s:973 had already
+# written the trap down -- *"NAMED, so a green run with VM_FAULT set would itself be the finding"* --
+# and the arm's own message promised failure with no scope attached.
+# ★★★★ SO: A FAULT ARM'S SCOPE IS PART OF ITS DEFINITION, exactly as vm_run.ps1's header says the
+# GATE's scope is. Same disease, other face. MixedUpMotherGoose's 1 divergent cycle of 600 is the
+# margin: a corpus one title smaller could have retired a live arm as dead.
+# ★★★ THE GENERAL RULE FOR THIS FILE: every fault arm recorded here states WHICH titles or inputs
+# it is expected to redden. "EXPECTED to FAIL" without a scope is an unfalsifiable claim, and the
+# three green titles above are what it costs.
 # ═══════════════════════════════════════════════════════════════════════════════════════════
 p3b_rescheck	src/harness/p3b_probe.s	build/p3b_probe_pk_fresh.bin	-DHAL_GFX_MODE_SERVICE -DHAL_SYS_FAST_CLOCK -DPLANE_WINDOWED -DPRI_PACKED -DP3B_NO_CEL -DHAL_KEYBOARD -DTEXT_MODELLED -DRES_CHECKSUM -DP3B_IRQ	resource bytes gated after the bind; needs P3B_ROOM=1 and -WithInput; 15,852 B (+518 over p3b_fault); tables live in MAP_COVERAGE, not the code image	purpose=correctness

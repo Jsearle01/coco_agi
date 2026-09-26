@@ -303,6 +303,20 @@ param(
   # `sta co_col` above the key test, where 55% of tested pixels pay for a colour nothing reads.
   [switch]$SpillSrc,
   [switch]$EarlyCol,
+
+  # ★★★★★ T-P0-156's FOUR BEFORE arms, one per measured group [P6.84's rule: a share is not a
+  # cost, and each change is measured against its own before arm rather than inferred from a total].
+  # -FlagShiftLoop  : vm_getflag/vm_setflag build the bit mask with a shift loop (group A)
+  # -TicSlow        : vm_tic_loop reloads vm_ip and stores/reloads vm_op (group B)
+  # -SkipSlow       : vm_skip_instruction builds D and indexes with leax instead of abx (group C)
+  # -MarkSlow       : vm_tic_loop tests all four expression markers in a cmpa/lbeq chain (group D)
+  # ★★ Group C's OTHER half -- hoisting vm_su_lp's code pointer -- was costed and REJECTED, so it
+  # has no arm: it would cost pshs/puls u per CALL to save 6 per ITERATION and the oracle measures
+  # 1.8 bytes walked per call. There is nothing to switch between [see vm_core.s at vm_su_lp].
+  [switch]$FlagShiftLoop,
+  [switch]$TicSlow,
+  [switch]$SkipSlow,
+  [switch]$MarkSlow,
   [switch]$SlowSteal,
   # ★★★★ -NoRemap IS the fault arm (-DRES_FAULT_NOREMAP): a theft takes the cheap path WITHOUT
   # re-mapping, so the walk reads through whatever the compositor left in slot 6. Expect a wrong
@@ -518,6 +532,10 @@ if ($RestoreNoCross)  { $FLAGS += "-DP3B_RESTORE_NOCROSS" }
 if ($RestoreStaleSlice) { $FLAGS += "-DP3B_RESTORE_STALESLICE" }
 if ($SpillSrc)        { $FLAGS += "-DCOMP_SPILL_SRC" }
 if ($EarlyCol)        { $FLAGS += "-DCOMP_EARLY_COL" }
+if ($FlagShiftLoop)   { $FLAGS += "-DVM_FLAG_SHIFTLOOP" }
+if ($TicSlow)         { $FLAGS += "-DVM_TIC_SLOW" }
+if ($SkipSlow)        { $FLAGS += "-DVM_SKIP_SLOW" }
+if ($MarkSlow)        { $FLAGS += "-DVM_MARK_SLOW" }
 if ($CelStats) { $FLAGS += "-DP3B_CELSTATS" }
 if ($CelStatsNever)  { $FLAGS += "-DP3B_CELSTATS_NEVER" }
 if ($CelStatsAlways) { $FLAGS += "-DP3B_CELSTATS_ALWAYS" }

@@ -313,17 +313,55 @@ vm_tic_loop:
                 ldd     vm_ip
                 leax    d,x
 * ★ Same clobber, same fix: the test opcode must survive the ip update.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ ADVANCE ip WHILE D STILL HOLDS IT, THEN LOAD A [T-P0-156 §4B]. The old order loaded the
+* opcode FIRST, so it had to spill it to vm_op across the `ldd vm_ip` that the ip update needed --
+* `sta vm_op` + `lda vm_op` + a second `ldd vm_ip` = **16 cycles per test opcode**, 168 times a
+* cycle.
+* ★★★★★ AND THE CORRECT IDIOM IS TWELVE LINES AWAY IN THIS FILE: vm_su_lp already does
+* `addd #1 / std vm_ip / lda ,x` and its own comments say why -- *"ip advanced while D still holds
+* ip"*, *"only now is A free for the opcode"*. **vm_tic_loop simply never adopted it.**
+* ★★★ vm_rl_loop has the same pair and its comment (*"survives the ip update; A does not"*) states
+* the constraint as if it were inherent; it is a consequence of the ORDER, not of the 6809.
+* ★★ Nothing between here and the `sta vm_op` below the marker checks reads vm_op -- verified by
+* grep over every reader in this file -- so the spill had one purpose: surviving vmtr_rec.
+                ifdef   VM_TIC_SLOW
                 lda     ,x
                 sta     vm_op
                 ldd     vm_ip
                 addd    #1
                 std     vm_ip
                 lda     vm_op
-
+                else
+                addd    #1                      ; ★ D still holds ip
+                std     vm_ip
+                lda     ,x                      ; ★ only now is A free for the opcode
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
                 ifdef   VM_TRACE
+                sta     vm_op                   ; ★ vmtr_rec clobbers A; this is the ONLY reason
                 ldb     #1                      ; kind 1 = an evaluator step
                 jsr     vmtr_rec
+                lda     vm_op
                 endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THREE OF THE FOUR MARKERS ARE >= $FC, SO ONE UNSIGNED COMPARE SEPARATES THEM ALL
+* [T-P0-156 §4D]. The old chain ran cmpa/lbeq four times -- **28 cycles before a test opcode
+* could be dispatched, on every one of ~250 iterations a cycle** -- and the common case is the
+* one it tested LAST.
+* ★★★★★ AND THE IDIOM IS ALREADY IN THIS FILE, forty lines down: vm_skip_instruction's own
+* comment reads *"VMTEST_MAX, NOT $FC, AND IT SUBSUMES THE MARKER CHECK"*. ★★★ **Second rule in
+* this task whose correct form was already written down elsewhere in the same source file**
+* (vm_su_lp's ip idiom was the first, §4B) -- so the recurring defect is not ignorance of the
+* 6809, it is that a routine written early never adopted what a later one learned.
+* ★★★★ THE ORDER IS CHOSEN SO THE COMMON CASE ENDS ON A *SHORT* BRANCH TAKEN: cmpa(2) + bhs
+* not-taken(3) + tsta(2) + bne taken(3) = **10 cycles, down from 28**. The rare paths pay a
+* 4-byte trampoline rather than making the hot path carry a 5-cycle long branch.
+* ★★ $FE IS NOT A MARKER and must not become one. It is >= VMTEST_MAX, so it reached
+* vm_test_unimpl through the range check below; vm_tic_mark falls through to the same place.
+* ★ THIS REPLACES THE 256-BYTE OPCODE CLASS TABLE THAT WAS COSTED AT 0.40% -- see §6 route
+* accounting. The table needed a tfr/abx/ldb and still cost ~21 cycles; this costs 10 and no bytes.
+                ifdef   VM_MARK_SLOW
                 cmpa    #$FC
                 lbeq    vm_tic_or
                 cmpa    #$FD
@@ -332,8 +370,30 @@ vm_tic_loop:
                 lbeq    vm_tic_end
                 cmpa    #$FF
                 lbeq    vm_tic_end
+                else
+* ★★★★★ TWO FAULT ARMS, AND THE SECOND ONE EXISTS BECAUSE THE FIRST WAS NOT GOOD ENOUGH [§2W].
+* -DVM_MARK_FAULT_HALT raises the boundary by one, so $FC stops reaching vm_tic_mark and falls into
+* the test path as an out-of-range opcode. It DOES fail the gate -- and it fails by **halting at
+* cycle 1**, because vm_test_unimpl sets vm_quit. ★★★★ So it shows the gate notices a corpse, which
+* is the one thing §2W.3 says a diagnostic must not be allowed to stand in for.
+* ★★★★★ -DVM_MARK_FAULT IS THE REAL ONE: it swaps vm_tic_mark's OR and NOT targets, so every marker
+* is still a marker, the VM RUNS TO 600 CYCLES, and the state it produces is wrong. **That is what
+* proves the gate reads state on this path rather than merely noticing a dead build.**
+                ifdef   VM_MARK_FAULT_HALT
+                cmpa    #$FD
+                else
+                cmpa    #$FC
+                endc
+                bhs     vm_tic_mrk              ; $FC-$FF: the three markers and $FE
+                tsta
+                bne     vm_tic_test             ; ★ THE COMMON CASE, on a short branch TAKEN
+                lbra    vm_tic_end              ; $00 ends the expression
+vm_tic_mrk:     lbra    vm_tic_mark             ; ★ the trampoline the hot path does not pay for
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 
 * ---- evaluate one test ------------------------------------------------------
+vm_tic_test:
                 sta     vm_op
 * ★★ AC-5 COVERAGE FOR THE *TEST* OPCODE SPACE. The command counter has been here since P4.5 and
 * the test counter had not, so "coverage" meant one of the two dispatch classes and the report
@@ -415,6 +475,34 @@ vm_tic_true:    lda     #1
                 jsr     vm_if_exit
                 endc
                 rts
+
+* ★★★ THE RARE HALF OF §4D's SPLIT, placed HERE rather than in the loop so the hot path holds no
+* marker arithmetic at all. A is $FC-$FF. ★★ It is only reached once per expression at most (a
+* closing $00 does not come through here), against ~250 loop iterations a cycle, so it is written
+* for clarity and the long branches are not worth shortening.
+                ifndef  VM_MARK_SLOW
+vm_tic_mark:
+                ifdef   VM_MARK_FAULT
+* ★★★★ THE SWAP: $FC enters NOT mode and $FD enters OR mode. Both are still markers, so nothing
+* halts and the VM runs the full sweep -- producing wrong flags and variables for the gate to find.
+                cmpa    #$FC
+                lbeq    vm_tic_not
+                cmpa    #$FD
+                lbeq    vm_tic_or
+                else
+                cmpa    #$FC
+                lbeq    vm_tic_or
+                cmpa    #$FD
+                lbeq    vm_tic_not
+                endc
+                cmpa    #$FF
+                lbeq    vm_tic_end
+* ★★★★ $FE FALLS THROUGH TO THE TEST PATH, WHICH IS WHAT IT DID BEFORE. It is >= VMTEST_MAX, so
+* the range check sends it to vm_test_unimpl -- and that handler must still run, because vm_exitall,
+* vm_skip_instruction and the NOT/OR handling downstream all have to happen for an unimplemented
+* test [the reason the range check falls INTO `jsr ,x` rather than branching past it].
+                lbra    vm_tic_test
+                endc
 
 vm_tic_or:
                 lda     vm_ormode
@@ -620,6 +708,19 @@ vm_skip_until:
 * one in vm_test_if_code were the first two, and I introduced THIS one myself while rewriting
 * the routine to decode rather than scan. **`ldd`/`ldx` for arithmetic and `lda` for a byte read
 * share A, and the read must not sit between the load and the use.**
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE `ldx vm_code` HOIST WAS COSTED AND REJECTED -- P6.98's LESSON, FIRING BEFORE THE
+* CHANGE THIS TIME [T-P0-156 §4C]. Holding the base in U across the loop turns `ldx vm_code` +
+* `leax d,x` (14 cyc) into `leax d,u` (8), saving 6 PER ITERATION -- but U must be pushed and
+* pulled around the call, which is 14 cycles PER CALL.
+* ★★★★★ AND THE ITERATION COUNT IS ~1.5, NOT ~10. The oracle walks **1.8 bytes per
+* skip_instructions_until call** over 110 calls a cycle [opcount_ref.py, KQ1 room 1, cycles
+* 11-120, invariant]: nearly every call finds its marker on the first or second opcode. So the
+* hoist would cost ~14 to save ~9. **It is a LOSS and it was estimated at 0.95% of a cycle.**
+* ★★★ Fourth instance: an inner-loop cycle count is not a per-unit cost, and a per-iteration
+* saving is worth nothing until the iterations are counted [P6.98, AD-131's neighbours].
+* ★★ What WOULD pay here is inlining the operand step to drop the jsr/rts (12 cyc) -- not costed,
+* not in this task's approved list, recorded as a follow-up rather than taken quietly.
 vm_su_lp:       ldd     vm_ip
                 cmpd    vm_codelen
                 bhs     vm_su_out               ; UNSIGNED [L-40]
@@ -655,6 +756,15 @@ vm_skip_instruction:
 * ★★ Markers are >= 20 and still land here. VM_SAID_OP is $0E and is still reached below.
 * ★ Second withdrawal from the same account as AD-97's VMTEST_TAB, and taken for the same reason:
 * p3b needed room for a clock calibration and had two bytes.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ `abx` IS THE 6809's TABLE INDEX AND THIS ROUTINE WAS BUILDING D INSTEAD [T-P0-156 §4C].
+* The old body read the opcode into A, then cleared A, then `tfr a,b`, then RE-READ vm_op into B --
+* so the `tfr` was dead the instant the `ldb` followed it -- then indexed with `leax d,x` (8 cyc)
+* where `abx` (3 cyc) does the same job for a byte index. **18 cycles, and this routine is called
+* about 280 times a cycle** (168 test opcodes step their own operands, plus ~110 from vm_su_lp).
+* ★★★ The fix is to hold the opcode in B FROM THE START: `cmpb #imm` costs exactly what `cmpa
+* #imm` costs, so the two guards are free of it, and A is cleared once at the point D is needed.
+                ifdef   VM_SKIP_SLOW
                 lda     vm_op
                 cmpa    #VMTEST_MAX
                 bhs     vm_si_out               ; out of range, or a marker: no operands either way
@@ -669,6 +779,21 @@ vm_skip_instruction:
                 ldb     ,x
                 addd    vm_ip
                 std     vm_ip
+                else
+                ldb     vm_op
+                cmpb    #VMTEST_MAX
+                bhs     vm_si_out               ; out of range, or a marker: no operands either way
+                cmpb    #VM_SAID_OP
+                beq     vm_si_said
+                ldx     #VMTEST_ARGS
+                abx                             ; ★ B + X -> X, 3 cycles, no A involved
+                ldb     ,x                      ; the operand count
+                clra                            ; ★ only now is D wanted
+                addd    vm_ip
+                std     vm_ip
+                endc
+* ★★ vm_si_said clobbers both D and X, so neither arm owes it a register.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 vm_si_out:      rts
 
 * said: ip += code[ip] * 2 + 1
