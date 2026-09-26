@@ -54,6 +54,9 @@ local DLY3    = tonumber(os.getenv("S01_DLY3") or "0")
 -- ★★★★★ S-03: the 16-colour buffer is 30,720 B and is filled through a moving MMU window, so all-RAM
 -- is never entered and the vectors stay in ROM. See s01_fill16.
 local BIG     = tonumber(os.getenv("S01_BIG") or "0")
+-- ★★★★★ S-04 §4A(1): shift the row numbering. If the repeats move with it they are an artefact of
+-- the byte VALUE; if they stay they are tied to a screen POSITION and are real.
+local ROWBASE = tonumber(os.getenv("S01_ROWBASE") or "0")
 
 -- ★★ The delay sweep. 8 CPU cycles per iteration; a frame is ~29,830 cycles at 1.79 MHz, of which
 -- ~8,000 is vertical blank. So 0..3600 in steps covers blank plus the whole active field.
@@ -92,7 +95,7 @@ end
 for _, n in ipairs({"entry", "s01_mode", "s01_colA", "s01_colB", "s01_dly", "s01_frames",
                     "s01_fillm", "s01_fillb", "s01_vrest", "s01_vresb", "s01_refill",
                     "s01_col0", "s01_col1", "s01_col2", "s01_col3", "s01_palreg",
-                    "s01_dly2", "s01_dly3", "s01_big"}) do
+                    "s01_dly2", "s01_dly3", "s01_big", "s01_rowbase"}) do
     if not SYM[n] then print("★★★ map lacks " .. n); m:exit(); return end
 end
 
@@ -269,6 +272,32 @@ local function row_sig(buf, y)
     return buf:sub(o, o + 63)          -- 16 raster columns x 4 bytes
 end
 
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+-- ★★★★★ S-04 §4A(2): A SECOND READING THAT CANNOT ALIAS THE WAY THE SIGNATURE CAN.
+-- The signature compares 16 raster columns as an opaque blob. This reads the TWO PIXELS of the row's
+-- first byte explicitly -- at 320-wide, pixel 0 is columns 0-1 and pixel 1 is columns 2-3 -- and
+-- reports them as a pair. **Two readings of the same frame that cannot fail together is the point**
+-- [§3(2): the signature is the suspect and must not be used to test itself].
+-- ★★★ It is deliberately narrower than the signature: 2 pixels, at named positions, in the 320-wide
+-- reading. So it is only valid ABOVE the boundary -- which is exactly where the repeat lives.
+local function pixpair_runs(buf, y0, y1)
+    local runs, prev, n = {}, nil, 0
+    for y = y0, y1 do
+        local o = y * SW * 4 + 1
+        local a = buf:sub(o + 1 * 4, o + 1 * 4 + 3)   -- column 1 = pixel 0 (the high nibble)
+        local b = buf:sub(o + 3 * 4, o + 3 * 4 + 3)   -- column 3 = pixel 1 (the low nibble)
+        local s = a .. b
+        if s == prev then n = n + 1
+        else
+            if prev ~= nil then runs[#runs+1] = n end
+            prev, n = s, 1
+        end
+    end
+    if prev ~= nil then runs[#runs+1] = n end
+    return runs
+end
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+
 local function sig_runs(buf, y0, y1)
     local runs, prev, n = {}, nil, 0
     for y = y0, y1 do
@@ -330,6 +359,7 @@ _G._s01 = emu.add_machine_frame_notifier(function()
             else           wr16(SYM.s01_voff, VOFF);     wr16(SYM.s01_dly, SWEEP[1]) end
             -- ★★★★ §4C's two extra splits. Zero means one split, exactly as S-01 ran.
             prog:write_u8(SYM.s01_big, BIG)
+            prog:write_u8(SYM.s01_rowbase, ROWBASE)
             wr16(SYM.s01_dly2, DLY2)
             wr16(SYM.s01_dly3, DLY3)
             -- ═══════════════════════════════════════════════════════════════════════════════
@@ -353,7 +383,19 @@ _G._s01 = emu.add_machine_frame_notifier(function()
                 prog:write_u8(SYM.s01_col1, 0x09)    -- blue
                 prog:write_u8(SYM.s01_col2, 0x12)    -- green
                 prog:write_u8(SYM.s01_col3, 0x3F)    -- white
-                prog:write_u8(SYM.s01_palreg, 0xB8)
+                -- ═══════════════════════════════════════════════════════════════════════════
+                -- ★★★★★ THE FLIP TARGETS THE BORDER ($FF9A), NOT A PALETTE INDEX, AND AT 16 COLOURS
+                -- THAT IS NOT OPTIONAL. S-02 pointed it at $FFB8 because 4-colour mode displays only
+                -- indices 0-3, so index 8 was invisible. **At 16 colours EVERY index is displayed** --
+                -- so the flip was overwriting index 8 with $3F, which equals pal16[7], and two indices
+                -- rendered alike. That collision IS the entire "16-colour row repeat".
+                -- ★★★★ MAME records the border per scanline too -- `update_value(&m_scanlines[..]
+                -- .m_border, border)` -- so flipping $FF9A keeps the bitmap current without touching
+                -- any picture colour. **The border is outside the decoded area, so it cannot alias.**
+                -- ★★★ This is why editing s01_pal16 changed nothing: the colliding entry was never a
+                -- pal16 entry. **The table was innocent and the flip was the culprit.**
+                local PALREG = (BIG ~= 0) and 0x9A or 0xB8
+                prog:write_u8(SYM.s01_palreg, PALREG)
                 prog:write_u8(SYM.s01_colA, 0x3F)
                 prog:write_u8(SYM.s01_colB, 0x00)
             end
@@ -537,6 +579,51 @@ _G._s01 = emu.add_machine_frame_notifier(function()
         w("   -> runs of 1: %d   runs of 2: %d   anything else: %d%s",
           ones, twos, other,
           other > 0 and ("  [" .. table.concat(obad, ",") .. "]") or "")
+        -- ★★★★★ §4A(2): the SECOND, independent reading of the SAME frame. If it disagrees with the
+        -- signature, neither is trusted (§6's first trigger) and the instrument needs work before the
+        -- question can be asked at all.
+        do
+            local pruns = pixpair_runs(buf, 25, 217)
+            local p1, p2, pother = 0, 0, 0
+            for _, n in ipairs(pruns) do
+                if n == 1 then p1 = p1 + 1 elseif n == 2 then p2 = p2 + 1 else pother = pother + 1 end
+            end
+            w("   §4A(2) pixel-pair reading (cols 1 and 3, the 320-wide reading):")
+            w("      %s", table.concat(pruns, ","))
+            w("      -> runs of 1: %d   runs of 2: %d   anything else: %d", p1, p2, pother)
+            w("      %s", (p2 == twos and pother == other)
+                 and "★ AGREES with the signature reading"
+                 or  "★★★ DISAGREES with the signature reading -- neither may be trusted [§6]")
+            -- ═══════════════════════════════════════════════════════════════════════════════
+            -- ★★★★★ THE 16 RENDERED COLOURS, AND A DUPLICATE CHECK. The repeats track the byte value
+            -- mod 16 -- low nibble 6 -- which is a property of the DATA, not of screen position. The
+            -- only way two rows differing in the low nibble can look identical is if two PALETTE
+            -- INDICES RENDER ALIKE. ★★★★ With the row-number fill, rows 0..15 have high nibble 0, so
+            -- pixel 1 (column 3) of the first sixteen displayed rows IS index 0..15 in order.
+            -- ★★★ This is the clinching datum: if there is a duplicate, the repeat is my palette and
+            -- the display is clean. S-03 set 16 distinct palette BYTES and never checked that they
+            -- render distinctly -- **distinct inputs are not distinct outputs.**
+            local seen, dups = {}, {}
+            local cols = {}
+            for i = 0, 15 do
+                local y = 25 + i
+                local o = y * SW * 4 + 1 + 3 * 4       -- column 3 = pixel 1 = the low nibble
+                local v = buf:sub(o, o + 3)
+                local hex = string.format("%02X%02X%02X", v:byte(3) or 0, v:byte(2) or 0, v:byte(1) or 0)
+                cols[#cols+1] = string.format("%d=%s", i, hex)
+                if seen[v] ~= nil then dups[#dups+1] = string.format("%d==%d", seen[v], i) end
+                seen[v] = i
+            end
+            w("   rendered palette (index=RRGGBB, read from rows 25..40 pixel 1):")
+            w("      %s", table.concat(cols, " "))
+            if #dups > 0 then
+                w("   ★★★★★ DUPLICATE RENDERED COLOURS: %s", table.concat(dups, " "))
+                w("      -> the 'row repeat' is MY PALETTE, not the display. Two indices render alike,")
+                w("         so two source rows differing only in that nibble are indistinguishable.")
+            else
+                w("   ★ all 16 indices render distinctly -- a palette collision is NOT the explanation")
+            end
+        end
         -- ═══════════════════════════════════════════════════════════════════════════════════
         -- ★★★ and the transition profile of the SAME frame, to locate the boundary independently
         local pr = {}

@@ -46,7 +46,10 @@ param(
   [int]   $Dly2    = 0,
   [int]   $Dly3    = 0,
   # ★★★★★ -Big: the 16-colour buffer (30,720 B) via a moving window -- S-03 §4A.
-  [switch]$Big
+  [switch]$Big,
+  # ★★★★★ -RowBase: S-04 §4A(1). Shifts the row numbering to separate a value artefact from a
+  # position artefact. 0 is the S-03 baseline.
+  [int]   $RowBase = 0
 )
 $ErrorActionPreference = "Stop"
 $env:PATH = "C:\Users\jayse\DEV\cmd;C:\Users\jayse\DEV\mingw64\opt\bin;" + $env:PATH
@@ -80,6 +83,7 @@ $env:S01_VOFF  = "$Voff"
 $env:S01_DLY2  = "$Dly2"
 $env:S01_DLY3  = "$Dly3"
 $env:S01_BIG   = $(if ($Big) { "1" } else { "0" })
+$env:S01_ROWBASE = "$RowBase"
 if ($VSweep) { $env:S01_VSWEEP = "1" } else { Remove-Item env:S01_VSWEEP -ErrorAction SilentlyContinue }
 if ($RowMap) { $env:S01_ROWMAP = "1" } else { Remove-Item env:S01_ROWMAP -ErrorAction SilentlyContinue }
 if ($Eye) { $env:S01_EYE = "1"; $env:S01_SWEEP = "$Dly" }

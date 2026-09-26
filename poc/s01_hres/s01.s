@@ -274,7 +274,17 @@ s01_fill16:
                 sta     $FFA3
                 ldx     #$4000
                 ldu     #30720                  ; bytes remaining
-                clrb                            ; B = source row number
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE ROW NUMBERING STARTS AT A HOST-POKED VALUE, AND THAT IS S-04's WHOLE TEST [§4A(1)].
+* The repeat's period is ~16 rows, and at 4 bpp 16 is exactly the period of a byte's HIGH NIBBLE --
+* so the hypothesis is that the SIGNATURE collides at a high-nibble boundary and reports a repeat the
+* display does not have.
+* ★★★★★ **Shifting the numbering separates the two possibilities with one poke.** If the repeats are
+* an artefact of the byte VALUE they move with s01_rowbase; if they are tied to a screen POSITION they
+* stay put. ★★★ No new fill mode, no new decode, and nothing that could alias in a new way -- which
+* §3(2) warns against, since the signature is the suspect and must not be used to test itself.
+                ldb     s01_rowbase             ; ★ B = the FIRST row's value, normally 0
+* ═══════════════════════════════════════════════════════════════════════════════════════════
                 ldy     #160                    ; bytes remaining in this row (160 B/row at $1E)
 * ★★★★★ THE MODE DECISION IS HOISTED OUT OF THE LOOP, and that is not tidiness -- it is why this runs
 * at all. The first version re-read s01_fillm AND s01_fillb on every one of 30,720 bytes: ~50 cycles a
@@ -528,10 +538,23 @@ s01_fillm:      fcb     0               ; 0 = constant s01_fillb, 1 = row N fill
 s01_fillb:      fcb     $55             ; the constant: $55 = flat index 1, $0F = a 4-pixel stripe
 s01_refill:     fcb     0               ; ★ host sets to 1; the guest refills and clears it (an ack)
 s01_big:        fcb     0               ; ★ 0 = 15,360 B (4-colour); 1 = 30,720 B (16-colour, S-03)
+s01_rowbase:    fcb     0               ; ★ S-04 §4A(1): the value the first source row is filled with
 * ★★★ Sixteen DISTINCT CoCo3 palette bytes, so no two indices can render as the same colour. That is
 * a requirement of the row-signature measurement, not decoration -- see the note at the palette init.
+* ★★★★★ AND "16 DISTINCT BYTES" IS NOT THE REQUIREMENT -- "16 DISTINCT RENDERED COLOURS" IS [S-04].
+* S-03 set sixteen distinct palette bytes and called the collision fixed. **$3F and $07 both render as
+* FFFFFF**, so two source rows differing only in that nibble were indistinguishable and read as a
+* repeated row -- which is the entire "16-colour row repeat" this spike existed to explain.
+* ★★★★ `$07` is replaced by `$3C`, and the driver now DUMPS THE SIXTEEN RENDERED COLOURS AND CHECKS
+* FOR DUPLICATES on every row-map run, so the property that is actually needed is the one verified.
+* ★★★ **Distinct inputs are not distinct outputs**, and the fix for the first collision addressed the
+* cause I had identified rather than the property I needed.
+* ★★★ MAME's coco3 RGB mapping, DEDUCED from the rendered dump rather than assumed: $09 renders pure
+* blue at maximum and $12 pure green, which fits R = bit5*2 + bit2, G = bit4*2 + bit1, B = bit3*2 + bit0.
+* ★★ Under it the eight "maximum" primaries are $00,$09,$12,$1B,$24,$2D,$36,$3F and they are confirmed
+* distinct in the dump; `$01` gives (0,0,1) which collides with nothing.
 s01_pal16:      fcb     $00,$09,$12,$1B,$24,$2D,$36,$3F
-                fcb     $07,$0E,$15,$1C,$23,$2A,$31,$38
+                fcb     $01,$0E,$15,$1C,$23,$2A,$31,$38
 s01_voff:       fdb     S01_VOFF        ; ★ $FF9D/$FF9E -- physical address >> 3; host-poked and swept
 s01_dly:        fdb     0               ; delay iterations after VBORD, 8 CPU cycles each
 s01_dly2:       fdb     0               ; ★ 0 = one split. Otherwise: back to WIDE after this delay

@@ -85,6 +85,78 @@ numeric and one human, of the same frame.**
 
 ---
 
+# S-04 — Is the row repeat real, or the instrument?
+
+★★★★★ **THE INSTRUMENT. The 16-colour mode is CLEAN and matches 4 colours exactly.**
+
+```
+BEFORE (S-03):  runs of 1: 175   runs of 2: 9   <- the "repeat"
+AFTER  (S-04):  runs of 1: 191   runs of 2: 1   <- identical to the 4-colour baseline
+ 4-colour ref:  runs of 1: 191   runs of 2: 1
+```
+★★ The lone remaining "2" is the final scanline, where 193 active scanlines read slightly past the
+buffer — the same edge 4 colours shows, not a pattern.
+
+## The cause, and it was mine
+
+★★★★★ **The palette flip that keeps MAME's bitmap current was pointed at `$FFB8` — palette index 8.**
+S-02 chose it because **4-colour mode displays only indices 0-3, so index 8 was invisible.** ★★★★★ **At
+16 colours EVERY index is displayed.** So the flip was overwriting index 8 with `$3F` twice a frame,
+`pal16[7]` is also `$3F`, and **two indices rendered identically** — making two source rows that differ
+only in that nibble indistinguishable, and reporting them as one repeated row.
+
+★★★★ **Fix: flip the BORDER (`$FF9A`) instead.** MAME records the border per scanline too
+(`update_value(&m_scanlines[..].m_border, border)`), so it keeps the bitmap current without touching any
+picture colour, **and the border is outside the decoded area so it cannot alias.**
+
+## How it was found, and the three wrong turns are the useful part
+
+★★★★★ **§4A(1) — shifting the row numbering — is what killed it, and it took one poke.** If the repeats
+were an artefact of the byte VALUE they would move with `s01_rowbase`; if they were tied to a screen
+POSITION they would stay:
+
+| `s01_rowbase` | first repeat at index | byte value there |
+|---|---|---|
+| 0 | 6 | **6** |
+| 4 | 2 | **6** |
+| 8 | 14 | **22** |
+
+★★★★★ **6, 6, 22 — all ≡ 6 (mod 16). The repeated rows are those whose LOW NIBBLE is 6**, which is a
+property of the data and cannot be a property of the raster. ★★★ §4A(2)'s independent pixel-pair reading
+agreed with the signature at every step, so §6's first trigger never fired and neither reading was the
+problem.
+
+★★★★ **Then the rendered-palette dump named it outright:**
+```
+0=0000FF 1=00FF00 2=00FFFF 3=FF0000 4=FF00FF 5=FFFF00 6=FFFFFF 7=FFFFFF ...
+★★★★★ DUPLICATE RENDERED COLOURS: 6==7
+```
+
+★★★★★ **THREE WRONG TURNS, AND THEY ARE WORTH MORE THAN THE ANSWER:**
+
+1. ★★★★★ **S-03 "fixed" a palette collision by setting 16 distinct palette BYTES and never checked that
+   they render distinctly.** ★★★★ **Distinct inputs are not distinct outputs.** The fix addressed the
+   cause I had identified rather than **the property I actually needed**, and it left the defect in place
+   while reading as closed.
+2. ★★★★ **I then edited `s01_pal16` twice and the dump did not change.** ★★★ That was the signal the
+   colliding entry was **never a pal16 entry at all** — it was the flip register — and I should have read
+   "my edit changed nothing" as evidence rather than trying a third value.
+3. ★★★ **My byte→RGB arithmetic was wrong twice** before the dump let me derive the real mapping from
+   observed data (`$09` → pure blue max, `$12` → pure green max, so R = bit5·2+bit2, G = bit4·2+bit1,
+   B = bit3·2+bit0). ★★ **The dump is what made it derivable**; predicting it was what kept failing.
+
+## ★★★★★ WITHDRAWN: S-03 §7.3's hypothesis about the port's display
+
+**S-03 raised the possibility that MAME duplicates a scanline in `$1E` — the port's own display mode —
+and that every byte gate would be blind to it because it compares the plane rather than the raster.**
+
+★★★★★ **That hypothesis is WITHDRAWN. There is no row duplication in `$1E`.** ★★★★ It was an artefact of
+a flip register that is invisible at 4 colours and displayed at 16, and **it says nothing about the port,
+whose display this spike never touched.** ★★★ It was flagged as a hypothesis with a cheap test rather
+than as a finding, which is the only reason it cost a paragraph instead of a task.
+
+---
+
 # S-03 — The 16-colour pair, and stage 2
 
 ★★★★★ **STOPPED AT A §6 TRIGGER. The 16-colour pair SPLITS exactly as the 4-colour pair does, but its
