@@ -156,9 +156,46 @@ too.** ★★★★★ **But at 16 colours ONE SOURCE ROW IS DISPLAYED TWICE EVE
 is not.** The period is exact and the 4-colour control with the *same instrument* is unbroken over 171
 rows, so **this is not an instrument artefact of the signature method.**
 
-★★★ **It is ~6.7% of vertical stretch (16/15)**, which is the shape of a lines-per-row or field-length
-interaction rather than anything about the counter. ★★ `$FF98 = $80` (LPR = 000) is written identically
-in both depths, so LPR as *written* is not the differentiator. **Not diagnosed further — §6 says stop.**
+### ★★★★★ ISOLATED: the repeat has NOTHING to do with the split
+
+**Run with NO HRES change at all — `VresT = VresB`, so the mode never changes mid-frame:**
+
+```
+16 colours ($1E only):  runs of 1: 175   runs of 2: 9    <- same periodic positions
+ 4 colours ($15 only):  runs of 1: 191   runs of 2: 1    <- essentially clean
+```
+
+★★★★★ **So it is a property of the 320x192x16 mode itself, not of the mid-frame write.** ★★★ And the
+fill is not at fault: a host-side readback confirms **every source row 0..100 holds its own number**
+(`r0=$00 r1=$01 ... r30=$1E r31=$1F r32=$20 r33=$21`), so the repeat is on the display side.
+★★ The 4-colour lone "2" is the last scanline, where 193 active scanlines at 80 B/row read slightly
+past a 15,360-byte buffer — an edge, not a pattern.
+
+★★★★ **Where they fall matters**: the repeats occur in roughly the **first 128 scanlines** and then stop,
+about **9 occurrences**, so 193 scanlines display ~184 source rows. **A ~4-5% vertical compression in
+the upper two thirds of the frame.**
+
+### What it is not, and what was checked
+
+★★★ MAME's mechanism is `m_video_position += pitch` gated on `++m_line_in_row >= get_lines_per_row()`,
+and **`get_lines_per_row()` returns 1 for LPR = 000** (`$FF98 & 0x07` cases 0x00 and 0x01 both give 1).
+`$FF98 = $80` is written identically at both depths, **so LPR as written is not the differentiator** and
+the simple "one row, many scanlines" path does not explain a 16/15 ratio. ★★ `$FF99`'s LPF field
+(bits 6-5) is 00 in both `$15` and `$1E`. **Not diagnosed further — §6 says stop and report.**
+
+### ★★★★★ AND A CONSEQUENCE THAT REACHES PAST THIS SPIKE — stated as a HYPOTHESIS, not a claim
+
+★★★★★ **`$1E` is the mode the port uses for its main display TODAY** [`hal.inc:328`,
+`GFX_MODE_320x192x16`]. If MAME shows one framebuffer row twice, periodically, in that mode, then **the
+port's rendered picture is slightly vertically compressed and its byte gates cannot see it** — because
+they compare the FRAMEBUFFER, and *"a readback path and a display path are different paths"*
+[idiom 19j; AD-114 was exactly a case where both planes were byte-identical and never presented].
+
+★★★★ **This is a hypothesis with a cheap test and it is NOT this spike's to run**: point the same
+row-signature instrument at the port's own display, or compare a picture-gate framebuffer against the
+rendered screen row by row. ★★★ **If it holds, it is a finding about every eye gate this project has
+passed.** ★★ If it does not, then something about this spike's configuration provokes it and that is
+worth knowing too.
 
 ## ★★★★ AND A CAVEAT ABOUT THIS INSTRUMENT, which must be stated with its result
 

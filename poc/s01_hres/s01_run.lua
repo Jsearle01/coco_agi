@@ -542,6 +542,38 @@ _G._s01 = emu.add_machine_frame_notifier(function()
         local pr = {}
         for _, e in ipairs(row_profile(buf)) do pr[#pr+1] = string.format("%d:%d", e[1], e[2]) end
         w("   transition profile (same frame): %s", table.concat(pr, "  "))
+        -- ═══════════════════════════════════════════════════════════════════════════════════
+        -- ★★★★★ VERIFY THE BUFFER BEFORE BLAMING THE DISPLAY. The 16-colour run shows one source row
+        -- repeated every 16 scanlines -- a 16/15 ratio -- and that is equally consistent with the FILL
+        -- writing a value twice as with the display repeating a row. **They call for opposite fixes.**
+        -- ★★★★ Row N should start at byte N*stride and hold the value N. Blocks $3A/$3B are mapped
+        -- after the fill restores them, so rows 0..~100 are readable at logical $4000 + N*stride.
+        -- ★★★ This is the same discipline as S-01's framebuffer readback, which is what proved the fill
+        -- correct and sent the search to the display path instead of round in circles.
+        do
+            local stride = (BIG ~= 0) and 160 or 80
+            local nmax = (0x8000 - 0x4000) // stride - 1
+            local bad, shown = {}, {}
+            for n = 0, math.min(nmax, 100) do
+                local v = prog:read_u8(0x4000 + n * stride)
+                if v ~= (n % 256) then
+                    if #bad < 10 then bad[#bad+1] = string.format("row%d=$%02X", n, v) end
+                end
+                if n < 6 or (n >= 30 and n < 34) then
+                    shown[#shown+1] = string.format("r%d=$%02X", n, v)
+                end
+            end
+            w("   framebuffer rows (stride %d): %s", stride, table.concat(shown, " "))
+            if #bad == 0 then
+                w("   ★ FILL VERIFIED over rows 0..%d -- every row holds its own number, so any",
+                  math.min(nmax, 100))
+                w("     repeat on screen is the DISPLAY's, not the fill's")
+            else
+                w("   ★★★ FILL IS WRONG: %s -- the screen result says nothing about the GIME",
+                  table.concat(bad, " "))
+            end
+        end
+        -- ═══════════════════════════════════════════════════════════════════════════════════
         w("   guest frames %d", rd16(SYM.s01_frames))
         local fh = io.open(OUT .. "/s02_rowmap.txt", "w")
         if fh then fh:write(table.concat(log, "\n") .. "\n"); fh:close() end
