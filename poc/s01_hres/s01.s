@@ -471,8 +471,38 @@ s01_palwr:
 * ★★★ The counter is 8-bit and wraps at 256, which is safe because the frame is ~262 lines and every
 * threshold is above 6: after the wrap the count reaches 6, so no threshold is re-triggered.
 * ★★ FIRQ stacks only PC and CC, so everything touched is pushed -- A, B and X here.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE FRAME RESET IS THE HANDLER'S NOW, NOT THE POLLED LOOP'S. The zero point used to be set
+* by the main loop when its $FF92 poll succeeded -- after a fill check, a tick and a liveness
+* update -- so it landed late by a VARYING amount every frame. A drifting zero point moves every
+* boundary every frame, which smears a 300-frame sample to nothing. -M3Own did not touch this,
+* because the loop still reset hcount and hptr even once it stopped writing the mode.
+* ★★★★★ BOTH SOURCES ARE NOW CITED RATHER THAN SWEPT [ref: SockmasterGime.md, $FF93 FIRQENR]:
+* bit 4 HBORD "generated on the falling edge of HSYNC" -- once per scanline -- and bit 3 VBORD
+* "on the falling edge of VSYNC" -- once per frame. Measured rates match the document exactly:
+* $10 gives 260.32/frame against a ~262-line frame, $08 gives 1.00, $20 (TMR) gives 0.06 because
+* the timer register is never written and $000 stops it, and $01/$02/$04 give zero.
+* ★★★★ Reading $FF93 "tells you which interrupts came in and acknowledges and resets the interrupt
+* source", so ONE read at the top serves as both the status and the ack for both sources. The old
+* handler's read at the BOTTOM cannot work here: the status is needed to tell them apart.
+* ★★★ This is also the shape the port wants. The interpreter's main loop will be busy doing real
+* work and cannot be trusted to poll on time; the raster program must not depend on it.
 s01_firq:
                 pshs    a,b,x
+                lda     $FF93                   ; status AND ack, both sources, one read
+                bita    #$08                    ; VBORD -- the frame boundary
+                beq     s01_fq_hb
+                clr     s01_hcount
+                ldx     #s01_htab
+                stx     s01_hptr
+                lda     #$80
+                ldb     s01_vrest
+                std     $FF98                   ; the top-of-frame mode, placed by the raster
+                lbra    s01_fq_ack
+s01_fq_hb:
+                bita    #$10                    ; HBORD -- one per scanline
+                beq     s01_fq_ack
+* ═══════════════════════════════════════════════════════════════════════════════════════════
                 inc     s01_hcount
                 ldx     s01_hptr
                 lda     ,x                      ; the next scanline to act on
@@ -514,7 +544,9 @@ s01_fq_ack:
                 bne     s01_fq_ack2
                 inc     s01_fcount
 s01_fq_ack2:
-                lda     $FF93                   ; ack the GIME FIRQ source
+* ★★★★ The ack moved to the TOP of the handler, where its value is needed to tell VBORD from HBORD.
+* Reading $FF93 a second time here would ack a source that arrived DURING the handler and discard
+* the scanline it was announcing, so it is gone rather than merely moved.
                 puls    a,b,x
                 rti                             ; ★ RTI, not `puls pc` -- FIRQ's return is an RTI
 * ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -554,6 +586,11 @@ s01_norefill:
                 lda     s01_mode
                 cmpa    #3
                 lbne    s01_not_m3
+* ★★★★★ m3own NOW MEANS "THE HANDLER OWNS THE RASTER ENTIRELY" -- the count, the pointer and the
+* top-of-frame mode. The loop touching ANY of them reintroduces the drifting zero point, and the
+* count reset was the half -M3Own originally missed.
+                lda     s01_m3own
+                lbne    s01_m3_noown
                 clr     s01_hcount
                 ldx     #s01_htab
                 stx     s01_hptr
@@ -569,8 +606,7 @@ s01_norefill:
 * ★★★★ m3own = 1: the raster table owns $FF98/$FF99 outright and the loop never touches them, so
 * the table's FIRST entry sets the top-of-frame mode. m3own = 0 keeps the old path as the control,
 * because a fix believed without its red arm is SS2W's whole complaint.
-                lda     s01_m3own
-                bne     s01_m3_noown
+* ★★ The m3own test above already branched past this, so it is not re-tested here.
                 lda     #$80
                 ldb     s01_vrest
                 std     $FF98                   ; wide, for the top of the frame
