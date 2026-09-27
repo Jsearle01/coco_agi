@@ -73,6 +73,8 @@ local BXOR    = tonumber(os.getenv("S01_BXOR") or "63")
 local BSET    = tonumber(os.getenv("S01_BSET") or "0")
 -- ★★★★★ Print every row of the screen for four consecutive frames, run-length encoded.
 local FULLDUMP = (os.getenv("S01_FULLDUMP") or "") ~= ""
+-- ★★★★★ 1 = the raster table owns $FF98/$FF99 and mode 3's loop never writes them.
+local M3OWN   = tonumber(os.getenv("S01_M3OWN") or "0")
 local BCOL    = tonumber(os.getenv("S01_BCOL") or "36")
 
 -- ★★ The delay sweep. 8 CPU cycles per iteration; a frame is ~29,830 cycles at 1.79 MHz, of which
@@ -114,7 +116,8 @@ for _, n in ipairs({"entry", "s01_mode", "s01_colA", "s01_colB", "s01_dly", "s01
                     "s01_col0", "s01_col1", "s01_col2", "s01_col3", "s01_palreg",
                     "s01_dly2", "s01_dly3", "s01_big", "s01_rowbase",
                     "s01_firqon", "s01_firqbit", "s01_fvec", "s01_fcount", "s01_firq",
-                    "s01_htab", "s01_hcount", "s01_bxor", "s01_bset", "s01_bcol", "s01_hwrite"}) do
+                    "s01_htab", "s01_hcount", "s01_bxor", "s01_bset", "s01_bcol", "s01_hwrite",
+                    "s01_m3own"}) do
     if not SYM[n] then print("★★★ map lacks " .. n); m:exit(); return end
 end
 
@@ -145,6 +148,29 @@ end
 -- ★★ Transitions are returned as (y, from, to) so the three expected regions (border, top band,
 -- bottom band) are distinguishable from the two that a same-colour bottom band would give.
 local SW, SH = scr.width, scr.height
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+-- ★★★★★ WHERE DOES THE VISIBLE AREA ACTUALLY START? Jay, on the arm that writes $FF9A: "it's my
+-- understanding that the border color register changes both borders to the designated color. i
+-- don't think you can color the top border then change the color for the bottom border and expect
+-- the top order not to change color also."
+-- ★★★★★ He is right, and it is the stronger form of the correction: $FF9A is ONE register for the
+-- whole border, so top and bottom must always match. The full-height dump read y0-23 as black
+-- while y216-237 was red, which is not merely unreliable -- IT IS A STATE THE HARDWARE CANNOT
+-- PRODUCE. His eye saw both red, and the eye is tier 1 [SS2].
+-- ★★★★ And it invalidates what was built on it: "y24-215 is exactly 192 rows" was the evidence
+-- that y0-23 was the top border, so the region map -- and the reading of the fixed y106
+-- transition -- rests on a premise the hardware contradicts. Hence this: ask MAME for the
+-- geometry instead of inferring it from row counts.
+do
+    local va = scr.visible_area
+    if type(va) == "table" then
+        w("  screen: %dx%d  visible x%d-%d y%d-%d", SW, SH,
+          va.x0 or -1, va.x1 or -1, va.y0 or -1, va.y1 or -1)
+    else
+        w("  screen: %dx%d  visible_area not a table (%s)", SW, SH, type(va))
+    end
+end
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
 
 -- ═══════════════════════════════════════════════════════════════════════════════════════════
 -- ★★★★★ STAGE 1 NEEDS A DIFFERENT MEASUREMENT AND STAGE 0's WOULD HAVE REPORTED NOTHING. A
@@ -432,6 +458,7 @@ _G._s01 = emu.add_machine_frame_notifier(function()
             -- ★★★★ Init-consumed, so it goes here, before PC is set -- S-02's race, not repeated.
             prog:write_u8(SYM.s01_bset, BSET)
             prog:write_u8(SYM.s01_bcol, BCOL)
+            prog:write_u8(SYM.s01_m3own, M3OWN)
             if HTAB ~= "" then
                 -- ★★★★★ THE PARSE WAS "(%d+):(%d+)" -- DECIMAL ONLY -- while every other parameter in
                 -- this harness is passed as hex and read through tonumber, which takes 0x. So

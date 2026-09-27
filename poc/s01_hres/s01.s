@@ -557,9 +557,25 @@ s01_norefill:
                 clr     s01_hcount
                 ldx     #s01_htab
                 stx     s01_hptr
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE LOOP'S OWN MODE WRITE IS THE SUSPECT, AND s01_m3own MAKES IT A CONTROL. The busy-wait
+* arm guarantees ordering because the loop does the waiting itself and then writes. Here the loop
+* writes "the top of the frame" wide value from wherever in the frame it happens to be -- it does a
+* fill check, a tick and a liveness update -- so it can land AFTER the handler's mid-frame narrow
+* write and clobber it before the raster ever reaches those scanlines.
+* ★★★★★ That is the only hypothesis left that explains four handler lines rendering IDENTICALLY
+* while s01_hwrite proves the write executes 196 times in 197 frames: not the timing of the write,
+* but something undoing it.
+* ★★★★ m3own = 1: the raster table owns $FF98/$FF99 outright and the loop never touches them, so
+* the table's FIRST entry sets the top-of-frame mode. m3own = 0 keeps the old path as the control,
+* because a fix believed without its red arm is SS2W's whole complaint.
+                lda     s01_m3own
+                bne     s01_m3_noown
                 lda     #$80
                 ldb     s01_vrest
                 std     $FF98                   ; wide, for the top of the frame
+s01_m3_noown:
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ THIS WAS `eora #$3F` -- AN IMMEDIATE. s01_bxor existed as a data byte, the host poked it,
 * the readback confirmed it arrived as $00, and THE CODE NEVER READ IT. So -BXor 0 disabled
@@ -742,6 +758,7 @@ s01_hcount:     fcb     0               ; scanlines since VBORD; 8-bit, wraps ha
 s01_bflip:      fcb     0               ; the border value, alternated each frame
 s01_hflip:      fcb     0               ; ★★★★ the handler's paired palette value, alternated per write
 s01_hwrite:     fcb     0               ; ★★★★★ times the handler's mode write actually executed
+s01_m3own:      fcb     0               ; ★★★★★ 1 = the raster table owns $FF98/$FF99; the loop never writes
 s01_bxor:       fcb     $3F             ; ★ the flip mask; 0 = no border flip at all (see mode 3)
 * ★★★ Sixteen DISTINCT CoCo3 palette bytes, so no two indices can render as the same colour. That is
 * a requirement of the row-signature measurement, not decoration -- see the note at the palette init.
