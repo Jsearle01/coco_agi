@@ -886,3 +886,57 @@ that was wrong.**
 written.** Everything the spike touches is below `$8000` and therefore RAM under every map, while
 all-RAM would move the 6809's vectors into RAM — and an NMI through a garbage vector would look
 exactly like "stage 0 failed", the false negative §2 exists to prevent.
+
+---
+
+## S-05 §8 — what stands, and the four claims withdrawn
+
+★★★★★ **WITHDRAWN: "mode 3 renders nothing the guest does" and "every mode-3 measurement is
+void"** (commit `61afeeb`'s subject asserts both). They rested on stage 2 and stage 3 not
+responding to `-FillB`, read as "the screen is not the guest's framebuffer".
+
+★★★★★ **The discriminator was invalid, and the S-03 build proves it.** Checked out at `0f37499` —
+the commit whose stage 2 Jay eye-gated — stage 2 does not respond to `-FillB` **either**:
+4-colour gives transitions `[24,77,94,216]` for `FillB` 85 and 15 alike, and 16-colour gives
+`[24,106,107,109,216]` for both. **So the non-response is original behaviour, not a fault.**
+
+★★★★★ **AND IT SETTLES STAGE 2 POSITIVELY.** 16-colour stage 2 at `0f37499` gives
+`[24,106,107,109,216]`, and HEAD's full-height dump gives `y24 / y106 / y107 / y109 / y216` —
+**the same picture.** Stage 2 at HEAD is byte-identical to the state Jay eye-gated, so it is
+correct, and **"stage 2 has regressed since S-03" is withdrawn as well.**
+
+★★★★ **Withdrawn with them: the inference from palette indices.** "The bands are indices 2, 3 and
+15, and a `$0F` fill can only produce 0 and 15" assumed `-FillB` reaches the 16-colour moving-window
+fill unchanged. That assumption is what the S-03 comparison contradicts.
+
+### What the same comparison establishes
+
+★★★★ **Mode 3's picture IS stage 2's static picture** — the `y106/107/109` structure is the static
+16-colour framebuffer, present at S-03, not a boundary. So mode 3 renders correctly and **the raster
+program adds nothing to it.** That is a sharper statement of the defect than "renders nothing".
+
+★★★★★ **STILL STANDING, because it was measured by varying the TABLE and not the fill:** the
+boundary does not follow the raster program. Four handler lines (60, 88, 120, 150), three
+middle-entry lines × `-M3Own` on/off, and `-FirqBit $18` vs `$10` — **including an arm that cannot
+reset the count and should be visibly broken** — all render identically. The red control does not go
+red, and that remains the open defect.
+
+★★★ **Also standing:** the flicker fix (eye-gated — "it was steady", both borders red); the FIRQ
+source, now cited rather than swept [ref: `SockmasterGime.md`, `$FF93` FIRQENR — bit 5 TMR, bit 4
+HBORD on HSYNC's falling edge, bit 3 VBORD on VSYNC], with measured rates matching the document
+($10 = 260.32/frame, $08 = 1.00, $20 = 0.06, $01/$02/$04 = 0); and the handler executing 197 / 394 /
+591 writes for one / two / three entries.
+
+### The lesson, and it is the session's fifth of one kind
+
+★★★★★ **A discriminator must be shown to respond on a known-good build before its silence is read as
+a fault.** §2W says an instrument must be shown able to fail; this is the mirror image — **an
+instrument must be shown able to SUCCEED on a case known to be good**, or its null result indicts the
+subject rather than itself. Running `-FillB` against `0f37499` cost one command and would have
+prevented the void claim entirely.
+
+★★★ **And the S-03 header already carried the answer to the symptom I spent the day chasing:**
+*"the first stage-1 and static runs displayed a screen that CANNOT have been this framebuffer... the
+display was showing someone else's memory"*, fixed by pinning `$FFA0-$FFA7` and selecting MMU task 0
+via `$FF91` bit 0. §2H's third check — grep the prior record for the same subsystem before building
+on a characterisation — would have surfaced it.
