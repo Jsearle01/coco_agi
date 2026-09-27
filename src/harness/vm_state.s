@@ -218,8 +218,37 @@ fDidntMove_H    equ     fDidntMove/256          ; ★ $4000 -> $40; motion_wande
 * is the same shape of defect one layer up.
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ -DVM_ACCCOUNT -- HOW MANY ACCESSOR CALLS DOES A CYCLE MAKE? [T-P0-161 §4B].
+* ★★★★★ MEASURED, NOT DERIVED, AND THAT IS THE WHOLE POINT. P6.106 predicted a counter at 3.6% and
+* measured 0.21% -- 17x over -- because the estimate multiplied a per-site cost by 306 opcodes when
+* the site saw 22 commands. §1.4: count the ACTUAL calls before predicting anything, and do not
+* normalise by the opcode count. **90 call sites is a fact about the SOURCE, not about a cycle.**
+* ★★★★ WHY THE INCREMENT IS AT THE TOP OF EACH ROUTINE: `inc <extended>` touches CC and nothing
+* else -- not A, not B, not X -- and every accessor's LAST operation re-establishes CC for its
+* caller (`lda ,x` in getvar, `tsta` in getflag, `stb ,x` in setvar). So the flag cannot change what
+* a caller sees. **Checked by AC-4's nine-title byte identity on the counting arm, not asserted.**
+* ★★★ A MEASUREMENT ARM, NEVER SHIPPED: the four counters and their increments exist only under the
+* flag, and no shipped arm's flag set names it [p3b_arms_check.ps1]. This is P6.77's counting-ARM
+* answer rather than P6.106's guarded-counter one, because nothing here was ever unconditional.
+* ★★ The counters are cumulative and 16-bit; the host divides by the released-cycle count, exactly
+* as vm_sweep.lua does with vm_opcount.
+                ifdef   VM_ACCCOUNT
+vm_acc_gv       fdb     0               ; vm_getvar calls
+vm_acc_sv       fdb     0               ; vm_setvar calls
+vm_acc_gf       fdb     0               ; vm_getflag calls
+vm_acc_sf       fdb     0               ; vm_setflag calls
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+
 * vm_getvar: A = var number -> A = value.  ★ NO timer side effect here; see vm_get_timer_var.
 vm_getvar:
+                ifdef   VM_ACCCOUNT
+                inc     vm_acc_gv+1
+                bne     vm_gv_cnt
+                inc     vm_acc_gv
+vm_gv_cnt:
+                endc
                 ldx     #VM_VARS
                 pshs    b
                 tfr     a,b
@@ -230,6 +259,12 @@ vm_getvar:
 
 * vm_setvar: A = var number, B = value
 vm_setvar:
+                ifdef   VM_ACCCOUNT
+                inc     vm_acc_sv+1
+                bne     vm_sv_cnt
+                inc     vm_acc_sv
+vm_sv_cnt:
+                endc
                 ifdef   VM_VAR0DIAG
                 jsr     vm_v0_record
                 endc
@@ -357,6 +392,12 @@ vm_v0_out:      puls    cc,d,x,y,pc
 vm_bitmask      fcb     1,2,4,8,$10,$20,$40,$80
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 vm_getflag:
+                ifdef   VM_ACCCOUNT
+                inc     vm_acc_gf+1
+                bne     vm_gf_cnt
+                inc     vm_acc_gf
+vm_gf_cnt:
+                endc
                 pshs    b
                 tfr     a,b
                 andb    #7
@@ -385,8 +426,62 @@ vm_gf_got:      anda    ,s+
 vm_gf_out:      tsta
                 puls    b,pc
 
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ VMGETFLAG -- vm_getflag's BODY AS A MACRO, FOR THE FOUR HOT SITES [T-P0-161 §4C].
+* ★★★★★ MEASURED, AND THE SITE CHOICE IS THE MEASUREMENT'S: vm_getflag is 114.7 calls per cycle in
+* the castle -- HALF of all 235.1 accessor calls -- from SEVEN sites, four of them in vm_tests.s and
+* NONE in vm_cycle.s. **The dispatch expected vm_cycle.s's 38 sites to be the hot ones; they are the
+* coldest per site**, carrying only setvar (17.2/cycle across 43 sites) and setflag (33.8 across 26).
+* ★★★★ WHAT THE INLINE SAVES: `jsr` (8), the `puls b,pc` return (≈3) and the `pshs b`/`puls b` pair
+* the routine needs and a call site does not (≈9) = ~22 cycles a call. 114.7 x 22 = 2,523 CPU cycles
+* = 1.85% of `interpret`, 0.71% of a cycle. ~25 bytes a site against region A's 1,066.
+* ★★★★★ THE `pshs b` IS DROPPED AND THAT IS THE PART THAT NEEDS PROVING, NOT ASSERTING. All four
+* sites read `sta vm_testres` or `sta par_*` and never touch B; and after the test dispatch's
+* `jsr ,x` [vm_core.s:519] the caller reads vm_exitall and then vm_skip_instruction, which does its
+* OWN `ldb vm_op` from memory rather than consuming an incoming B.
+* ★★★★★ AND THE FAULT ARM IS **NOT** A DROPPED `pshs b`, WHICH AC-7 SUGGESTED AND WHICH CANNOT FAIL.
+* B is provably free at all four sites, so an arm that clobbers B changes nothing and the gate stays
+* green -- **an inert fault, the defect §2W exists to catch, and vm_core.s:246-249 records the last
+* time it was mine.** The same proof that makes the change safe makes that fault useless.
+* ★★★★ -DVM_GF_INLINE_FAULT DROPS ONE `lsra`, so the flag BYTE index is wrong and the inline reads a
+* different flag. That is what a mis-inlined body actually looks like -- an instruction lost in a
+* copy -- and the nine-title state diff can see it.
+* ★★★ ONE HOME, WHICH IS WHY IT IS A MACRO AND NOT FOUR COPIES [§2F]. This file's own note twenty
+* lines up rejects hand-inlining for exactly that reason -- *"sixty places for the layout to be
+* wrong"* -- and a macro is one place. It lives HERE, beside the routine it mirrors, and both
+* p3b_probe.s and vm_probe.s include vm_state.s before vm_tests.s.
+* ★★ The expansion is behaviour-identical to the routine: same instructions, same order, same CC on
+* exit via `tsta`. Checked by AC-4's nine-title byte identity, not by this comment.
+VMGETFLAG       macro
+                tfr     a,b
+                andb    #7
+                lsra
+                lsra
+                ifndef  VM_GF_INLINE_FAULT
+                lsra                            ; ★ AC-7 drops THIS one: wrong flag byte
+                endc
+                ldx     #VM_FLAGS
+                lda     a,x
+                pshs    a
+                ldx     #vm_bitmask
+                abx
+                lda     ,x
+                anda    ,s+
+                beq     vgf_\1
+                lda     #1
+vgf_\1
+                tsta
+                endm
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+
 * vm_setflag: A = flag number, B = 0 (clear) or non-zero (set)
 vm_setflag:
+                ifdef   VM_ACCCOUNT
+                inc     vm_acc_sf+1
+                bne     vm_sf_cnt
+                inc     vm_acc_sf
+vm_sf_cnt:
+                endc
                 pshs    a,b
                 tfr     a,b
                 andb    #7

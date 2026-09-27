@@ -71,9 +71,14 @@ vmtest_greater_v:
                 lbra    vm_tr_false
 
 * ── flags ─────────────────────────────────────────────────────────────────────────
+* ★★★★★ VMGETFLAG, NOT `jsr vm_getflag` [T-P0-161 §4C]. `isset` is the most executed test in the
+* corpus and vm_getflag is 114.7 calls a cycle in the castle -- half of all 235.1 accessor calls --
+* so these are the sites the measurement picked. B is dead from here to `rts` and the test
+* dispatch's caller does not consume it [vm_core.s:519-522], which is why the macro may skip the
+* save the routine cannot. **One home: the body lives in vm_state.s and is expanded, not copied.**
 vmtest_is_set:
                 jsr     vm_p0
-                jsr     vm_getflag
+                VMGETFLAG isset
                 sta     vm_testres
                 rts
 
@@ -82,7 +87,7 @@ vmtest_is_set:
 * many words, which is why the comment is here rather than trusted to be obvious.
 vmtest_is_set_v:
                 jsr     vm_v0
-                jsr     vm_getflag
+                VMGETFLAG issetv
                 sta     vm_testres
                 rts
 
@@ -230,13 +235,13 @@ vmtest_said:
                 addd    #1
                 std     vm_saidn
                 lda     #FLAG_SAID_ACCEPTED
-                jsr     vm_getflag
+                VMGETFLAG saidacc
                 sta     par_accepted
                 ifdef   VM_SAIDDIAG
                 sta     vm_sd_f4        ; ★ ON ENTRY -- par_said overwrites par_accepted on a match
                 endc
                 lda     #FLAG_ENTERED_CLI
-                jsr     vm_getflag
+                VMGETFLAG saidcli
                 sta     par_cli
                 ifdef   VM_SAIDDIAG
                 sta     vm_sd_f2

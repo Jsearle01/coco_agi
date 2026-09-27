@@ -1716,6 +1716,24 @@ _G._n = emu.add_machine_frame_notifier(function()
             end
             -- ═══════════════════════════════════════════════════════════════════════════
             w("    remaps total %d = %.2f per cycle", rd16(REMAPS), rd16(REMAPS)/NCYC)
+            -- ═══════════════════════════════════════════════════════════════════════════
+            -- ★★★★★ ACCESSOR CALLS PER CYCLE, under -DVM_ACCCOUNT [T-P0-161 §4B]. MEASURED, which
+            -- is the whole point: P6.106 predicted 3.6% from 16 cycles x 306 opcodes and measured
+            -- 0.21%, because the site saw 22 commands. 90 call sites is a fact about the SOURCE.
+            -- ★★★ IN THE SUMMARY, NOT IN A GATED DIAGNOSTIC -- the lesson twenty lines below this
+            -- one, where a counter existed in the guest and a reader existed in the host and
+            -- nothing ever printed it [T-P0-114].
+            -- ★★ Guarded on the SYMBOL, so an arm built without the flag prints nothing rather than
+            -- reading a stale address: the symbols file only carries these under -AccCount.
+            if SYM.vm_acc_gv then
+                local gv, sv = rd16(SYM.vm_acc_gv), rd16(SYM.vm_acc_sv)
+                local gf, sf = rd16(SYM.vm_acc_gf), rd16(SYM.vm_acc_sf)
+                w("    accessor calls: getvar %d setvar %d getflag %d setflag %d  TOTAL %d",
+                  gv, sv, gf, sf, gv + sv + gf + sf)
+                w("      per cycle:    getvar %.1f setvar %.1f getflag %.1f setflag %.1f  TOTAL %.1f",
+                  gv/NCYC, sv/NCYC, gf/NCYC, sf/NCYC, (gv + sv + gf + sf)/NCYC)
+            end
+            -- ═══════════════════════════════════════════════════════════════════════════
             -- ★★★★★ THE RESTORE, IN THE SUMMARY AND NOT IN A GATED DIAGNOSTIC [T-P0-114].
             -- The first version of this readout went beside the composite counters, which sit
             -- inside a diagnostic block that does not run on an ordinary sweep -- so the number

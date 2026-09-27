@@ -46,7 +46,19 @@ $PROBES = @(
   # ones that do, both probes keep their own map and simply gain the mapping call [§4A].
   # ★★★ Their gates were run green on the moved binaries BEFORE this re-pin: res 1,264/1,264 and
   # vm 9/9 with 0 divergent cycles of 600 each.
-  @{ n = "vm";   s = "src/harness/vm_probe.s";   f = @("-DHAL_GFX_MODE_SERVICE","-DHAL_SYS_FAST_CLOCK"); sz = 10140; sha = "67987995" },
+  # ★★★★★ RE-PINNED T-P0-161: 10,140 -> 10,229 B (+89), AND THE +89 IS TWO THINGS, WHICH IS WHY IT
+  # IS WRITTEN DOWN RATHER THAN ABSORBED.
+  #   +96  MINE: four VMGETFLAG expansions in vm_tests.s, which vm_probe.s includes. Verified before
+  #        re-pinning -- vm 9/9 with 0 divergent cycles of 600, both planes byte-identical over 120
+  #        cycles standing and moving, and the fault arm RED at 599 of 600 [-DVM_GF_INLINE_FAULT].
+  #   -7   PRE-EXISTING, CAUSE UNIDENTIFIED. P6.106 measured this probe at 10,133 B with AND without
+  #        that task's change -- byte-identical both ways -- so the drift predates T-P0-160 and was
+  #        reported rather than re-pinned. 10,133 + 96 = 10,229 exactly.
+  # ★★★★ THE -7 IS STILL OWED AN EXPLANATION. This pin now absorbs it, so the number can no longer
+  # be recovered by running the check -- it is recorded here so it does not vanish with the pin.
+  # ★★★ This file's own header describes the disease: "This check reported MOVED against a pin it
+  # could not reproduce, and no task ran it." Running it is what found the -7.
+  @{ n = "vm";   s = "src/harness/vm_probe.s";   f = @("-DHAL_GFX_MODE_SERVICE","-DHAL_SYS_FAST_CLOCK"); sz = 10229; sha = "B06DB7A6" },
   @{ n = "pic";  s = "src/harness/pic_probe.s";  f = @("-DHAL_GFX_MODE_SERVICE");                        sz = 0;    sha = "" },
   @{ n = "res";  s = "src/harness/res_probe.s";  f = @("-DHAL_GFX_MODE_SERVICE");                        sz = 0;    sha = "" },
   # ★★★★ PINNED AT T-P0-105, because this one MOVED and an on-disk baseline cannot notice that.

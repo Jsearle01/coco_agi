@@ -340,6 +340,10 @@ param(
   [switch]$NoRemap,
   [switch]$ViewFaultOneMap,
   [switch]$NoIrq,
+  # ★★★★★ -AccCount: count vm_getvar/setvar/getflag/setflag calls per cycle [T-P0-161 §4B].
+  # A MEASUREMENT arm -- never a shipped flag set. §1.4: the call count is measured, never derived
+  # from the 90 call sites and never normalised by the 306-opcode census.
+  [switch]$AccCount,
   [double]$Hold   = 3.0
 )
 $ErrorActionPreference = "Stop"
@@ -496,6 +500,7 @@ if ($RoomDrive) { $FLAGS += "-DP3B_ROOMDRIVE" }
 # and the vector stubs at $FEF0 are what P3_REGIONB_END reserves for.
 if ($Combined) { $FLAGS += @("-DP3B_COMBINED") + $IRQ }
 if ($Count) { $FLAGS += "-DP3B_COUNT" }
+if ($AccCount) { $FLAGS += "-DVM_ACCCOUNT" }
 if ($WholeDrop) { $FLAGS += "-DRES_FAULT_WHOLEDROP" }
 if ($TrimAll) { $FLAGS += "-DRES_TEST_TRIMALL" }
 if ($ViewHdrTest) { $FLAGS += "-DP3B_VIEWHDR_TEST" }
@@ -673,6 +678,10 @@ $CelLink = ($FLAGS -notcontains "-DP3B_NO_CEL")
 # **Condition = the source's**: p3b_probe.s sets COMP_NOCOUNT under P3B_COMBINED and not P3B_COUNT.
 # Absent from the symbol file, p3b_run.lua says the counters are off instead of quoting them.
 $Counting = $CelLink -and (-not $Combined -or $Count)
+# ★★★★ T-P0-161 §4B: the four accessor counters exist only under -DVM_ACCCOUNT, so the want-line
+# carries the SAME condition as the definition -- this file's rule, restated for the sixth time,
+# because vm_symbols.py fails the WHOLE run on a missing name.
+if ($AccCount) { $WANT += @("vm_acc_gv","vm_acc_sv","vm_acc_gf","vm_acc_sf") }
 # ★★ T-P0-130 AC-8's two symbols exist only under -DP3B_VIEWHDR_TEST -- the same condition.
 if ($ViewHdrTest) { $WANT += @("p3_vh_view","p3_vh_loop","p3_vh_cel","p3_vh_out","p3_vh_off","p3_vh_le") }
 # ★★ T-P0-136 AC-4's symbols exist only under -DP3B_CELTEST -- the SAME condition as the switch,

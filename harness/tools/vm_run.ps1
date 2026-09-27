@@ -78,6 +78,17 @@ if ($env:VM_OBJBOUND_TIGHT) { throw "VM_OBJBOUND_TIGHT is retired (P6.11): raisi
 # [L-86]. This drops the boundary to $A0 -- executed 8 times, with a real handler -- so the misroute
 # is something the diff can see. EXPECTED to FAIL.
 if ($env:VM_MODELLED_FAULT) { $ASMARGS += "-DVM_MODELLED_FAULT"; "★★★ FAULT INJECTED (-DVM_MODELLED_FAULT): VMOP_MODELLED_LO dropped to \$A0 -- this build is EXPECTED to FAIL" }
+# ★★★★★ T-P0-161 AC-7: the fault for the VMGETFLAG INLINE. Four sites in vm_tests.s expand
+# vm_getflag's body instead of calling it, and the gate passing is not by itself evidence that it
+# WATCHES those sites. This drops one `lsra` from the macro, so the flag BYTE index is wrong and the
+# inline reads a different flag -- which is what a mis-inlined body actually looks like, an
+# instruction lost in a copy. EXPECTED to FAIL.
+# ★★★★★ AND IT IS DELIBERATELY NOT A DROPPED `pshs b`, WHICH IS WHAT THE DISPATCH SUGGESTED. B is
+# provably dead at all four sites and unread by the test dispatch's caller [vm_core.s:519-522], so
+# an arm that clobbers B changes nothing and passes -- an INERT fault, §2W's own defect, and
+# vm_core.s:246-249 records the last time that mistake was made here. **The proof that makes the
+# change safe is the proof that makes the suggested fault useless.**
+if ($env:VM_GF_INLINE_FAULT) { $ASMARGS += "-DVM_GF_INLINE_FAULT"; "★★★ FAULT INJECTED (-DVM_GF_INLINE_FAULT): VMGETFLAG drops one lsra -- wrong flag byte -- this build is EXPECTED to FAIL" }
 # ★★★★★ THE VBL CLOCK ARM [Jay's ruling AD-138]. VM_VBLCLOCK=1 runs VAR_SECONDS off the CoCo3's
 # real 59.92 Hz vertical-sync interrupt instead of the cycle-derived virtual counter. Unset,
 # nothing changes and the nine-title gate is HEAD's gate exactly -- which is the arm L-79 requires
