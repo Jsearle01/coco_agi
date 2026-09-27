@@ -63,7 +63,15 @@ local STABN   = tonumber(os.getenv("S01_STAB") or "0")
 -- can be cited -- docs/ground-truth/ holds only a .gitkeep here, so Sock's reference is unavailable.
 local FIRQON  = tonumber(os.getenv("S01_FIRQON") or "0")
 local FIRQBIT = tonumber(os.getenv("S01_FIRQBIT") or "16")
-local FVEC    = tonumber(os.getenv("S01_FVEC") or "262")
+local FVEC    = tonumber(os.getenv("S01_FVEC") or "271")
+-- ★★★★★ S-05 phase 2: the raster program, as "line:vres,line:vres,line:vres". Mode 3's handler walks
+-- it. The scanlines are HANDLER-COUNTED lines since VBORD, not screen y -- the mapping between the
+-- two is part of what this measures, so it is not assumed.
+local HTAB    = os.getenv("S01_HTAB") or ""
+local BXOR    = tonumber(os.getenv("S01_BXOR") or "63")
+-- ★★★★★ $FF9A has never been written by this spike. 1 = write it once at init; 0 keeps the control.
+local BSET    = tonumber(os.getenv("S01_BSET") or "0")
+local BCOL    = tonumber(os.getenv("S01_BCOL") or "36")
 
 -- ★★ The delay sweep. 8 CPU cycles per iteration; a frame is ~29,830 cycles at 1.79 MHz, of which
 -- ~8,000 is vertical blank. So 0..3600 in steps covers blank plus the whole active field.
@@ -103,7 +111,8 @@ for _, n in ipairs({"entry", "s01_mode", "s01_colA", "s01_colB", "s01_dly", "s01
                     "s01_fillm", "s01_fillb", "s01_vrest", "s01_vresb", "s01_refill",
                     "s01_col0", "s01_col1", "s01_col2", "s01_col3", "s01_palreg",
                     "s01_dly2", "s01_dly3", "s01_big", "s01_rowbase",
-                    "s01_firqon", "s01_firqbit", "s01_fvec", "s01_fcount", "s01_firq"}) do
+                    "s01_firqon", "s01_firqbit", "s01_fvec", "s01_fcount", "s01_firq",
+                    "s01_htab", "s01_hcount", "s01_bxor", "s01_bset", "s01_bcol"}) do
     if not SYM[n] then print("★★★ map lacks " .. n); m:exit(); return end
 end
 
@@ -388,6 +397,8 @@ local frame, state, step, si, held = 0, "wait_ok", 0, 1, {}
 local results = {}
 local s02_f0 = nil   -- s01_frames at the moment the refill was acknowledged
 local stab, stab_n, stab_bad, stab_frames = {}, 0, {}, {}
+local bord = {}   -- ★ the border rows: Jay saw them flashing and nothing here ever looked
+local bordn = {}  -- ★★★ samples per ROW, so "static two-tone" and "flashing" cannot be confused
 
 _G._s01 = emu.add_machine_frame_notifier(function()
     frame = frame + 1
@@ -415,6 +426,46 @@ _G._s01 = emu.add_machine_frame_notifier(function()
             prog:write_u8(SYM.s01_firqon, FIRQON)
             prog:write_u8(SYM.s01_firqbit, FIRQBIT)
             wr16(SYM.s01_fvec, FVEC)
+            prog:write_u8(SYM.s01_bxor, BXOR)
+            -- ★★★★ Init-consumed, so it goes here, before PC is set -- S-02's race, not repeated.
+            prog:write_u8(SYM.s01_bset, BSET)
+            prog:write_u8(SYM.s01_bcol, BCOL)
+            if HTAB ~= "" then
+                -- ★★★★★ THE PARSE WAS "(%d+):(%d+)" -- DECIMAL ONLY -- while every other parameter in
+                -- this harness is passed as hex and read through tonumber, which takes 0x. So
+                -- -HTab "88:1E" matched vr="1" and poked $01 (4-colour, HRES 0): a silently TRUNCATED
+                -- value that still switched something, so the narrow/wide classifier still reported a
+                -- boundary and the defect left no trace. Sixth instance of the row this spike keeps
+                -- feeding: a control that silently does not do what it claims.
+                -- ★★★★ So it now demands an explicit, whole, VALID value and dies otherwise.
+                local i, n = 0, 0
+                for ent in HTAB:gmatch("[^,]+") do
+                    local ln, vr = ent:match("^%s*([^:%s]+)%s*:%s*([^:%s]+)%s*$")
+                    local lnv, vrv = ln and tonumber(ln), vr and tonumber(vr)
+                    if not lnv or not vrv then
+                        error(string.format("raster entry [%s] does not parse as line:value -- "
+                            .. "hex needs the 0x prefix, as every other switch here does", ent))
+                    end
+                    -- ★★★ Reject what cannot be a mid-frame HRES switch, rather than measuring it:
+                    -- CRES must stay 2 (16-colour, the depth the port uses -- changing depth changes
+                    -- the row stride) and LPF must stay 0, because bits 5-6 are the ONLY field whose
+                    -- write calls MAME's update_geometry() and so moves the border itself.
+                    if vrv < 0 or vrv > 255 then error(string.format("raster value $%X out of range", vrv)) end
+                    if (vrv & 3) ~= 2 then
+                        error(string.format("raster value $%02X has CRES=%d, not 2 (16-colour)", vrv, vrv & 3))
+                    end
+                    if ((vrv >> 5) & 3) ~= 0 then
+                        error(string.format("raster value $%02X sets LPF=%d -- that is a GEOMETRY "
+                            .. "change, not an HRES switch", vrv, (vrv >> 5) & 3))
+                    end
+                    prog:write_u8(SYM.s01_htab + i, lnv)
+                    prog:write_u8(SYM.s01_htab + i + 1, vrv)
+                    i = i + 2; n = n + 1
+                    w("  ★ raster entry %d: line %d -> $FF99=$%02X (HRES %d)", n, lnv, vrv, (vrv >> 2) & 7)
+                end
+                prog:write_u8(SYM.s01_htab + i, 0)   -- terminator
+                w("  ★ raster program: %d entries from [%s]", n, HTAB)
+            end
             wr16(SYM.s01_dly2, DLY2)
             wr16(SYM.s01_dly3, DLY3)
             -- ═══════════════════════════════════════════════════════════════════════════════
@@ -494,6 +545,13 @@ _G._s01 = emu.add_machine_frame_notifier(function()
                 local b = {}
                 for a = 0x0100, 0x0114 do b[#b+1] = string.format("%02X", prog:read_u8(a)) end
                 w("  RAM vectors $0100-$0114: %s", table.concat(b, " "))
+                -- ★★★★★ READ THE PARAMETERS BACK. The border alternates between $00 and $3F, which are
+                -- exactly colB and colA -- the values s01_palwr writes. So the first suspect is not the
+                -- GIME but whether -BXor 0 reached the guest, which is S-03's ordering bug exactly.
+                w("  guest holds: mode=%d bxor=$%02X colA=$%02X colB=$%02X palreg=$%02X firqon=%d",
+                  prog:read_u8(SYM.s01_mode), prog:read_u8(SYM.s01_bxor),
+                  prog:read_u8(SYM.s01_colA), prog:read_u8(SYM.s01_colB),
+                  prog:read_u8(SYM.s01_palreg), prog:read_u8(SYM.s01_firqon))
                 if FIRQON ~= 0 then
                     w("  ★ FIRQ arm: bit $%02X on $FF93, vector slot $%04X", FIRQBIT, FVEC)
                 end
@@ -545,6 +603,15 @@ _G._s01 = emu.add_machine_frame_notifier(function()
     -- before measuring the problem is how a task ends up proving its own premise.
     -- ★★★ The guest's own loop counter is read alongside, so §4B(3)'s "is the CPU still getting time"
     -- is answered from the same run rather than a second one.
+    -- ═══════════════════════════════════════════════════════════════════════════════════════
+    -- ★★★★★ THE BORDER ROWS, WHICH NO MEASUREMENT IN THIS SERIES HAS EVER SAMPLED.
+    -- Jay, watching mode 3: "the upper and lower screen border is flickering fast" -- and it was still
+    -- flashing after the border-flip scaffold was disabled, so the cause is something else.
+    -- ★★★★★ Every instrument in S-01..S-05 scans y=25..217, the ACTIVE DISPLAY. **The borders are
+    -- outside that range and have been invisible to all of it**, which is why a person watching found
+    -- this and 10,800-frame distributions did not.
+    -- ★★★ This records the distinct colours seen in the top border (y=5..20) and the bottom (y=222..236)
+    -- across the sampled frames. A border that flashes shows as more than one colour per region.
     if state == "stab" then
         if step == SETTLE then
             w("   §4A handler invocations after %d frames: s01_fcount = %d  (guest frames %d)",
@@ -552,6 +619,39 @@ _G._s01 = emu.add_machine_frame_notifier(function()
         end
         if step <= SETTLE then return end
         local buf = grab()
+        do
+            local buf2 = buf
+            -- ★★★★★ "act" IS THE WITNESS, and it is the control the first two cuts of this lacked.
+            -- Per-row counting proved every border row alternates -- but it did so IDENTICALLY in the
+            -- arm that alternates $FF9A by construction and the arm that never writes it. Identical
+            -- numbers on both sides of the variable mean the variable is not what is being measured.
+            -- ★★★★ So sample rows in the ACTIVE DISPLAY the same way. If those alternate too, the
+            -- alternation is WHOLE-FRAME and belongs to the host's grab, not to the guest's border.
+            for _, spec in ipairs({ {"top", 5, 20}, {"act", 100, 150}, {"bot", 222, 236} }) do
+                -- ★★★★★ THE FIRST CUT OF THIS KEYED ON THE REGION, NOT THE ROW, so four top rows
+                -- landed in one bucket and "2 distinct colours" could mean EITHER a flash in time OR
+                -- two rows that are simply different colours -- and the second needs no flash at all.
+                -- ★★★★ It reported "A BORDER IS CHANGING" identically in the no-FIRQ arm, which is how
+                -- it was caught. §2W.3: a diagnostic must name the side it actually has. Keyed per row,
+                -- a colour appearing in EVERY sample of one row is static; a row with two is temporal.
+                for y = spec[2], spec[3], 5 do
+                    local o = (y * SW + SW // 2) * 4 + 1
+                    local v = buf2:sub(o, o + 3)
+                    local k = string.format("%s y%03d:%02X%02X%02X", spec[1], y,
+                                v:byte(3) or 0, v:byte(2) or 0, v:byte(1) or 0)
+                    bord[k] = (bord[k] or 0) + 1
+                    bordn[spec[1] .. y] = (bordn[spec[1] .. y] or 0) + 1
+                end
+            end
+        end
+        -- ★★★★★ THE SAMPLER USED TO TAKE ITS OWN grab() HERE, AND TO RUN DURING SETTLE TOO. So it read a
+        -- SECOND whole-frame capture in the same notifier tick as the band measurement's, and 250 of its
+        -- samples came from frames before the guest had settled. 495 of 550 samples were BLACK **at
+        -- y=100-150, the active display every other instrument in this spike reports as 100% stable**,
+        -- which is what proved the alternation host-side. It now runs after settle and reads the SAME
+        -- buffer the bands are measured from, so a disagreement between them is about the picture.
+        -- ★★★★ Withdrawn with it: every border figure reported before this fix, and the "mode 1 steady /
+        -- mode 3 changing" localisation built on them. The instrument was the variable.
         -- ★★★★ With extra splits asked for, the binary search cannot read the frame -- use the scan.
         if DLY2 > 0 then
             local pat = band_pattern(buf)
@@ -601,6 +701,32 @@ _G._s01 = emu.add_machine_frame_notifier(function()
             w("   §4B(3) guest loop iterations: %d over %d host frames = %.3f per frame",
               d, sp, d / sp)
             w("      (no FIRQ handler installed in this arm -- this is the BASELINE to compare against)")
+        end
+        -- ★★★★★ the border regions, so a flash there is a number rather than only an impression
+        do
+            local ks = {}
+            for k in pairs(bord) do ks[#ks+1] = k end
+            table.sort(ks)
+            local parts = {}
+            for _, k in ipairs(ks) do parts[#parts+1] = string.format("%s x%d", k, bord[k]) end
+            w("   BORDER rows (never sampled before S-05): %s", table.concat(parts, "  "))
+            -- ★★★★★ A row whose single colour accounts for every sample of that row is STATIC. Only a
+            -- row carrying two or more colours across frames is flashing, and that is the claim Jay's
+            -- eye makes. Counted per row, the two cases are no longer the same number.
+            local percol, flashing = {}, {}
+            for _, k in ipairs(ks) do
+                local row = k:match("^(%a+ y%d+):")
+                percol[row] = (percol[row] or 0) + 1
+            end
+            for row, nc in pairs(percol) do if nc > 1 then flashing[#flashing+1] = row end end
+            table.sort(flashing)
+            if #flashing == 0 then
+                w("   -> every sampled row holds ONE colour for all %d frames: STATIC, not flashing",
+                  bordn["top5"] or 0)
+            else
+                w("   -> ★★★ %d row(s) change colour BETWEEN FRAMES: %s",
+                  #flashing, table.concat(flashing, ", "))
+            end
         end
         local fh = io.open(OUT .. "/s04_stability.txt", "w")
         if fh then fh:write(table.concat(log, "\n") .. "\n"); fh:close() end

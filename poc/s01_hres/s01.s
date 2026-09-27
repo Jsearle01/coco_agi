@@ -210,6 +210,22 @@ s01_pal4:
                 lda     s01_col3
                 sta     $FFB3
 s01_pal_done:
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ $FF9A (BRDR) HAS NEVER BEEN WRITTEN BY THIS SPIKE IN ANY STAGE -- it has carried whatever
+* DECB left in it, and the border was never sampled, so nothing noticed. Jay saw the top and bottom
+* border flickering fast.
+* ★★★★ With the sampler fixed, every border row alternates black/white on a period of exactly 2
+* frames, IDENTICALLY whether the guest alternates $FF9A by construction or never touches it. So
+* the rendered border is not following $FF9A, and the next question is whether it follows it AT ALL.
+* ★★★ This writes it ONCE to a host-poked value, gated on a flag so the unwritten case stays
+* reachable as the control. A distinctive mid-palette value is neither of the two colours observed,
+* so "the border became the value I asked for" and "the border stopped alternating" are separable.
+                lda     s01_bset
+                beq     s01_bset_done
+                lda     s01_bcol
+                sta     $FF9A
+s01_bset_done:
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 
 * ★ Enable VBORD as a POLLABLE source. IEN stays 0, so this latches status without vectoring.
@@ -444,15 +460,41 @@ s01_palwr:
 * ★★ Reading $FF93 is the candidate ack, by symmetry with $FF92 acking IRQ [irq_vbl.s:75]. **If it is
 * wrong the handler re-enters forever and the main loop stops**, which s01_frames reports -- so a wrong
 * ack is a loud failure, not a quiet one.
+* ★★★★★ S-05 PHASE 2: THE HANDLER NOW *PLACES* THE BOUNDARIES. This is §1.2's actual experiment, and
+* the counting version was not it -- a handler that merely coexists with busy-waits injects cycles into
+* every delay and made stability 690x worse. **Here the delays are GONE.**
+*
+* ★★★★ ONE COMPARE PER INVOCATION, because the handler runs ~145 times a frame and pays for itself in
+* every one of them. s01_hptr walks a table of (scanline, vres) pairs; only the NEXT pair is ever
+* compared, and a 0 terminator ends the frame's work. **Three boundaries cost three writes and ~145
+* cheap compares, not 145 three-way tests.**
+* ★★★ The counter is 8-bit and wraps at 256, which is safe because the frame is ~262 lines and every
+* threshold is above 6: after the wrap the count reaches 6, so no threshold is re-triggered.
+* ★★ FIRQ stacks only PC and CC, so everything touched is pushed -- A, B and X here.
 s01_firq:
-                pshs    a
-                inc     s01_fcount+1
+                pshs    a,b,x
+                inc     s01_hcount
+                ldx     s01_hptr
+                lda     ,x                      ; the next scanline to act on
+                beq     s01_fq_ack              ; 0 = nothing left this frame
+                cmpa    s01_hcount
                 bne     s01_fq_ack
-                inc     s01_fcount
+* ★★★★★ REACHED IT. The mode is written as a PAIR -- $FF98 with BP set and $FF99 from the table -- the
+* same form gfx.s and the init use, so the write is identical in kind to the one the busy-wait version
+* made. **Only WHEN it happens has changed, and that is the whole experiment.**
+                ldb     1,x
+                lda     #$80
+                std     $FF98
+                leax    2,x
+                stx     s01_hptr
 s01_fq_ack:
+                inc     s01_fcount+1
+                bne     s01_fq_ack2
+                inc     s01_fcount
+s01_fq_ack2:
                 lda     $FF93                   ; ack the GIME FIRQ source
-                puls    a
-                rti
+                puls    a,b,x
+                rti                             ; ★ RTI, not `puls pc` -- FIRQ's return is an RTI
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 
@@ -475,6 +517,34 @@ s01_norefill:
 * variable the hardware never reads again, which is the shape of a diagnostic that cannot fail [§2W].
                 ldd     s01_voff
                 std     $FF9D
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ MODE 3 -- FIRQ-PLACED BOUNDARIES. **There is no delay loop here at all.** The main loop's
+* whole job per frame is: reset the raster program, assert the wide mode for the top of the screen, and
+* change one register value so MAME keeps the bitmap current.
+* ★★★★ THE BORDER IS WHAT GETS FLIPPED, not a palette index -- S-04 established that a changing palette
+* value is required and that pointing the flip at an index displayed in 16-colour mode is what caused
+* S-03's false finding. `$FF9A` is recorded per scanline by MAME and is outside the decoded area.
+* ★★★ `eora #$3F` alternates it between $00 and $3F, so the value genuinely CHANGES every frame.
+* ★★ Everything else the loop used to do -- three delays, three paired writes, three palette writes --
+* is now the handler's, and the guest spends the frame doing nothing. **That is the point: the boundary
+* is placed by the raster, not by a cycle count.**
+                lda     s01_mode
+                cmpa    #3
+                lbne    s01_not_m3
+                clr     s01_hcount
+                ldx     #s01_htab
+                stx     s01_hptr
+                lda     #$80
+                ldb     s01_vrest
+                std     $FF98                   ; wide, for the top of the frame
+                lda     s01_bflip
+                eora    #$3F
+                sta     s01_bflip
+                sta     $FF9A                   ; ★ the border -- keeps the bitmap current
+                lbra    s01_tick
+s01_not_m3:
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 
 * ---- the TOP state ----
                 lda     s01_mode
@@ -601,6 +671,14 @@ s01_firqon:     fcb     0               ; ★ S-05: 0 = leave the machine as S-0
 s01_firqbit:    fcb     $10             ; ★ the $FF93 bit to enable -- SWEPT, not assumed
 s01_fvec:       fdb     $0106           ; ★ the RAM vector slot -- SWEPT; $0106 is uninitialised
 s01_fcount:     fdb     0               ; ★ handler invocations; the host reads this to confirm firing
+* ★★★★★ THE RASTER PROGRAM: (scanline, $FF99) pairs, 0-terminated, host-poked. Mode 3's handler walks
+* it one entry at a time. ★★★ Three pairs plus a terminator is the message-box case -- narrow, wide
+* again for the box's rows, narrow below it -- and the table is the only thing that decides where.
+s01_htab:       fcb     0,0,0,0,0,0,0
+s01_hptr:       fdb     0               ; -> the next pair the handler will act on
+s01_hcount:     fcb     0               ; scanlines since VBORD; 8-bit, wraps harmlessly (see s01_firq)
+s01_bflip:      fcb     0               ; the border value, alternated each frame
+s01_bxor:       fcb     $3F             ; ★ the flip mask; 0 = no border flip at all (see mode 3)
 * ★★★ Sixteen DISTINCT CoCo3 palette bytes, so no two indices can render as the same colour. That is
 * a requirement of the row-signature measurement, not decoration -- see the note at the palette init.
 * ★★★★★ AND "16 DISTINCT BYTES" IS NOT THE REQUIREMENT -- "16 DISTINCT RENDERED COLOURS" IS [S-04].
@@ -617,6 +695,9 @@ s01_fcount:     fdb     0               ; ★ handler invocations; the host read
 * distinct in the dump; `$01` gives (0,0,1) which collides with nothing.
 s01_pal16:      fcb     $00,$09,$12,$1B,$24,$2D,$36,$3F
                 fcb     $01,$0E,$15,$1C,$23,$2A,$31,$38
+s01_bset:       fcb     0               ; ★★★★ 1 = write $FF9A once at init; 0 = leave it, the control
+s01_bcol:       fcb     $24             ; ★★★ the border value -- $24 is pure red under the mapping above,
+                                        ; deliberately neither of the two colours the flicker shows
 s01_voff:       fdb     S01_VOFF        ; ★ $FF9D/$FF9E -- physical address >> 3; host-poked and swept
 s01_dly:        fdb     0               ; delay iterations after VBORD, 8 CPU cycles each
 s01_dly2:       fdb     0               ; ★ 0 = one split. Otherwise: back to WIDE after this delay

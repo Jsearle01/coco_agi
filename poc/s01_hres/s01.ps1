@@ -56,7 +56,15 @@ param(
   # ★★★★★ S-05: route an interrupt to FIRQ. Bit and vector slot are swept, not assumed.
   [switch]$Firq,
   [int]   $FirqBit = 0x10,
-  [int]   $FVec    = 0x0106
+  [int]   $FVec    = 0x010F,
+  # ★★★★★ -HTab "line:vres,line:vres,...": the raster program mode 3's handler walks.
+  [string]$HTab    = "",
+  # ★★★★★ -BXor 0 disables the border flip -- the 30 Hz flash Jay's eye caught.
+  [int]   $BXor    = 0x3F,
+  # ★★★★★ -BSet writes $FF9A ONCE at init, to -BCol. Without it the register is never written at all
+  # and holds whatever DECB left -- which is how every stage up to here has run.
+  [switch]$BSet,
+  [int]   $BCol    = 0x24
 )
 $ErrorActionPreference = "Stop"
 $env:PATH = "C:\Users\jayse\DEV\cmd;C:\Users\jayse\DEV\mingw64\opt\bin;" + $env:PATH
@@ -95,6 +103,10 @@ $env:S01_STAB  = "$Stab"
 $env:S01_FIRQON = $(if ($Firq) { "1" } else { "0" })
 $env:S01_FIRQBIT = "$FirqBit"
 $env:S01_FVEC  = "$FVec"
+$env:S01_HTAB  = $HTab
+$env:S01_BSET  = if ($BSet) { "1" } else { "0" }
+$env:S01_BCOL  = [string]$BCol
+$env:S01_BXOR  = "$BXor"
 if ($VSweep) { $env:S01_VSWEEP = "1" } else { Remove-Item env:S01_VSWEEP -ErrorAction SilentlyContinue }
 if ($RowMap) { $env:S01_ROWMAP = "1" } else { Remove-Item env:S01_ROWMAP -ErrorAction SilentlyContinue }
 if ($Eye) { $env:S01_EYE = "1"; $env:S01_SWEEP = "$Dly" }
