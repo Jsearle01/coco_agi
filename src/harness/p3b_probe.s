@@ -426,9 +426,30 @@ P3_NKEY         equ     MAP_STATUS+92
 *                           gates.manifest's rows quote co_tested and co_rej_pri as evidence,
 *                           so the answer there is a counting ARM, not a switch. Cost when on:
 *                           11.9% of a castle cycle [P6.76].
-*   VM_NOCOUNT         5    opcodes and tests seen      THIS FILE, all arms but -DP3B_COVERAGE
-*                                                       [T-P0-102; P6.46 -- these CORRUPTED game
-*                                                       data before they were guarded]
+*   VM_NOCOUNT         6    opcodes and tests seen,     THIS FILE, all arms but -DP3B_COVERAGE
+*                           and vm_opcount              [T-P0-102; P6.46 -- these CORRUPTED game
+*                                                       data before they were guarded. vm_opcount
+*                                                       joined the flag at T-P0-160 -- see below]
+*
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THIS AUDIT ENUMERATED FLAGS, AND AN UNGUARDED COUNTER HAS NO FLAG TO ENUMERATE [T-P0-160
+* §4D]. vm_opcount's three instructions sat on the command-dispatch path in vm_core.s behind NO
+* conditional at all, so the table above could be complete and correct and still not mention it.
+* ★★★★★ THE AUDIT'S SHAPE WAS "FIND THE FLAGS", NOT "FIND THE COUNTERS", so the one instrument
+* with no flag was invisible to it BY CONSTRUCTION -- not overlooked, unreachable.
+* ★★★★ SO THE NEXT READER ASKING "are there instruments left on" MUST GREP FOR COUNTERS AND NOT
+* ONLY FOR `*_NOCOUNT`: an `ldd`/`addd`/`std` or `ldy`/`leay`/`sty` pair against a `fdb 0` on a hot
+* path is the shape, whether or not a flag names it. The four found so far were VM_OPSEEN/
+* VM_TESTSEEN [P6.46], COMP_NOCOUNT [P6.77], PIC_NOCOUNT [P6.85] and vm_opcount [T-P0-160], and
+* the first three had flags while the fourth did not.
+* ★★★ AND IT WAS NOT FREE TO DELETE: vm_opcount has FIVE readers -- vm_probe.s publishes it to
+* VP_OPCOUNT, vm_sweep.lua prints commands/cycle from it, and objscan_sweep.ps1 and
+* objbound_gain.ps1 use it as the ARM-COMPARABILITY guard [L-79]. A counting ARM, per P6.77's
+* precedent, and VM_NOCOUNT was already the right flag because vm_probe.s does not define it.
+* ★★ Measured cost when on: 0.21% of `interpret` on the census workload, NOT the 3.6% estimated
+* from 16 cycles x 306 opcodes -- the site sees only the ~22 COMMANDS a cycle, because the 116
+* if-opcodes take vm_rl_if and bypass it.
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 *
 * ★★★ OPT-IN (`ifdef`) instruments cost nothing unless a flag is passed, and **none is `equ`'d in
 * any source file** -- checked, not assumed: RES_CHECKSUM, VM_TRACE, VM_IFDIAG, VM_SAIDDIAG,
