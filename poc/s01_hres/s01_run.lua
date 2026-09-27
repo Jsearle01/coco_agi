@@ -71,6 +71,8 @@ local HTAB    = os.getenv("S01_HTAB") or ""
 local BXOR    = tonumber(os.getenv("S01_BXOR") or "63")
 -- ★★★★★ $FF9A has never been written by this spike. 1 = write it once at init; 0 keeps the control.
 local BSET    = tonumber(os.getenv("S01_BSET") or "0")
+-- ★★★★★ Print every row of the screen for four consecutive frames, run-length encoded.
+local FULLDUMP = (os.getenv("S01_FULLDUMP") or "") ~= ""
 local BCOL    = tonumber(os.getenv("S01_BCOL") or "36")
 
 -- ★★ The delay sweep. 8 CPU cycles per iteration; a frame is ~29,830 cycles at 1.79 MHz, of which
@@ -552,6 +554,11 @@ _G._s01 = emu.add_machine_frame_notifier(function()
                   prog:read_u8(SYM.s01_mode), prog:read_u8(SYM.s01_bxor),
                   prog:read_u8(SYM.s01_colA), prog:read_u8(SYM.s01_colB),
                   prog:read_u8(SYM.s01_palreg), prog:read_u8(SYM.s01_firqon))
+                -- ★★★★★ Jay, on the arm that writes $FF9A=$24: "still back/white flicker. no red".
+                -- So EITHER the write did not land OR the flickering region is not the border. This
+                -- settles the first half, which is free, before any more of his time is spent.
+                w("  guest holds: bset=%d bcol=$%02X", prog:read_u8(SYM.s01_bset),
+                  prog:read_u8(SYM.s01_bcol))
                 if FIRQON ~= 0 then
                     w("  ★ FIRQ arm: bit $%02X on $FF93, vector slot $%04X", FIRQBIT, FVEC)
                 end
@@ -619,6 +626,39 @@ _G._s01 = emu.add_machine_frame_notifier(function()
         end
         if step <= SETTLE then return end
         local buf = grab()
+        -- ═══════════════════════════════════════════════════════════════════════════════════════
+        -- ★★★★★ FULL-HEIGHT DUMP, FOUR CONSECUTIVE FRAMES. Three border instruments in a row have
+        -- each reported something insensitive to what the guest does, so this stops sampling chosen
+        -- rows and prints EVERY row of the 239, for four frames running. It is the row-profile read
+        -- the band measurement already uses, with its window widened from y=25..217 to the whole
+        -- screen -- not a new instrument, so its soundness is the one already established.
+        -- ★★★★ It is validated by the -BSet arm: if the top and bottom rows are the border, they read
+        -- as $24's pure red. If they do not, the flicker is not the border and $FF9A is a dead end.
+        -- ★★★ Per §3 this prints structured text -- row numbers and colour values. The verdict on a
+        -- PICTURE remains Jay's; this file forms no opinion about what the screen looks like.
+        if FULLDUMP and step <= SETTLE + 4 then
+            local seen, order, prof = {}, {}, {}
+            for y = 0, SH - 1 do
+                local o = (y * SW + SW // 2) * 4 + 1
+                local v = buf:sub(o, o + 3)
+                local c = string.format("%02X%02X%02X", v:byte(3) or 0, v:byte(2) or 0, v:byte(1) or 0)
+                if not seen[c] then order[#order+1] = c; seen[c] = string.char(64 + #order) end
+                prof[#prof+1] = seen[c]
+            end
+            -- ★★ Run-length encoded, so 239 rows read as a handful of spans and a shifting boundary
+            -- is visible as a span whose length changes between frames.
+            local runs, s, i = {}, table.concat(prof), 1
+            while i <= #s do
+                local ch, j = s:sub(i, i), i
+                while j <= #s and s:sub(j, j) == ch do j = j + 1 end
+                runs[#runs+1] = string.format("%s:y%d-%d", ch, i - 1, j - 2)
+                i = j
+            end
+            local leg = {}
+            for n, c in ipairs(order) do leg[#leg+1] = string.char(64 + n) .. "=" .. c end
+            w("   FULL y0-%d frame %d: %s", SH - 1, step - SETTLE, table.concat(runs, " "))
+            w("      legend: %s", table.concat(leg, " "))
+        end
         do
             local buf2 = buf
             -- ★★★★★ "act" IS THE WITNESS, and it is the control the first two cuts of this lacked.

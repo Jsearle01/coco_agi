@@ -64,7 +64,9 @@ param(
   # ★★★★★ -BSet writes $FF9A ONCE at init, to -BCol. Without it the register is never written at all
   # and holds whatever DECB left -- which is how every stage up to here has run.
   [switch]$BSet,
-  [int]   $BCol    = 0x24
+  [int]   $BCol    = 0x24,
+  # ★★★★★ -FullDump: every row of the 239, four consecutive frames, run-length encoded.
+  [switch]$FullDump
 )
 $ErrorActionPreference = "Stop"
 $env:PATH = "C:\Users\jayse\DEV\cmd;C:\Users\jayse\DEV\mingw64\opt\bin;" + $env:PATH
@@ -106,6 +108,7 @@ $env:S01_FVEC  = "$FVec"
 $env:S01_HTAB  = $HTab
 $env:S01_BSET  = if ($BSet) { "1" } else { "0" }
 $env:S01_BCOL  = [string]$BCol
+if ($FullDump) { $env:S01_FULLDUMP = "1" } else { Remove-Item env:S01_FULLDUMP -ErrorAction SilentlyContinue }
 $env:S01_BXOR  = "$BXor"
 if ($VSweep) { $env:S01_VSWEEP = "1" } else { Remove-Item env:S01_VSWEEP -ErrorAction SilentlyContinue }
 if ($RowMap) { $env:S01_ROWMAP = "1" } else { Remove-Item env:S01_ROWMAP -ErrorAction SilentlyContinue }

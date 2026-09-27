@@ -538,11 +538,38 @@ s01_norefill:
                 lda     #$80
                 ldb     s01_vrest
                 std     $FF98                   ; wide, for the top of the frame
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THIS WAS `eora #$3F` -- AN IMMEDIATE. s01_bxor existed as a data byte, the host poked it,
+* the readback confirmed it arrived as $00, and THE CODE NEVER READ IT. So -BXor 0 disabled
+* nothing, and every mode-3 arm ever run has flipped the border between $00 and $3F -- black and
+* white -- once per frame. That is the flicker Jay saw, it is this scaffold, and it lives in the
+* mode-3 block alone, which is why "the flashing didn't start until you started the new firq
+* process" was exactly right: mode 3 IS the FIRQ arm.
+* ★★★★★ AND IT IS WHY THREE BORDER INSTRUMENTS LOOKED INSENSITIVE TO EVERYTHING. They were: the
+* flip ran in all of them, so no arm differed. The instruments were reporting a real alternation
+* the whole time and the arm labels were the lie.
+* ★★★★ Sixth instance of the row this spike keeps feeding, and the worst of them, because the
+* readback of the PARAMETER was taken as evidence about the BEHAVIOUR. §2W: a control must be
+* shown to change the outcome, not merely to arrive.
+                lda     s01_bxor
+                beq     s01_bfix                ; 0 = no flip at all, and now it means it
                 lda     s01_bflip
-                eora    #$3F
+                eora    s01_bxor
                 sta     s01_bflip
                 sta     $FF9A                   ; ★ the border -- keeps the bitmap current
                 lbra    s01_tick
+* ★★★ With the flip off, write the border every frame with the SAME value if asked. MAME's
+* update_value() acts only on a CHANGE, so an init-only write is the case it ignores -- the same
+* mechanism that forced a per-frame scaffold in S-01..S-04, and the reason the init write showed
+* no red even though the parameter had arrived.
+s01_bfix:
+                lda     s01_bset
+                beq     s01_no_bfix
+                lda     s01_bcol
+                sta     $FF9A
+s01_no_bfix:
+                lbra    s01_tick
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 s01_not_m3:
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 
