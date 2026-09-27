@@ -217,6 +217,39 @@ s01_pal_done:
                 sta     $FF92
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ S-05 §4A: ROUTE AN INTERRUPT TO FIRQ, WITH BOTH UNKNOWNS HOST-POKED SO THEY ARE MEASURED.
+*
+* ★★★★★ TWO THINGS THIS SPIKE CANNOT LOOK UP. §1.2 says to take the register bits from Sock's
+* reference, and **docs/ground-truth/ holds only a .gitkeep in this working copy** -- the GIME manual
+* and Sock's page are not here [§2.2], so neither the HBORD bit nor the FIRQ RAM vector can be cited.
+* ★★★★ The tree gives the ADDRESSES only: `$FF93` is FIRQENR [hal.inc:91] and `$FF92`'s bit 3 is
+* VBORD [hal.inc:90, irq_vbl.s:77]. **The bit number for HBORD and the vector slot are unknown.**
+*
+* ★★★★★ SO BOTH ARE SWEPT RATHER THAN ASSUMED, which is what §4A asks for anyway -- "report how
+* firing was confirmed, not that it was assumed". s01_firqbit selects the enable bit and s01_fvec the
+* RAM vector slot; the host tries combinations and reads s01_fcount back. **A handler that never runs
+* looks exactly like one that does not help**, so the counter is the whole point.
+* ★★★ Read from the machine at the OK prompt: $0100-$0105 are RTI stubs, **$0106-$0108 is 00 00 00 --
+* uninitialised**, and $0109/$010C/$010F hold JMPs into ROM. An unused vector is what FIRQ looks like
+* on a machine that never enables it, so $0106 is the first candidate -- and writing a JMP there also
+* makes a slot that would otherwise jump to $0000 safe.
+* ★★ Nothing is enabled unless the host asks: s01_firqon = 0 leaves the machine exactly as S-04 had it.
+                lda     s01_firqon
+                beq     s01_no_firq
+                lda     #$7E                    ; JMP
+                ldx     s01_fvec
+                sta     ,x
+                ldd     #s01_firq
+                std     1,x                     ; the slot now points at our handler
+                lda     s01_firqbit
+                sta     $FF93                   ; enable the candidate source on FIRQ
+                lda     #$5C                    ; ★ $FF90 with FEN=1; $4C with bit 4 set, nothing else
+                sta     $FF90
+                andcc   #$BF                    ; ★ unmask F -- the ORCC at entry masked both
+s01_no_firq:
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ AN EXPLICIT BRANCH TO THE LOOP, AND IT IS HERE BECAUSE ITS ABSENCE COST TWO ROUNDS OF
 * DEBUGGING. The init used to reach s01_loop by FALLING THROUGH, which was correct only while nothing
 * sat between them. Converting the fill to a subroutine put `s01_do_fill` in that gap, so the init
@@ -396,6 +429,31 @@ s01_palwr:
                 abx
                 sta     ,x
                 puls    b,pc
+
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE FIRQ HANDLER. Phase 1 counts and acks; nothing else, because §4A says confirm it FIRES
+* before asking whether it helps.
+*
+* ★★★★★ FIRQ STACKS ONLY PC AND CC -- **A, B, X, Y and U are NOT saved** -- which is exactly what makes
+* it cheap (§1.2: ~19 cycles of IRQ state-stacking avoided) and exactly what makes it dangerous. This
+* handler touches A, so it pushes A. **A handler that clobbered A would corrupt whatever the main loop
+* was doing at a random instruction**, and the symptom would be indistinguishable from "FIRQ breaks the
+* split".
+* ★★★ `inc` on memory does not use A, and CC is restored by RTI, so `pshs a` / `puls a` is sufficient
+* and is also the cheapest correct thing.
+* ★★ Reading $FF93 is the candidate ack, by symmetry with $FF92 acking IRQ [irq_vbl.s:75]. **If it is
+* wrong the handler re-enters forever and the main loop stops**, which s01_frames reports -- so a wrong
+* ack is a loud failure, not a quiet one.
+s01_firq:
+                pshs    a
+                inc     s01_fcount+1
+                bne     s01_fq_ack
+                inc     s01_fcount
+s01_fq_ack:
+                lda     $FF93                   ; ack the GIME FIRQ source
+                puls    a
+                rti
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 
 s01_loop:
@@ -425,7 +483,7 @@ s01_norefill:
                 tsta                            ; ★ NOT `bne` off the cmpa -- mode 0 leaves Z clear
                 bne     s01_top_hres            ;   there and would have taken the HRES branch
                 lda     s01_colA
-                bsr     s01_palwr
+                lbsr    s01_palwr
                 bra     s01_wait
 s01_top_hres:
 * ★★★★★ WRITTEN AS A PAIR WITH `std $FF98`, EXACTLY AS THE INIT AND gfx.s DO, AND THAT IS THE
@@ -449,7 +507,7 @@ s01_top_hres:
 * -- $FF99 changing while the palette stays constant -- was run and the screen stayed broken, so it
 * is not `$FF99` traffic that keeps the bitmap current. **A CHANGING PALETTE VALUE IS REQUIRED.**
                 lda     s01_colA
-                bsr     s01_palwr
+                lbsr    s01_palwr
 
 * ---- the delay that places the boundary ----
 s01_wait:
@@ -465,14 +523,14 @@ s01_switch:
                 tsta
                 bne     s01_bot_hres
                 lda     s01_colB
-                bsr     s01_palwr
+                lbsr    s01_palwr
                 bra     s01_tick
 s01_bot_hres:
                 lda     #$80                    ; ★★★★★ THE THING UNDER TEST, as a paired write
                 ldb     s01_vresb
                 std     $FF98
                 lda     s01_colB                ; ★ the paired palette write -- see the note above
-                bsr     s01_palwr
+                lbsr    s01_palwr
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ TWO MORE SPLITS, IF THE HOST ASKS FOR THEM [S-02 §4C]. MAME records $FF98/$FF99 per scanline,
 * so N splits should cost N writes and be no harder structurally than one -- but "should" is not
@@ -492,7 +550,7 @@ s01_d2:
                 ldb     s01_vrest
                 std     $FF98
                 lda     s01_colA
-                bsr     s01_palwr
+                lbsr    s01_palwr
                 ldx     s01_dly3
                 beq     s01_split_done
 s01_d3:
@@ -539,6 +597,10 @@ s01_fillb:      fcb     $55             ; the constant: $55 = flat index 1, $0F 
 s01_refill:     fcb     0               ; ★ host sets to 1; the guest refills and clears it (an ack)
 s01_big:        fcb     0               ; ★ 0 = 15,360 B (4-colour); 1 = 30,720 B (16-colour, S-03)
 s01_rowbase:    fcb     0               ; ★ S-04 §4A(1): the value the first source row is filled with
+s01_firqon:     fcb     0               ; ★ S-05: 0 = leave the machine as S-04 had it
+s01_firqbit:    fcb     $10             ; ★ the $FF93 bit to enable -- SWEPT, not assumed
+s01_fvec:       fdb     $0106           ; ★ the RAM vector slot -- SWEPT; $0106 is uninitialised
+s01_fcount:     fdb     0               ; ★ handler invocations; the host reads this to confirm firing
 * ★★★ Sixteen DISTINCT CoCo3 palette bytes, so no two indices can render as the same colour. That is
 * a requirement of the row-signature measurement, not decoration -- see the note at the palette init.
 * ★★★★★ AND "16 DISTINCT BYTES" IS NOT THE REQUIREMENT -- "16 DISTINCT RENDERED COLOURS" IS [S-04].

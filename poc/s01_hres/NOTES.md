@@ -85,6 +85,111 @@ numeric and one human, of the same frame.**
 
 ---
 
+# S-05 — Anchor the boundaries to the raster
+
+★★★★★ **THE JITTER WAS A KNIFE EDGE, NOT A PROPERTY OF CYCLE-COUNTED PACING — and it was removed by an
+unrelated 2-cycle change to my own code.** ★★★★ **The FIRQ hypothesis proper is UNTESTED**: a COUNTING
+handler was built and it is strictly worse on both axes.
+
+## §4A — the handler fires, and both unknowns were measured rather than cited
+
+★★★★★ **§1.2 says to take the register bits from Sock's reference, and `docs/ground-truth/` holds only
+a `.gitkeep` in this working copy** — the GIME manual and Sock's page are **not present**, so neither
+the HBORD bit nor the FIRQ vector slot could be cited [§2.2]. ★★★ The tree gives the addresses only
+(`$FF93` is FIRQENR [hal.inc:91]; `$FF92` bit 3 is VBORD [irq_vbl.s:77]).
+
+★★★★ **So both were swept, which §4A asks for anyway.** The RAM vector block, read from the machine at
+the OK prompt:
+```
+$0100: 3B 3B 3B 3B 3B 3B | 00 00 00 | 7E D8 A1 | 7E D8 AF | 7E A0 F6
+       two RTI stubs       $0106      $0109      $010C      $010F
+```
+| vector | bit | `s01_fcount` after 120 frames |
+|---|---|---|
+| `$0106` | `$10` | **0 — never fired** |
+| `$0106` | `$20` | **0 — never fired** |
+| **`$010F`** | **`$10`** | ★★★★★ **17,419** |
+| `$010F` | `$20` | 4 (a slower source — the timer) |
+
+★★★★★ **FIRQ vectors through `$010F`, and bit `$10` on `$FF93` fires ~145 times a frame.** ★★★ **My
+inference from the dump was BACKWARDS**: I reasoned that `$0106` being `00 00 00` marked it as the
+unused FIRQ slot, when in fact `$010F` was already initialised (`JMP $A0F6`, into Color BASIC) **and is
+the FIRQ slot.** ★★ Confirmed by a counter the host reads — 64,075 invocations over the long run — not
+by assumption, which is what §4A required.
+
+## §4C — what the counting handler costs
+
+```
+FIRQ off:  guest loop iterations 10200 over 10200 host frames = 1.000 per frame
+FIRQ on:   guest loop iterations  2307 over  3000 host frames = 0.769 per frame
+```
+★★★★★ **23% of the guest's CPU, for a handler that does nothing but increment a counter and ack.**
+★★★ §6's third trigger: **the number, not a verdict.**
+
+## ★★★★★ §4B — AND THE BASELINE NO LONGER JITTERS, WHICH REFRAMES S-04
+
+S-04 measured `39,89,138 x9733` and `39,88,138 x1067` — 9.88% deviation. **Re-run with the same window,
+the same parameters and the same tracker:**
+```
+FIRQ off, 10800 frames:  distribution 39,89,138 x10800   distinct patterns 1   100.00%
+```
+★★★★ **Zero deviation.** The difference is in **my own binary**: fitting the FIRQ code forced
+`bsr s01_palwr` → `lbsr s01_palwr`, **+2 cycles per boundary write.**
+
+★★★★★ **CONFIRMED BY MEASUREMENT, not by inference.** Sweeping `dly2` one iteration (8 cycles) at a
+time:
+
+| `dly2` | 697 | 698 | **699** | 700 | 701 | 702 |
+|---|---|---|---|---|---|---|
+| | y88 100% | y88 100% | ★★★★★ **2 patterns, 50.17%** | y89 100% | y89 100% | y89 100% |
+
+★★★★★ **EIGHT CPU CYCLES separate "rock steady at y=88" from "rock steady at y=89", and exactly at the
+crossing the boundary alternates 50/50.** ★★★★ **So the jitter is a KNIFE EDGE — the accumulated cycle
+total landing on a scanline boundary — and not a property of cycle-counted pacing at all.**
+
+### What this does and does not say
+
+- ★★★★ **S-04's finding was REAL.** Jay saw it, and at that binary's cycle total the boundary sat on the
+  edge. **The 9.88% was that edge.**
+- ★★★★★ **But its EXPLANATION was wrong.** S-04 attributed it to "an accumulated busy-wait whose total
+  lands near a scanline edge **and therefore alternates**", as though accumulation were inherently
+  unstable. ★★★ **Accumulation is perfectly stable; it is only the ~7% of totals that land within 8
+  cycles of a line boundary that alternate.**
+- ★★★★★ **THE REAL ARGUMENT FOR HARDWARE PACING IS DIFFERENT AND STRONGER THAN S-04's.** Cycle counting
+  is not unstable — it is **unpredictably** stable: **a boundary tuned today breaks on the next code
+  edit**, and this task demonstrated exactly that by accident, with two cycles of unrelated change.
+- ★★★ **A fix by tuning is therefore not a fix.** `dly2 = 700` is stable in this binary and says nothing
+  about the next one.
+
+## ★★★★★ §4B/§4D — the counting handler makes stability CATASTROPHICALLY worse
+
+```
+FIRQ off:  distinct patterns    1   MODE [39,89,138] 100.00%
+FIRQ on:   distinct patterns  690   MODE [122]         0.39%
+```
+★★★★★ **690 patterns, and the mode is a SINGLE boundary — the three-band structure collapses entirely.**
+★★★★ **Because the handler interrupts the busy-wait loops at unpredictable points and injects ~30 cycles
+into every delay.** ★★★ **A counting handler does not stabilise a cycle-counted boundary; it destroys
+it**, and that is obvious in hindsight and was not obvious in advance.
+
+★★★★★ **THIS DOES NOT FALSIFY §1.2's HYPOTHESIS, because the hypothesis was never tested.** §1.2 says
+*"every boundary anchored to a hardware event should behave like the first one"* — **a handler that
+PLACES the boundary.** What was built counts. ★★★ **The two are different experiments and only the
+cheap one was run.**
+
+## What is still owed
+
+1. ★★★★★ **The boundary-PLACING handler — the actual §1.2 experiment.** The delays disappear and the
+   handler writes `$FF99` on a counted scanline, so its own entry latency is the only variable and that
+   is deterministic. ★★★ **This is the experiment the spike is named for and it is not done.**
+2. ★★★★ **The 23% cost needs re-measuring for a placing handler**, which does more per invocation but
+   removes the busy-waits — **it is not obviously worse and not obviously better.**
+3. ★★★ **Whether `$FF93` bit `$10` is HBORD at all** is not established — only that it fires ~145 times
+   a frame, which is neither 192 (active lines) nor 262 (total). ★★ **Named as unexplained rather than
+   assumed to be the horizontal border.**
+
+---
+
 # S-04 — Is the row repeat real, or the instrument?
 
 ★★★★★ **THE INSTRUMENT. The 16-colour mode is CLEAN and matches 4 colours exactly.**

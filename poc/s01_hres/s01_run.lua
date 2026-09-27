@@ -59,6 +59,11 @@ local BIG     = tonumber(os.getenv("S01_BIG") or "0")
 local ROWBASE = tonumber(os.getenv("S01_ROWBASE") or "0")
 -- ★★★★★ S-04 §4B: sample the boundary every frame for this many frames. 3600 = 60 emulated seconds.
 local STABN   = tonumber(os.getenv("S01_STAB") or "0")
+-- ★★★★★ S-05 §4A: the FIRQ arm. Both the enable bit and the vector slot are swept, because neither
+-- can be cited -- docs/ground-truth/ holds only a .gitkeep here, so Sock's reference is unavailable.
+local FIRQON  = tonumber(os.getenv("S01_FIRQON") or "0")
+local FIRQBIT = tonumber(os.getenv("S01_FIRQBIT") or "16")
+local FVEC    = tonumber(os.getenv("S01_FVEC") or "262")
 
 -- ★★ The delay sweep. 8 CPU cycles per iteration; a frame is ~29,830 cycles at 1.79 MHz, of which
 -- ~8,000 is vertical blank. So 0..3600 in steps covers blank plus the whole active field.
@@ -97,7 +102,8 @@ end
 for _, n in ipairs({"entry", "s01_mode", "s01_colA", "s01_colB", "s01_dly", "s01_frames",
                     "s01_fillm", "s01_fillb", "s01_vrest", "s01_vresb", "s01_refill",
                     "s01_col0", "s01_col1", "s01_col2", "s01_col3", "s01_palreg",
-                    "s01_dly2", "s01_dly3", "s01_big", "s01_rowbase"}) do
+                    "s01_dly2", "s01_dly3", "s01_big", "s01_rowbase",
+                    "s01_firqon", "s01_firqbit", "s01_fvec", "s01_fcount", "s01_firq"}) do
     if not SYM[n] then print("★★★ map lacks " .. n); m:exit(); return end
 end
 
@@ -406,6 +412,9 @@ _G._s01 = emu.add_machine_frame_notifier(function()
             -- ★★★★ §4C's two extra splits. Zero means one split, exactly as S-01 ran.
             prog:write_u8(SYM.s01_big, BIG)
             prog:write_u8(SYM.s01_rowbase, ROWBASE)
+            prog:write_u8(SYM.s01_firqon, FIRQON)
+            prog:write_u8(SYM.s01_firqbit, FIRQBIT)
+            wr16(SYM.s01_fvec, FVEC)
             wr16(SYM.s01_dly2, DLY2)
             wr16(SYM.s01_dly3, DLY3)
             -- ═══════════════════════════════════════════════════════════════════════════════
@@ -472,6 +481,25 @@ _G._s01 = emu.add_machine_frame_notifier(function()
               prog:read_u8(SYM.s01_colA), prog:read_u8(SYM.s01_colB),
               prog:read_u8(SYM.s01_fillm), prog:read_u8(SYM.s01_fillb))
             w("  DECB ready at frame %d, handed over to $%04X", frame, SYM.entry)
+            -- ═══════════════════════════════════════════════════════════════════════════════
+            -- ★★★★★ THE RAM VECTOR BLOCK, READ FROM THE MACHINE [S-05 §4A]. hal.inc:723 says
+            -- "the dispatch block at $0100-$010F (RTI stubs) is loaded by DECB" and hal.inc:406 calls
+            -- $010C "the VBL handler", i.e. IRQ -- but **the FIRQ slot's address is nowhere in the
+            -- tree**, and docs/ground-truth/ holds only a .gitkeep in this working copy, so Sock's
+            -- reference is NOT available to derive it from [§2.2].
+            -- ★★★★ So it is read rather than assumed. A 3-byte JMP per vector makes the block
+            -- $0100,$0103,$0106,$0109,$010C,$010F, and whichever slot holds a JMP (opcode $7E)
+            -- versus an RTI ($3B) says which DECB has claimed.
+            do
+                local b = {}
+                for a = 0x0100, 0x0114 do b[#b+1] = string.format("%02X", prog:read_u8(a)) end
+                w("  RAM vectors $0100-$0114: %s", table.concat(b, " "))
+                if FIRQON ~= 0 then
+                    w("  ★ FIRQ arm: bit $%02X on $FF93, vector slot $%04X", FIRQBIT, FVEC)
+                end
+                w("    ($7E = JMP, $3B = RTI; 3-byte slots at $0100/03/06/09/0C/0F)")
+            end
+            -- ═══════════════════════════════════════════════════════════════════════════════
             if STABN > 0 then
                 w("  ★ S-04 §4B: sampling the boundary every frame for %d frames", STABN)
                 state, step = "stab", 0
@@ -518,6 +546,10 @@ _G._s01 = emu.add_machine_frame_notifier(function()
     -- ★★★ The guest's own loop counter is read alongside, so §4B(3)'s "is the CPU still getting time"
     -- is answered from the same run rather than a second one.
     if state == "stab" then
+        if step == SETTLE then
+            w("   §4A handler invocations after %d frames: s01_fcount = %d  (guest frames %d)",
+              SETTLE, rd16(SYM.s01_fcount), rd16(SYM.s01_frames))
+        end
         if step <= SETTLE then return end
         local buf = grab()
         -- ★★★★ With extra splits asked for, the binary search cannot read the frame -- use the scan.
@@ -565,6 +597,7 @@ _G._s01 = emu.add_machine_frame_notifier(function()
         if #stab_frames >= 2 then
             local d = stab_frames[#stab_frames] - stab_frames[1]
             local sp = (#stab_frames - 1) * 600
+            w("   §4A final s01_fcount = %d (0 = the handler NEVER FIRED -- see §6)", rd16(SYM.s01_fcount))
             w("   §4B(3) guest loop iterations: %d over %d host frames = %.3f per frame",
               d, sp, d / sp)
             w("      (no FIRQ handler installed in this arm -- this is the BASELINE to compare against)")

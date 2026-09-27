@@ -52,7 +52,11 @@ param(
   [int]   $RowBase = 0,
   # ★★★★★ -Stab N: S-04 §4B(1). Sample the boundary every frame for N frames and report the
   # distribution. 3600 frames = 60 emulated seconds.
-  [int]   $Stab    = 0
+  [int]   $Stab    = 0,
+  # ★★★★★ S-05: route an interrupt to FIRQ. Bit and vector slot are swept, not assumed.
+  [switch]$Firq,
+  [int]   $FirqBit = 0x10,
+  [int]   $FVec    = 0x0106
 )
 $ErrorActionPreference = "Stop"
 $env:PATH = "C:\Users\jayse\DEV\cmd;C:\Users\jayse\DEV\mingw64\opt\bin;" + $env:PATH
@@ -88,6 +92,9 @@ $env:S01_DLY3  = "$Dly3"
 $env:S01_BIG   = $(if ($Big) { "1" } else { "0" })
 $env:S01_ROWBASE = "$RowBase"
 $env:S01_STAB  = "$Stab"
+$env:S01_FIRQON = $(if ($Firq) { "1" } else { "0" })
+$env:S01_FIRQBIT = "$FirqBit"
+$env:S01_FVEC  = "$FVec"
 if ($VSweep) { $env:S01_VSWEEP = "1" } else { Remove-Item env:S01_VSWEEP -ErrorAction SilentlyContinue }
 if ($RowMap) { $env:S01_ROWMAP = "1" } else { Remove-Item env:S01_ROWMAP -ErrorAction SilentlyContinue }
 if ($Eye) { $env:S01_EYE = "1"; $env:S01_SWEEP = "$Dly" }
