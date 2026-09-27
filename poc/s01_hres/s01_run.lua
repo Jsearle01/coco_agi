@@ -114,7 +114,7 @@ for _, n in ipairs({"entry", "s01_mode", "s01_colA", "s01_colB", "s01_dly", "s01
                     "s01_col0", "s01_col1", "s01_col2", "s01_col3", "s01_palreg",
                     "s01_dly2", "s01_dly3", "s01_big", "s01_rowbase",
                     "s01_firqon", "s01_firqbit", "s01_fvec", "s01_fcount", "s01_firq",
-                    "s01_htab", "s01_hcount", "s01_bxor", "s01_bset", "s01_bcol"}) do
+                    "s01_htab", "s01_hcount", "s01_bxor", "s01_bset", "s01_bcol", "s01_hwrite"}) do
     if not SYM[n] then print("★★★ map lacks " .. n); m:exit(); return end
 end
 
@@ -559,6 +559,11 @@ _G._s01 = emu.add_machine_frame_notifier(function()
                 -- settles the first half, which is free, before any more of his time is spent.
                 w("  guest holds: bset=%d bcol=$%02X", prog:read_u8(SYM.s01_bset),
                   prog:read_u8(SYM.s01_bcol))
+                -- ★★★★★ Does the handler's mode write EXECUTE? Four handler lines rendered identically
+                -- and the mechanism was inferred twice without this number ever being taken.
+                w("  guest holds: hwrite=%d hcount=%d frames=%d fcount=%d",
+                  prog:read_u8(SYM.s01_hwrite), prog:read_u8(SYM.s01_hcount),
+                  rd16(SYM.s01_frames), rd16(SYM.s01_fcount))
                 if FIRQON ~= 0 then
                     w("  ★ FIRQ arm: bit $%02X on $FF93, vector slot $%04X", FIRQBIT, FVEC)
                 end
@@ -623,6 +628,10 @@ _G._s01 = emu.add_machine_frame_notifier(function()
         if step == SETTLE then
             w("   §4A handler invocations after %d frames: s01_fcount = %d  (guest frames %d)",
               SETTLE, rd16(SYM.s01_fcount), rd16(SYM.s01_frames))
+            -- ★★★★★ AFTER the guest has run, which the first cut of this got wrong: the same readback
+            -- in the pre-handover block printed four zeros, because nothing had executed yet.
+            w("   handler mode writes: s01_hwrite = %d  (hcount now %d)",
+              prog:read_u8(SYM.s01_hwrite), prog:read_u8(SYM.s01_hcount))
         end
         if step <= SETTLE then return end
         local buf = grab()

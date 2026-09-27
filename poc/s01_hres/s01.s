@@ -487,6 +487,28 @@ s01_firq:
                 std     $FF98
                 leax    2,x
                 stx     s01_hptr
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ PAIR THE MODE WRITE WITH A PALETTE WRITE, WHICH IS WHAT THE CYCLE-COUNTED PATH DOES AND
+* THIS HANDLER DID NOT. Every `std $FF98` in the busy-wait arm is followed by `lbsr s01_palwr`
+* (see the note at the stage-0 loop: "the refresh IS driven by a changing palette value"). The
+* handler wrote the mode ALONE, and with the border scaffold removed four different handler lines
+* -- 60, 88, 120, 150 -- rendered IDENTICALLY: no boundary at all.
+* ★★★★★ So the earlier "the FIRQ-placed boundary is 100% stable" was measured while a border flip
+* happened to be supplying the changing value, from the wrong place and corrupting the frame. The
+* boundary needs the change AT THE BOUNDARY, not once per frame at VBORD.
+* ★★★★ The value alternates so MAME's update_value() sees a change, and it goes to s01_palreg --
+* index 1 by default, which a $0F fill never selects, so it cannot alter a pixel. This is the
+* difference from the $FF9A flip that inverted every row.
+                inc     s01_hwrite      ; ★★★★★ did this write EXECUTE? Four handler lines rendered
+                                        ; identically and I inferred the mechanism twice without ever
+                                        ; counting the write. §2W: measure it.
+                lda     s01_hflip
+                eora    #$3F
+                sta     s01_hflip
+                ldx     #$FF00
+                ldb     s01_palreg
+                sta     b,x
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 s01_fq_ack:
                 inc     s01_fcount+1
                 bne     s01_fq_ack2
@@ -509,7 +531,7 @@ s01_vb:
                 lda     s01_refill
                 beq     s01_norefill
                 clr     s01_refill
-                bsr     s01_do_fill
+                lbsr    s01_do_fill     ; ★ long: the handler's paired palette write moved this out of range
 s01_norefill:
 
 * ★★★ VOFFSET IS RE-WRITTEN EVERY FRAME, so the host can sweep it on a running guest. Without this
@@ -551,12 +573,25 @@ s01_norefill:
 * ★★★★ Sixth instance of the row this spike keeps feeding, and the worst of them, because the
 * readback of the PARAMETER was taken as evidence about the BEHAVIOUR. §2W: a control must be
 * shown to change the outcome, not merely to arrive.
+* ★★★★★ THE FLIP TARGET IS NOW s01_palreg, NOT $FF9A. Four handler lines -- 60, 88, 120, 150 --
+* rendered IDENTICALLY with the flip off: no mid-frame boundary at all. So the flip was not
+* incidental to the measurement, it was what kept MAME's per-scanline record refreshed, and the
+* boundary result was entangled with its own scaffold.
+* ★★★★ $FF9A was the wrong thing to flip: alternating the border inverted EVERY ROW of the frame,
+* so it corrupted the active area it was supposed to be keeping current. A palette entry the fill
+* never selects keeps the record changing and cannot alter a pixel: at 16 colours a $0F fill uses
+* indices 0 and 15 ONLY, so index 1 ($FFB1, s01_palreg's default) is invisible by construction.
+* ★★★ S-03's lesson applies in the other direction here -- there, a flip target collided with a
+* displayed index and produced a false row repeat. The check is the same one: the flipped register
+* must not be a colour the picture can show.
                 lda     s01_bxor
                 beq     s01_bfix                ; 0 = no flip at all, and now it means it
                 lda     s01_bflip
                 eora    s01_bxor
                 sta     s01_bflip
-                sta     $FF9A                   ; ★ the border -- keeps the bitmap current
+                ldx     #$FF00
+                ldb     s01_palreg
+                sta     b,x                     ; ★ keeps MAME's record current, off the picture
                 lbra    s01_tick
 * ★★★ With the flip off, write the border every frame with the SAME value if asked. MAME's
 * update_value() acts only on a CHANGE, so an init-only write is the case it ignores -- the same
@@ -705,6 +740,8 @@ s01_htab:       fcb     0,0,0,0,0,0,0
 s01_hptr:       fdb     0               ; -> the next pair the handler will act on
 s01_hcount:     fcb     0               ; scanlines since VBORD; 8-bit, wraps harmlessly (see s01_firq)
 s01_bflip:      fcb     0               ; the border value, alternated each frame
+s01_hflip:      fcb     0               ; ★★★★ the handler's paired palette value, alternated per write
+s01_hwrite:     fcb     0               ; ★★★★★ times the handler's mode write actually executed
 s01_bxor:       fcb     $3F             ; ★ the flip mask; 0 = no border flip at all (see mode 3)
 * ★★★ Sixteen DISTINCT CoCo3 palette bytes, so no two indices can render as the same colour. That is
 * a requirement of the row-signature measurement, not decoration -- see the note at the palette init.
