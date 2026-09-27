@@ -532,12 +532,20 @@ s01_fq_hb:
                 inc     s01_hwrite      ; ★★★★★ did this write EXECUTE? Four handler lines rendered
                                         ; identically and I inferred the mechanism twice without ever
                                         ; counting the write. §2W: measure it.
+* ★★★★★ THIS WAS `ldx #$FF00 / ldb s01_palreg / sta b,x` AND IT WROTE TO $FEB1, NOT $FFB1.
+* 6809 accumulator-offset indexing treats the offset as SIGNED: s01_palreg = $B1 = -79, so the
+* effective address was $FF00 - 79 = $FEB1 -- RAM, not a palette register. The handler's "paired
+* palette write" never touched the palette in ANY arm, which is precisely why no boundary rendered,
+* because "the screen only stays current while some palette value CHANGES" is this spike's own
+* established finding.
+* ★★★★★ s01_palwr uses `abx`, which adds B UNSIGNED, and that is why it is written that way. I
+* inlined a reimplementation of a proven subroutine instead of calling it, and the reimplementation
+* was wrong in a way that assembles cleanly and stores somewhere plausible.
+* ★★★ X is free here: hptr was already saved by the `stx` above, and s01_palwr clobbers X by design.
                 lda     s01_hflip
                 eora    #$3F
                 sta     s01_hflip
-                ldx     #$FF00
-                ldb     s01_palreg
-                sta     b,x
+                lbsr    s01_palwr
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 s01_fq_ack:
                 inc     s01_fcount+1
@@ -641,9 +649,8 @@ s01_m3_noown:
                 lda     s01_bflip
                 eora    s01_bxor
                 sta     s01_bflip
-                ldx     #$FF00
-                ldb     s01_palreg
-                sta     b,x                     ; ★ keeps MAME's record current, off the picture
+* ★★★★ Same signed-offset defect as the handler's, same fix: call the subroutine that uses `abx`.
+                lbsr    s01_palwr               ; ★ keeps MAME's record current, off the picture
                 lbra    s01_tick
 * ★★★ With the flip off, write the border every frame with the SAME value if asked. MAME's
 * update_value() acts only on a CHANGE, so an init-only write is the case it ignores -- the same
