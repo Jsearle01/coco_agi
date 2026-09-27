@@ -270,9 +270,29 @@ vm_rl_inrange:
                 leax    d,x
                 ldx     ,x                      ; X = handler
 vm_rl_dispatch:
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ GUARDED BY VM_NOCOUNT [T-P0-160 §4B]. These three instructions were UNCONDITIONAL on the
+* hottest path in the interpreter -- 16 cycles on every opcode, 306 opcodes a cycle, ~4,900 cycles
+* = 3.6% of `interpret` -- and they are the FOURTH instrument found left switched on, after
+* VM_OPSEEN/VM_TESTSEEN [P6.46], COMP_NOCOUNT [P6.77] and PIC_NOCOUNT [P6.85].
+* ★★★★★ AND IT IS A COUNTING ARM, NOT A REMOVAL, BECAUSE vm_opcount HAS FIVE READERS. The dispatch
+* expected none; the grep found vm_probe.s publishing it to VP_OPCOUNT (twice), vm_sweep.lua
+* printing commands/cycle from it, and -- load-bearing -- objscan_sweep.ps1 and objbound_gain.ps1
+* using it as the ARM-COMPARABILITY guard: "opcount MUST match between arms; if it does not, the
+* arms ran different programs" [L-79]. CLAUDE.md §2W names it as AD-102's work-invariance check.
+* ★★★★★ VM_NOCOUNT IS THE RIGHT FLAG AND IT ALREADY EXISTED. p3b_probe.s:95-96 defines it
+* unconditionally, so the integration probe stops paying; vm_probe.s does NOT define it, so the
+* VM gate keeps the counter and every reader above keeps working. **The two clients want opposite
+* things and the flag already separated them -- this line was simply outside it**, exactly as
+* §191's note says of pic_draw.s.
+* ★★★★ §2W: the red arm is a vm_probe build WITH -DVM_NOCOUNT, which must report opcount=0. The
+* positive control is that the unmodified vm_probe still reports its baseline 184.
+                ifndef  VM_NOCOUNT
                 ldy     vm_opcount
                 leay    1,y
                 sty     vm_opcount
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★ THE OPCODE GOES ON THE STACK ACROSS THE HANDLER, because vm_op is a GLOBAL and `call` /
 * `call.v` run a whole nested logic that overwrites it. The arg-count lookup below then read the
 * CALLEE's last opcode -- $00, `return` -- whose VMOP_ARGS entry is 0, so ip did not advance past
