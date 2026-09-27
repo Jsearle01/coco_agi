@@ -157,20 +157,60 @@ note_fail() { FAILED="$FAILED $1"; }
 # ★★ Found by running it: the first version of this block failed the suite on a clean tree.
 MOJI_ALLOW='reports/20260826-030000-p3-2-sync-entry-and-first-pixels.md'
 echo "═══ source integrity (mojibake) ═══"
-MOJI_FILES=$(git ls-files '*.s' '*.inc' '*.py' '*.lua' '*.sh' '*.ps1' '*.md' '*.manifest' 2>/dev/null \
-             | grep -v -F -x "$MOJI_ALLOW")
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ★★★★★ THE DETECTOR IS SELF-TESTED BEFORE THE TREE IS SWEPT [T-P0-158 §4A]. The acceptance test was
+# narrowed in this task -- it used to accept ANY reversal that decoded as valid UTF-8, which
+# false-positived on a ratio and whose "repair" rewrote a correct report -- and **a narrowed checker
+# can fail silently by no longer detecting anything.** §2W: the same check must be seen to go red.
+# ★★★ mojibake_selftest.py proves it both ways from CODEPOINTS: real 3-byte and 2-BYTE damage still
+# flags and still repairs correctly, the false positive no longer flags, clean text is untouched, and
+# nothing the tool declines to flag is ever modified. **If that fails, the tree sweep means nothing**,
+# so it runs first and its failure is the gate's failure.
+if python harness/tools/mojibake_selftest.py; then
+    echo "★ detector self-test: all cases behave"
+else
+    echo "★★★ THE DETECTOR ITSELF IS MISBEHAVING -- the tree sweep below proves nothing"
+    note_fail mojibake
+fi
+echo
+# ★★★★★ SCOPE IS EVERY TRACKED FILE, NOT AN EXTENSION LIST [§2J.7: "every tracked text file"].
+# T-P0-156 ran this over SIX files -- the ones it had touched -- and reported that as discharging
+# §2J.7, which let a report sit misencoded for a whole task. An extension list is the same defect
+# deferred: it goes stale the first time someone adds a .txt or a .tsv.
+# ★★★★ So every tracked path is passed and **fix_mojibake.py skips anything that is not UTF-8 by
+# itself** ("NOT UTF-8 -- skipped"), which makes the tool's own decoder the arbiter rather than a
+# filename. Only genuinely binary extensions are excluded, because a binary that happens to decode as
+# UTF-8 would be scanned for no reason.
+# ★★★★★ THE BOM EXCEPTION IS BY EXPLICIT FILENAME, NEVER BY PATTERN [§2J.7's own rule, and §2N's].
+# These three are written by MAME and MAME puts a BOM in them; `--allow-bom` tolerates that WITHOUT
+# excluding the files, so their contents are still swept for double-encoded runs. ★★★ Adding one is a
+# visible act, and `*.cfg` as a pattern would have hidden the next .cfg somebody hand-edits.
+MOJI_BOM_OK='harness/mame-cfg/coco3.cfg harness/mame-cfg/default.cfg harness/mame-cfg/sierra-live/coco3.cfg'
+MOJI_FILES=$(git ls-files 2>/dev/null \
+             | grep -v -E '\.(bin|dmk|dsk|png|jpg|gif|pdf|zip|gz|rom|ccc|wav|ttf|ico|o)$' \
+             | grep -v -F -x "$MOJI_ALLOW" \
+             | grep -v -F -x -f <(printf '%s\n' $MOJI_BOM_OK))
 if [ -z "$MOJI_FILES" ]; then
     echo "★★★ could not list tracked files -- NOT treating that as clean"
     note_fail mojibake
 else
     # shellcheck disable=SC2086
-    if python harness/tools/fix_mojibake.py --check $MOJI_FILES; then
-        echo "★ source integrity: clean"
+    if python harness/tools/fix_mojibake.py --check $MOJI_FILES \
+       && python harness/tools/fix_mojibake.py --check --allow-bom $MOJI_BOM_OK; then
+        echo "★ source integrity: clean ($(echo "$MOJI_FILES" | wc -l) files swept, 3 BOM-tolerated)"
     else
-        echo "★★★ DOUBLE-ENCODED SOURCE -- repair with: python harness/tools/fix_mojibake.py <file>"
+        # ★★★★★ THE REPAIR ADVICE IS QUALIFIED, BECAUSE THE UNQUALIFIED VERSION DESTROYED A FILE.
+        # This line used to read "repair with: python harness/tools/fix_mojibake.py <file>", and
+        # following it rewrote a correct report's ratio into a Hebrew letter. The command is still the
+        # right one -- but it REWRITES FILES, and the reader is told to look at the diff.
+        echo "★★★ DOUBLE-ENCODED SOURCE. The named files decode as double-encoded runs."
+        echo "    To repair:  python harness/tools/fix_mojibake.py <file>"
+        echo "    ★★ THAT COMMAND REWRITES THE FILE IN PLACE. Read the diff before committing:"
+        echo "       a repair that damages is worse than the damage, because the next reader trusts it."
         note_fail mojibake
     fi
 fi
+# ═══════════════════════════════════════════════════════════════════════════════════════════
 echo
 
 # ★★★ pic's SWEEP is whole -- PIC_LIST/order.txt names all 45 pictures, so one launch covers the
