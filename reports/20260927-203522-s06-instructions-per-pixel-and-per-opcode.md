@@ -414,4 +414,5 @@ first and is recorded here rather than duplicated in the pool [§2C: folding is 
 
 ### 11 — Commit
 
-`<hash>` (pushed to origin/wip before this report).
+`e2e35b1` — this report and `sierra_trace.lua`'s steady gate, pushed to origin/wip.
+★★ Descends from `0800fac` (P6.107). Suite green at the commit: 537 files swept, all nine gates.
