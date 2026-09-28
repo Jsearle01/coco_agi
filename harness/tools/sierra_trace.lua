@@ -169,6 +169,41 @@ local dsk_start, dsk_end, dsk_quiet, draw_lat, settle = nil, nil, 0, 0, 0
 local MAX_FDC      = 20000   -- room changes measured 3,820-11,985; the boot load was 51,409
 local MAX_CAPTURES = 3       -- ★★★ one wasted arming must not cost the session
 local ncap         = 0
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+-- ★★★★★ SIERRA_GATE=steady -- ARM ON THE CEL BLITTER DURING STEADY ANIMATION [S-06 §4B].
+-- ★★★★★ THE DEFAULT IS UNCHANGED. "fill" is the proven gate that took three cuts to get right
+-- and the note below records why; a new question does not get to re-open it.
+-- ★★★★★ AND THE DISCRIMINATOR IS ALREADY MEASURED IN THIS FILE, which is why this is small: the
+-- FILL writes sequential runs of a FULL SCREEN ROW (159 bytes measured across 6 transitions,
+-- PC_AT_RUN 128) and THE CEL BLITTER TOPS OUT AT 11 in 4-byte-wide strips [cut 2's note, which
+-- caught the blitter by accident and recorded its signature]. So the steady gate is the fill
+-- gate's own test INVERTED -- a maxrun in the blitter's band, never the fill's.
+-- ★★★★ The other three conditions exist because cut 3 burned all three captures on the game
+-- LOAD: the disk must be quiet for a while, the screen must actually be being written, and the
+-- GIME must be in graphics mode. Steady animation is the only state that satisfies all four.
+-- ★★★ Quiet is counted independently of dsk_start, because dsk_quiet only advances once a burst
+-- has been seen and a parked game may never start one.
+-- ★★★★★ AND THE STEADY GATE NEEDS AN OPERATOR TRIGGER, BECAUSE A CONDITION IS A PROXY FOR
+-- "WHERE JAY IS" AND PROXIES ARE WHAT COST THIS GATE THREE CUTS. Jay, on the first steady run:
+-- "it going to fire at the same point it did last time" -- and it did: all three captures at
+-- t=53.3-60.1 s, wherever the game happened to be, which is cut 3's defect exactly ("burned all
+-- three captures inside half a second of the game LOADING").
+-- ★★★★★ SIERRA_TRIGGER names a file. Until that file EXISTS the steady gate cannot arm; the
+-- operator creates it when they are standing where they want measured. **The scene stops being a
+-- guess** -- which §7 requires, since every figure must state its scene.
+-- ★★★★ THIS IS NOT AN INPUT PATH. The audit line is `grep "set_value\|:post\|natkeyboard" -> no
+-- hits` and it still holds: nothing is written into the machine. A file read is the operator
+-- talking to the HOST, not to the guest.
+-- ★★★ Unset, behaviour is unchanged, so the fill gate and any prior invocation still work.
+local TRIG         = os.getenv("SIERRA_TRIGGER")
+local trig_seen    = false
+local GATE         = os.getenv("SIERRA_GATE") or "fill"
+local BLIT_LO      = tonumber(os.getenv("SIERRA_BLIT_LO") or "3")
+local BLIT_HI      = tonumber(os.getenv("SIERRA_BLIT_HI") or "16")
+local STEADY_QUIET = tonumber(os.getenv("SIERRA_STEADY_QUIET") or "120")  -- ~2 s at 59.92 Hz
+local STEADY_MINW  = tonumber(os.getenv("SIERRA_STEADY_MINW") or "200")   -- screen writes/frame
+local qframes      = 0
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
 local armed      = (m.debugger ~= nil)
 local tracing    = false
 local trace_end  = 0
@@ -321,7 +356,30 @@ _G._n = emu.add_machine_frame_notifier(function()
     -- ★ The flag is set inside the write tap; the debugger command is issued HERE, one frame
     -- later, which is affordable because the fill spans ~25 frames [T-P0-017: 152 frames at
     -- exactly 159 across 6 transitions].
-    if armed and not tracing and _G._saw_run
+    if fd == 0 then qframes = qframes + 1 else qframes = 0 end
+    if GATE == "steady" then
+        -- ★★★★ The operator's go-ahead, checked once and latched.
+        if TRIG and not trig_seen then
+            local th = io.open(TRIG, "r")
+            if th then
+                th:close(); trig_seen = true
+                w("[f%05d] t=%.3f  ★★★ OPERATOR TRIGGER seen -- steady gate is now live", frame, t)
+            end
+        end
+        -- ★★★★★ THE BLITTER, NOT THE FILL [S-06 §4B]. Four conditions, all four stated (L-44):
+        -- disk quiet long enough that this cannot be the load, the screen actually being
+        -- written, a maxrun in the BLITTER's band, and NOT a full-row run (which would be the
+        -- fill). ★★★ The last two together are the fill/blit discriminator this file measured.
+        if (not TRIG or trig_seen)
+           and armed and not tracing and not _G._saw_run
+           and qframes >= STEADY_QUIET and sw >= STEADY_MINW
+           and mr >= BLIT_LO and mr <= BLIT_HI
+           and (_G._vmode >= 0 and (_G._vmode & 0x80) ~= 0) then
+            w("[f%05d] t=%.3f  steady gate: quiet %d f, %d screen writes, maxrun %d",
+              frame, t, qframes, sw, mr)
+            trace_start(frame, t, 0)
+        end
+    elseif armed and not tracing and _G._saw_run
        and (_G._vmode >= 0 and (_G._vmode & 0x80) ~= 0) then
         trace_start(frame, t, dsk_start and dsk_start[3] or 0)
     end
