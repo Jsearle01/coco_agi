@@ -3448,6 +3448,39 @@ end)
 -- a PC in a remapped slot is attributable to what was mapped there, not guessed from the map.
 -- ★★ P3B_PROFILE="A-B" samples while the released-cycle count n is in [A, B). Headless only:
 -- this loop blocks the top level of the script, which p3b_room.lua's dofile would wait on.
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+-- ★★★★★ P3B_TRACE="A-B" -- MAME's LIVE DISASSEMBLY OF OUR OWN BUILD, over the same window
+-- P3B_PROFILE samples [T-P0-162 §4D(4)].
+-- ★★★★★ WHY: S-06 measured THEIR interpreter at ~35 instructions an opcode and compared it with
+-- OUR 450 CPU cycles converted at ~3.5 cycles an instruction -- and that conversion is derived,
+-- the weakest figure in the comparison. **The same instrument on both sides retires it.**
+-- ★★★★ The 997 Hz profiler cannot answer this: its samples are TIME-weighted, so they give shares
+-- and not instruction counts. An instruction count needs a trace.
+-- ★★★ Needs -debug, like every trace [idiom line 2393], and headless -debug hangs without
+-- execution_state="run" [idiom §10], which is set where the debugger is first touched.
+-- ★★ Volume: 6 frames is ~180,000 cycles and a few MB, the same budget sierra_trace.lua uses.
+local TRC = os.getenv("P3B_TRACE")
+if TRC then
+    local ta, tb = TRC:match("^(%d+)%-(%d+)$")
+    ta, tb = tonumber(ta), tonumber(tb)
+    local frames = tonumber(os.getenv("P3B_TRACE_FRAMES") or "6")
+    local tf = ((os.getenv("P3B_TRACE_FILE") or (OUT .. "/p3b.tr"))):gsub("/", "\\")
+    if not m.debugger then
+        w("★★★ P3B_TRACE asked for but NO DEBUGGER -- launch with -debug [no trace taken]")
+    else
+        pcall(function() m.debugger.execution_state = "run" end)
+        while n < ta do emu.wait(0.01) end
+        m.debugger:command("trace " .. tf .. ",0,noloop")
+        w("★★★ TRACE ON at released cycle %d -> %s", n, tf)
+        -- ★★ EMULATED time, not a frame counter: `frame` is a notifier-scoped local and
+        -- m.time:as_double() is what every other timing in this file uses. 59.92 Hz.
+        local t0 = m.time:as_double()
+        while m.time:as_double() < t0 + frames / 59.92 do emu.wait(0.005) end
+        pcall(function() m.debugger:command("trace off,0") end)
+        w("★★★ TRACE OFF after %d frames, at released cycle %d", frames, n)
+    end
+end
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
 local PROF = os.getenv("P3B_PROFILE")
 if PROF then
     local pa, pb = PROF:match("^(%d+)%-(%d+)$")

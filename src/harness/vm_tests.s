@@ -21,10 +21,13 @@ vm_tr_false:    clr     vm_testres
                 rts
 
 * ── comparisons ───────────────────────────────────────────────────────────────────
+* ★★★★ VMARGN 1 replaces `jsr vm_p1` [T-P0-162 §4B item 1]. vmtest_equal runs 50.7 times a cycle in
+* the castle; B is dead from here to `cmpa ,s+`. vm_v0 stays a call -- it reads a VARIABLE through
+* vm_getvar, which is not this change.
 vmtest_equal:
                 jsr     vm_v0
                 pshs    a
-                jsr     vm_p1
+                VMARGN  1
                 cmpa    ,s+
                 lbeq    vm_tr_true
                 lbra    vm_tr_false
@@ -77,7 +80,7 @@ vmtest_greater_v:
 * dispatch's caller does not consume it [vm_core.s:519-522], which is why the macro may skip the
 * save the routine cannot. **One home: the body lives in vm_state.s and is expanded, not copied.**
 vmtest_is_set:
-                jsr     vm_p0
+                VMARG0
                 VMGETFLAG isset
                 sta     vm_testres
                 rts

@@ -89,6 +89,13 @@ if ($env:VM_MODELLED_FAULT) { $ASMARGS += "-DVM_MODELLED_FAULT"; "★★★ FAUL
 # vm_core.s:246-249 records the last time that mistake was made here. **The proof that makes the
 # change safe is the proof that makes the suggested fault useless.**
 if ($env:VM_GF_INLINE_FAULT) { $ASMARGS += "-DVM_GF_INLINE_FAULT"; "★★★ FAULT INJECTED (-DVM_GF_INLINE_FAULT): VMGETFLAG drops one lsra -- wrong flag byte -- this build is EXPECTED to FAIL" }
+# ★★★★★ T-P0-162 AC-8: the fault for the VMARGN INLINE. vmtest_equal expands vm_arg's body instead
+# of calling vm_p1, and the gate passing is not by itself evidence that it WATCHES that site. This
+# drops the `addd #1`, so the inline reads operand 0 where it should read operand 1 -- an index lost
+# in a copy, which is what a mis-inlined operand fetch actually looks like. EXPECTED to FAIL.
+# ★★★ It is NOT a dropped `pshs b`: B is provably dead at both inlined sites, so that arm would be
+# inert -- §2W's own defect, and the same trap T-P0-161 documented at this exact spot.
+if ($env:VM_ARG_INLINE_FAULT) { $ASMARGS += "-DVM_ARG_INLINE_FAULT"; "★★★ FAULT INJECTED (-DVM_ARG_INLINE_FAULT): VMARGN drops the index add -- reads operand 0 -- this build is EXPECTED to FAIL" }
 # ★★★★★ THE VBL CLOCK ARM [Jay's ruling AD-138]. VM_VBLCLOCK=1 runs VAR_SECONDS off the CoCo3's
 # real 59.92 Hz vertical-sync interrupt instead of the cycle-derived virtual counter. Unset,
 # nothing changes and the nine-title gate is HEAD's gate exactly -- which is the arm L-79 requires

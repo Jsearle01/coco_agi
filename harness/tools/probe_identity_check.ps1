@@ -58,7 +58,14 @@ $PROBES = @(
   # be recovered by running the check -- it is recorded here so it does not vanish with the pin.
   # ★★★ This file's own header describes the disease: "This check reported MOVED against a pin it
   # could not reproduce, and no task ran it." Running it is what found the -7.
-  @{ n = "vm";   s = "src/harness/vm_probe.s";   f = @("-DHAL_GFX_MODE_SERVICE","-DHAL_SYS_FAST_CLOCK"); sz = 10229; sha = "B06DB7A6" },
+  # ★★★★ RE-PINNED T-P0-162: 10,229 -> 10,246 B (+17), and ALL of it is this task's -- two VMARG
+  # expansions in vm_tests.s, which vm_probe.s includes. The same +17 landed on all nine p3b arms
+  # and on region A, so the delta is one cause in three places.
+  # ★★★ Verified before re-pinning: vm 9/9 with 0 divergent cycles of 600, and the fault arm RED at
+  # 599 of 600 [-DVM_ARG_INLINE_FAULT].
+  # ★★ The -7 pre-existing drift T-P0-162 inherited is still unexplained and is now two pins deep;
+  # it is recorded in T-P0-161's note above and in that task's §7.
+  @{ n = "vm";   s = "src/harness/vm_probe.s";   f = @("-DHAL_GFX_MODE_SERVICE","-DHAL_SYS_FAST_CLOCK"); sz = 10246; sha = "7A9050F7" },
   @{ n = "pic";  s = "src/harness/pic_probe.s";  f = @("-DHAL_GFX_MODE_SERVICE");                        sz = 0;    sha = "" },
   @{ n = "res";  s = "src/harness/res_probe.s";  f = @("-DHAL_GFX_MODE_SERVICE");                        sz = 0;    sha = "" },
   # ★★★★ PINNED AT T-P0-105, because this one MOVED and an on-disk baseline cannot notice that.

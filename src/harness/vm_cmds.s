@@ -29,6 +29,47 @@ vm_arg:
                 lda     ,x
                 puls    b,pc
 
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ VMARG -- vm_arg's BODY AS A MACRO, FOR THE MEASURED-HOT TEST SITES [T-P0-162 §4B item 1].
+* ★★★★★ MEASURED, and the site choice is the measurement's, not a guess: a MAME trace of our own
+* build over 3 castle cycles (KQ1 room 1, 4 sprites) counts vm_arg at 225 executions a cycle,
+* vm_p0 at 159.3 and vm_p1 at 62.3, and the hot test handlers at is_set 64, equal 50.7, said 27.3,
+* controller 23 -- 165 of the 171 test dispatches a cycle.
+* ★★★★★ WHAT IT SAVES, AND WHY IT IS BIGGER FOR INDEX 0: the called path is
+*   jsr(8) + pshs b(6) + tfr a,b(6) + clra(2) + addd vm_ip(6) + ldx vm_code(6) + leax d,x(8)
+*   + lda ,x(4) + puls b,pc(8) = 54 cycles to fetch ONE operand byte.
+* Inlined for index 0 the index arithmetic vanishes with it -- `ldd vm_ip / ldx vm_code / leax d,x
+* / lda ,x` = 24 cycles, a saving of 30. For index N it is 28, a saving of 26.
+* ★★★★ THE `pshs b`/`puls b` IS DROPPED, and that is the part that needs proving rather than
+* asserting: vmtest_is_set's next act is VMGETFLAG, which loads B before reading it; vmtest_equal's
+* is `cmpa ,s+`. Neither reads an incoming B, and the test dispatch's caller does not either
+* [vm_core.s:519-522]. **AC-8's fault arm is what tests that, not this comment.**
+* ★★★ ONE HOME [§2F]: the body lives here beside vm_arg and is EXPANDED, never copied, and both
+* p3b_probe.s and vm_probe.s include vm_cmds.s before vm_tests.s.
+* ★★ Their equivalent is `LDB ,Y+` -- 6 cycles, one instruction, and the read IS the advance,
+* because their ip is a register. Ours cannot be, under the handler contract at the top of this
+* file; that is the RULING half of §4B and this macro is the licence-legal half.
+* ★★ TWO MACROS RATHER THAN ONE WITH `ifne \1`: conditional assembly keyed on a macro PARAMETER is
+* syntax this tree has never used, and the index-0 form is genuinely shorter rather than merely a
+* special case of the other. Two named forms cost nothing and cannot mis-assemble quietly.
+VMARG0          macro
+                ldd     vm_ip
+                ldx     vm_code
+                leax    d,x
+                lda     ,x
+                endm
+
+VMARGN          macro
+                ldd     vm_ip
+                ifndef  VM_ARG_INLINE_FAULT
+                addd    #\1                     ; ★ AC-8 drops THIS: reads operand 0, not \1
+                endc
+                ldx     vm_code
+                leax    d,x
+                lda     ,x
+                endm
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+
 vm_p0:          clra
                 bra     vm_arg
 vm_p1:          lda     #1

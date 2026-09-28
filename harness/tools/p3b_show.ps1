@@ -897,7 +897,15 @@ if ($Headless) {
   # output is a word count.
   $secs = if ($env:P3B_SECONDS) { $env:P3B_SECONDS } else { "900" }
   $vid = if ($env:P3B_TYPE) { @("-resolution","640x480") } else { @("-video","none") }
-  C:\mame\mame.exe coco3 @vid -sound none -window -nomaximize -skip_gameinfo -nothrottle `
+  # ★★★★★ -debug EXACTLY WHEN A TRACE IS ASKED FOR [T-P0-162 §4D(4)]. manager.machine.debugger is
+  # nil without it [idiom line 2393], so p3b_run.lua's P3B_TRACE block can only print "NO DEBUGGER"
+  # -- which is what it did on the first attempt, correctly.
+  # ★★★★ KEYED ON THE SAME CONDITION AS THE FEATURE, which is the rule this file has now restated
+  # seven times: the flag's condition must be the SAME condition as the thing that needs it. Keying
+  # it on a separate switch is how the two drift and a trace run silently takes no trace.
+  # ★★★ Off by default, so every gate row and every prior invocation is byte-for-byte unaffected.
+  $dbg = if ($env:P3B_TRACE) { @("-debug") } else { @() }
+  C:\mame\mame.exe coco3 @vid @dbg -sound none -window -nomaximize -skip_gameinfo -nothrottle `
     -seconds_to_run $secs `
     -rompath C:/mame/roms -cfg_directory harness\mame-cfg `
     -autoboot_script C:/Projects/coco_agi/harness/tools/p3b_run.lua -autoboot_delay 0 | Out-Null
