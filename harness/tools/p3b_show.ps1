@@ -344,6 +344,10 @@ param(
   # A MEASUREMENT arm -- never a shipped flag set. §1.4: the call count is measured, never derived
   # from the 90 call sites and never normalised by the 306-opcode census.
   [switch]$AccCount,
+  # ★★★★★ -Margin: split the transparent pixels co_pix discards into LEADING / INTERIOR / TRAILING
+  # [T-P0-163]. A counting arm, never a shipped flag: it decides whether a per-row first/last
+  # sidecar can reach the 3.91% or whether the runs themselves are needed.
+  [switch]$Margin,
   [double]$Hold   = 3.0
 )
 $ErrorActionPreference = "Stop"
@@ -501,6 +505,7 @@ if ($RoomDrive) { $FLAGS += "-DP3B_ROOMDRIVE" }
 if ($Combined) { $FLAGS += @("-DP3B_COMBINED") + $IRQ }
 if ($Count) { $FLAGS += "-DP3B_COUNT" }
 if ($AccCount) { $FLAGS += "-DVM_ACCCOUNT" }
+if ($Margin) { $FLAGS += "-DCOMP_MARGIN" }
 if ($WholeDrop) { $FLAGS += "-DRES_FAULT_WHOLEDROP" }
 if ($TrimAll) { $FLAGS += "-DRES_TEST_TRIMALL" }
 if ($ViewHdrTest) { $FLAGS += "-DP3B_VIEWHDR_TEST" }
@@ -682,6 +687,11 @@ $Counting = $CelLink -and (-not $Combined -or $Count)
 # carries the SAME condition as the definition -- this file's rule, restated for the sixth time,
 # because vm_symbols.py fails the WHOLE run on a missing name.
 if ($AccCount) { $WANT += @("vm_acc_gv","vm_acc_sv","vm_acc_gf","vm_acc_sf") }
+# ★★★★ T-P0-163: the margin counters exist only under -DCOMP_MARGIN, so the want-line carries the
+# SAME condition as the definition -- this file's rule, and vm_symbols.py fails the whole run on a
+# missing name. ★★ cm_pend is asked for too: a non-zero value at the park would mean a row ended
+# without co_rownext banking it, which is the one way this instrument could silently under-count.
+if ($Margin) { $WANT += @("cm_lead","cm_inter","cm_trail","cm_pend") }
 # ★★ T-P0-130 AC-8's two symbols exist only under -DP3B_VIEWHDR_TEST -- the same condition.
 if ($ViewHdrTest) { $WANT += @("p3_vh_view","p3_vh_loop","p3_vh_cel","p3_vh_out","p3_vh_off","p3_vh_le") }
 # ★★ T-P0-136 AC-4's symbols exist only under -DP3B_CELTEST -- the SAME condition as the switch,

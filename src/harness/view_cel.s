@@ -341,11 +341,68 @@ vc_dc_clr:      clr     ,x+
                 ldd     vc_w16
                 std     vc_remw
                 lda     vc_mir
-                beq     vc_dc_go
+                beq     vc_dc_mset
                 ldd     vc_w16
                 std     vc_p                    ; mirrored: the walk starts at the row's END
+vc_dc_mset:
+                clr     vc_rowend
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ THE WALK IS NOW A PER-RUN STEP, AND vc_decode_row IS ITS FIRST CONSUMER [T-P0-163].
+* ★★★★★ WHY: Sierra composites STRAIGHT FROM THE RUNS -- `LDA ,U+ / ANDA #$F0 / ANDB #$0F /
+* CMPA <$A9 / BEQ -> ABX` at $E75F -- so a transparent run costs one ABX and no per-pixel look.
+* We cannot do that while the only way to see a run is to compare bytes in an already-expanded
+* buffer, which is the per-pixel look the skip would exist to avoid [composite.s:318-320].
+* ★★★★★ MEASURED PRIZE: 267.7 transparent pixels a cycle are tested and discarded, and the split is
+* LEADING 2,040 / INTERIOR 5,835 / TRAILING 2,834 -- **54.5% INTERIOR**, which a per-row first/last
+* sidecar cannot reach at all. 3.91% of a cycle whole; ~1.1% net by sidecar.
+* ★★★★★ ONE WALK, TWO CONSUMERS [§2F] -- the rule this file already states twenty lines up: "TWO
+* ENTRY POINTS AND ONE UNPACK, NOT TWO UNPACKS... Duplicating the RLE walk to serve both is how the
+* two would drift apart on exactly one opcode." A third consumer gets a third entry point, not a
+* third walk. **`cel`'s 9,193 comparisons still gate this walk**, because vc_decode_row still
+* drives it and the cache is still filled through vc_decode_cel.
+* ★★★★ WHAT MOVED AND WHAT DID NOT: the fetch, the classify, the position arithmetic (including
+* both mirrored cases) and the bookkeeping are all INSIDE vc_next_run, byte-for-byte as they were.
+* Only the FILL stayed here. The post-advance is done before returning -- it does not depend on the
+* fill, so hoisting it changes nothing a caller can see.
+* ★★★ The jsr/rts per run costs ~13 cycles at ~1.5 runs a row; the decoder is 0.5% of a steady
+* castle stream and runs only on a cache miss (15 in 70 cycles), so this is affordable on the path
+* that pays it and free on the path that matters.
+vc_dr_lp:
+                jsr     vc_next_run
+                tsta
+                bne     vc_dr_end
+* ---- fill vc_len bytes of vc_col at X; a zero-length run writes nothing ----------
+                ldd     vc_len
+                beq     vc_dr_lp
+                tfr     d,y
+                lda     vc_col
+vc_dr_fill:     sta     ,x+
+                leay    -1,y
+                bne     vc_dr_fill
+                bra     vc_dr_lp
+* ★★ A = 1 the row finished (vc_err already cleared), A = 2 an error (vc_err already set).
+vc_dr_end:
+                rts
 
-vc_dc_go:
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ── vc_next_run ── ONE run: vc_col, vc_len, and X = where it goes ────────────────
+* Returns A = 0 a run is ready (fill vc_len bytes of vc_col at X, which may be 0 bytes)
+*         A = 1 the row is complete -- nothing to fill, vc_err cleared, vc_remh decremented
+*         A = 2 an error -- vc_err set, nothing to fill
+* ★★ vc_p, vc_remw, vc_remh, vc_src and vc_rowend carry the position between calls, so this is
+* resumable without any new state beyond the one flag.
+vc_next_run:
+                lda     vc_rowend
+                beq     vc_nr_go
+* ---- the previous call produced the row's last run ------------------------------
+                clr     vc_rowend
+                ldd     vc_remh
+                subd    #1
+                std     vc_remh
+                clr     vc_err
+                lda     #1
+                rts
+vc_nr_go:
                 ldd     vc_remh
                 lbeq    vc_dc_done
 vc_dc_row:
@@ -358,6 +415,7 @@ vc_dc_row:
                 bne     vc_dc_haveb
                 lda     #VC_E_TRUNC
                 sta     vc_err
+                lda     #2                      ; ★ A = 2: error, nothing to fill [T-P0-163]
                 rts
 vc_dc_haveb:
                 subd    #1
@@ -369,6 +427,7 @@ vc_dc_haveb:
                 blo     vc_dc_haveb
                 lda     #VC_E_TRUNC
                 sta     vc_err
+                lda     #2                      ; ★ A = 2: error, nothing to fill [T-P0-163]
                 rts
 vc_dc_haveb:
                 lda     ,x+
@@ -400,6 +459,7 @@ vc_dc_run:
                 bls     vc_dc_emit
                 lda     #VC_E_CHUNK             ; ★ the reference raises here; so do we
                 sta     vc_err
+                lda     #2                      ; ★ A = 2: error, nothing to fill [T-P0-163]
                 rts
 
 vc_dc_emit:
@@ -409,13 +469,13 @@ vc_dc_emit:
                 bne     vc_dc_bulk
 
 * ---- chunk_len == 1: p += adjust_pre ; raw[p] = colour ; p += adjust_after -------
+* ★★ X is set here and survives the post-advance, which touches only D [T-P0-163]. The single
+* `sta ,x` that used to sit between them is the CALLER's now.
                 ldd     vc_p
                 addd    vc_pre
                 std     vc_p
                 addd    vc_dest
                 tfr     d,x
-                lda     vc_col
-                sta     ,x
                 ldd     vc_p
                 addd    vc_post
                 std     vc_p
@@ -434,12 +494,8 @@ vc_dc_fwd:
                 ldd     vc_p
                 addd    vc_dest
                 tfr     d,x
-                ldd     vc_len
-                tfr     d,y
-                lda     vc_col
-vc_dc_fill:     sta     ,x+
-                leay    -1,y
-                bne     vc_dc_fill
+* ★★ The forward fill loop that used to be here is the CALLER's now [T-P0-163]. X survives the
+* post-advance below, which touches only A and D.
                 lda     vc_mir
                 bne     vc_dc_after             ; mirrored: p already moved
                 ldd     vc_p
@@ -457,7 +513,15 @@ vc_dc_after:
 * full width does NOT advance until an explicit zero arrives. Testing remaining_width == 0
 * instead would advance early on exactly those cels and drift for the rest of the resource.
                 lda     vc_cur
-                lbne    vc_dc_go2
+                bne     vc_dc_more
+* ★★★★★ A ZERO BYTE MEANS THIS RUN IS THE ROW'S LAST, NOT THAT THERE IS NO RUN [T-P0-163]. The
+* zero case above set colour = key and length = the rest of the row, so a run IS ready; the row's
+* end is reported on the NEXT call, which is what vc_rowend carries.
+                lda     #1
+                sta     vc_rowend
+vc_dc_more:
+                clra                            ; A = 0: a run is ready at X
+                rts
 * ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ THE ROW ENDS AND SO DOES THIS CALL. The old code reset vc_remw, decremented vc_remh and
 * carried vc_p into the next row -- adding width*2 when mirrored. **All three of those are now
@@ -465,16 +529,12 @@ vc_dc_after:
 * ★★★ vc_remh is decremented HERE rather than by the caller, so "rows still to decode" has one
 * home and the pull loop cannot disagree with the decoder about how far through the cel it is.
 * ═══════════════════════════════════════════════════════════════════════════════════════════
-                ldd     vc_remh
-                subd    #1
-                std     vc_remh
-                clr     vc_err
-                rts
-vc_dc_go2:
-                ldd     vc_remh
-                lbne    vc_dc_row
+* ★★ The decrement and the vc_err clear moved to vc_next_run's vc_rowend branch, which is the one
+* place that now reports "the row is complete" [T-P0-163]. vc_dc_go2's re-test of vc_remh went with
+* the loop: the caller loops, so a per-run step has nothing to loop over.
 vc_dc_done:
                 clr     vc_err
+                lda     #1                      ; ★ A = 1: no run, the cel is exhausted
                 rts
 
 * ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -517,6 +577,10 @@ vc_wc_fail:     puls    x
                 rts
 
 vc_cur          fcb     0               ; the compressed byte driving this iteration
+* ★★★★★ vc_rowend -- set when the run just produced was the row's LAST [T-P0-163]. The zero byte
+* that ends a row still YIELDS a run (colour = key, length = the rest of the row), so the row's end
+* can only be reported on the NEXT call. One byte, and it is what makes vc_next_run resumable.
+vc_rowend       fcb     0
 
 * ── vc_le16 ── X -> two little-endian bytes; returns D ───────────────────────────
 * ═══════════════════════════════════════════════════════════════════════════════════════════

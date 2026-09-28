@@ -1725,6 +1725,24 @@ _G._n = emu.add_machine_frame_notifier(function()
             -- nothing ever printed it [T-P0-114].
             -- ★★ Guarded on the SYMBOL, so an arm built without the flag prints nothing rather than
             -- reading a stale address: the symbols file only carries these under -AccCount.
+            -- ★★★★★ WHERE THE DISCARDED TRANSPARENT PIXELS ARE [T-P0-163, -DCOMP_MARGIN]. The three
+            -- buckets must SUM to co_rejkey, and cm_pend must be zero at the park -- a non-zero
+            -- pending value means a row ended without being banked, which is the only way this can
+            -- under-count. Both checks are printed rather than assumed [§2W].
+            if SYM.cm_lead then
+                local L, I, T = rd16(SYM.cm_lead), rd16(SYM.cm_inter), rd16(SYM.cm_trail)
+                local P, tot = rd16(SYM.cm_pend), L + I + T
+                w("    transparent pixels discarded: LEADING %d  INTERIOR %d  TRAILING %d  = %d",
+                  L, I, T, tot)
+                if tot > 0 then
+                    w("      margin (lead+trail) %.1f%% of them, interior %.1f%%  -- a first/last "
+                      .. "sidecar can reach the margin and NOT the interior",
+                      100.0 * (L + T) / tot, 100.0 * I / tot)
+                end
+                w("      per cycle: %.1f discarded (%.1f margin, %.1f interior)   cm_pend at park %d%s",
+                  tot/NCYC, (L+T)/NCYC, I/NCYC, P,
+                  P == 0 and "" or "  ★★★ NON-ZERO -- a row was not banked, figures under-count")
+            end
             if SYM.vm_acc_gv then
                 local gv, sv = rd16(SYM.vm_acc_gv), rd16(SYM.vm_acc_sv)
                 local gf, sf = rd16(SYM.vm_acc_gf), rd16(SYM.vm_acc_sf)

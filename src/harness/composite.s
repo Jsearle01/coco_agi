@@ -94,6 +94,13 @@ co_remh         fcb     0
 co_remw         fcb     0
 co_curx         fcb     0
 co_basex        fcb     0
+                ifdef   COMP_MARGIN
+cm_pend         fdb     0               ; transparent pixels since the last opaque one
+cm_lead         fdb     0               ; ... banked before the row's first opaque pixel
+cm_inter        fdb     0               ; ... between two opaque pixels
+cm_trail        fdb     0               ; ... after the row's last opaque pixel
+cm_seen         fcb     0               ; has an opaque pixel been seen in this row?
+                endc
 co_cury         fdb     0               ; ★ 16-bit: yPos - height + 1 can go NEGATIVE
 co_prio         fcb     0
 co_key          fcb     0
@@ -371,9 +378,54 @@ co_pix:
                 ldu     #co_rejkey
                 jsr     co_inc32
                 endc
-                bra     co_nextx
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ -DCOMP_MARGIN -- WHERE ARE THE TRANSPARENT PIXELS? [T-P0-163]
+* ★★★★★ THE QUESTION THIS SETTLES, and it decides between two designs rather than tuning one:
+* co_tested minus co_written is 328.7 pixels a cycle tested and discarded, all of them KEY
+* (co_rej_pri is zero in the castle [:407]) = 3.91% of a cycle at 42.6 cycles a tested pixel.
+* ★★★★★ A per-row FIRST/LAST sidecar can only reach the LEADING and TRAILING ones; the INTERIOR
+* ones need the runs themselves, which means the decoder's walk and `cel`'s subject. **So the split
+* between margin and interior is the whole difference between a one-file change and a two-file one**,
+* and nothing in the record measures it.
+* ★★★★ MEASURED, NOT DERIVED [§1.4: P6.106 predicted 3.6% and measured 0.21%].
+* ★★★ cm_pend accumulates transparent pixels since the last opaque one; an opaque pixel banks them
+* as LEADING if none has been seen in this row yet and INTERIOR otherwise; co_rownext banks the
+* remainder as TRAILING. **Every transparent pixel lands in exactly one bucket**, so the three sum
+* to co_rejkey and that is the check.
+* ★★ A counting ARM. 16-bit, so run it over tens of cycles and not hundreds.
+                ifdef   COMP_MARGIN
+                inc     cm_pend+1
+                bne     co_mg_p
+                inc     cm_pend
+co_mg_p:
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★ Long: the COMP_MARGIN block above pushed co_nextx out of an 8-bit displacement. The shipped
+* build (no COMP_MARGIN) pays the extra byte and cycle too -- which is why this arm is a
+* MEASUREMENT arm and its figures are not quoted beside a shipped timing.
+                lbra    co_nextx
 
 co_opaque:
+* ★★★★ COMP_MARGIN banks the pending transparent run: LEADING if this is the row's first opaque
+* pixel, INTERIOR otherwise. Placed BEFORE `sta co_col` so it cannot disturb the colour move
+* T-P0-154 made, and it touches only D and the counters.
+                ifdef   COMP_MARGIN
+                pshs    a
+                ldd     cm_pend
+                beq     co_mg_z
+                tst     cm_seen
+                bne     co_mg_in
+                addd    cm_lead
+                std     cm_lead
+                bra     co_mg_zz
+co_mg_in:       addd    cm_inter
+                std     cm_inter
+co_mg_zz:       ldd     #0
+                std     cm_pend
+co_mg_z:        lda     #1
+                sta     cm_seen
+                puls    a
+                endc
 * ★★★★ THE COLOUR, NOW THAT IT IS KNOWN TO BE NEEDED [T-P0-154 §4B(1)]. FIRST instruction here,
 * because `clra` four lines down destroys A. co_put_visual is co_col's only reader and it is on
 * this path; the transparent path reads it nowhere, which is what makes the move safe.
@@ -593,6 +645,16 @@ co_nextx:
                 lbra    co_pix
 
 co_rownext:
+* ★★★★ COMP_MARGIN: whatever is still pending at the row's end is TRAILING, and cm_seen resets so
+* the next row's first opaque pixel banks LEADING again.
+                ifdef   COMP_MARGIN
+                ldd     cm_pend
+                addd    cm_trail
+                std     cm_trail
+                ldd     #0
+                std     cm_pend
+                clr     cm_seen
+                endc
 * ★★★★★ Y GOES BACK TO co_src HERE, and this line is what keeps comp_probe correct. In the
 * non-row-pull build co_src is set ONCE per cel and advances continuously across rows; with the
 * per-pixel `stx` gone, only this store carries the position from one row to the next.
