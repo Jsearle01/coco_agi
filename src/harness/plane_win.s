@@ -122,6 +122,19 @@ pl_fault_pcur   fcb     $FF
                 endc
                 endc
 * ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ T-P0-164's counting arm, and it lives OUTSIDE the fault arm's `ifdef`. The first cut put it
+* beside pl_fault_cur, inside `ifdef PLANE_FAULT_PRIVCACHE` -- which is false in every normal build,
+* so the symbols did not exist and the assembler said so three times. **A data block's conditional
+* must be the condition it belongs to, not the one it happens to sit next to.**
+* ★★★★ ph_lastvis is the block plane_vis ITSELF last mapped, and it is what separates "the plane
+* crossed a slice" from "something else evicted the plane". ph_cur6 cannot do it: by the time
+* plane_vis looks, ph_cur6 already holds whatever the other claimant put there.
+                ifdef   PH_REMAPCOUNT
+ph_lastvis      fcb     $FF             ; the block plane_vis last mapped ($FF = none yet)
+ph_rm_cross     fdb     0               ; remaps to a DIFFERENT block -- plane vs ITSELF
+ph_rm_evict     fdb     0               ; remaps to the SAME block -- somebody else took slot 6
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
 * ★★★★★ UNDER PLANE_WIN_MMU THESE ARE CONSTANTS AND THEY ARE INITIALISED HERE, WHICH THE FIRST
 * VERSION OF THIS CHANGE DID NOT DO -- AND IT WAS THE ONE DEFECT THE CHANGE INTRODUCED.
 * pl_map_vis assigns MAP_PHASE_WIN every time, so the value never varies; but it only RUNS when a
@@ -188,6 +201,35 @@ plane_vis:
                 adda    ph_blk_fb               ; ★ slice n of the framebuffer is block fb+n
                 cmpa    ph_cur6                 ; ★ the register's own record, not a private one
                 beq     pv_have
+* ═══════════════════════════════════════════════════════════════════════════════════════════
+* ★★★★★ -DPH_REMAPCOUNT -- WHO TOOK SLOT 6? [T-P0-164 §4A]. This is the whole task in six
+* instructions, and it answers the question by DISTINGUISHING TWO CAUSES that cost the same cycles:
+*   ph_rm_cross  the block we are about to map DIFFERS from the one plane_vis last mapped
+*                -> the plane crossed its own slice boundary. PLANE-VERSUS-ITSELF, and 160-wide
+*                   is the fix (13,440 B = 1.64 slices, two adjacent slots, permanently mapped).
+*   ph_rm_evict  it is the SAME block plane_vis last mapped -> we had it and something else took
+*                it. SOURCE-VERSUS-PLANE, and two passes is the fix.
+* ★★★★★ AN UNATTRIBUTED TOTAL ANSWERS NOTHING, because both explanations predict the same total
+* [§6]. ph_lastvis is what makes them separable, and it is one byte.
+* ★★★★ P6.109 §3.2 claimed source-versus-plane from a COMMENT (composite.s:354-356) and attributed
+* no remap at all. **This is the measurement that comment never had**, and mmu_phase.s:204 already
+* sits against it: "a fetch never happens while drawing (§3.4)".
+* ★★★ A counting arm, never shipped: no arm in p3b_arms_check.ps1 names it.
+                ifdef   PH_REMAPCOUNT
+                pshs    a
+                cmpa    ph_lastvis
+                beq     ph_rc_ev
+                inc     ph_rm_cross+1
+                bne     ph_rc_st
+                inc     ph_rm_cross
+                bra     ph_rc_st
+ph_rc_ev:       inc     ph_rm_evict+1
+                bne     ph_rc_st
+                inc     ph_rm_evict
+ph_rc_st:       sta     ph_lastvis
+                puls    a
+                endc
+* ═══════════════════════════════════════════════════════════════════════════════════════════
                 bsr     pl_map_vis              ; A = the ABSOLUTE block
                 endc
                 else

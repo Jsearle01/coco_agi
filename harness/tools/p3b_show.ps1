@@ -348,6 +348,10 @@ param(
   # [T-P0-163]. A counting arm, never a shipped flag: it decides whether a per-row first/last
   # sidecar can reach the 3.91% or whether the runs themselves are needed.
   [switch]$Margin,
+  # ★★★★★ -Remap: attribute every slot-6 remap [T-P0-164]. Counting arm, never shipped. It decides a
+  # map ruling -- plane-versus-itself (160-wide) or source-versus-plane (two passes) -- and an
+  # unattributed total answers neither, because both predict the same total.
+  [switch]$Remap,
   [double]$Hold   = 3.0
 )
 $ErrorActionPreference = "Stop"
@@ -506,6 +510,7 @@ if ($Combined) { $FLAGS += @("-DP3B_COMBINED") + $IRQ }
 if ($Count) { $FLAGS += "-DP3B_COUNT" }
 if ($AccCount) { $FLAGS += "-DVM_ACCCOUNT" }
 if ($Margin) { $FLAGS += "-DCOMP_MARGIN" }
+if ($Remap) { $FLAGS += "-DPH_REMAPCOUNT" }
 if ($WholeDrop) { $FLAGS += "-DRES_FAULT_WHOLEDROP" }
 if ($TrimAll) { $FLAGS += "-DRES_TEST_TRIMALL" }
 if ($ViewHdrTest) { $FLAGS += "-DP3B_VIEWHDR_TEST" }
@@ -692,6 +697,8 @@ if ($AccCount) { $WANT += @("vm_acc_gv","vm_acc_sv","vm_acc_gf","vm_acc_sf") }
 # missing name. ★★ cm_pend is asked for too: a non-zero value at the park would mean a row ended
 # without co_rownext banking it, which is the one way this instrument could silently under-count.
 if ($Margin) { $WANT += @("cm_lead","cm_inter","cm_trail","cm_pend") }
+# ★★★★ T-P0-164: same-condition rule again -- these four exist only under -DPH_REMAPCOUNT.
+if ($Remap) { $WANT += @("ph_rm_all","ph_rm_vol","ph_rm_cross","ph_rm_evict","ph_rm_pri","ph_rm_vm","ph_rm_fb") }
 # ★★ T-P0-130 AC-8's two symbols exist only under -DP3B_VIEWHDR_TEST -- the same condition.
 if ($ViewHdrTest) { $WANT += @("p3_vh_view","p3_vh_loop","p3_vh_cel","p3_vh_out","p3_vh_off","p3_vh_le") }
 # ★★ T-P0-136 AC-4's symbols exist only under -DP3B_CELTEST -- the SAME condition as the switch,

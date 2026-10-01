@@ -1729,6 +1729,31 @@ _G._n = emu.add_machine_frame_notifier(function()
             -- buckets must SUM to co_rejkey, and cm_pend must be zero at the park -- a non-zero
             -- pending value means a row ended without being banked, which is the only way this can
             -- under-count. Both checks are printed rather than assumed [§2W].
+            -- ★★★★★ WHO TOOK SLOT 6 [T-P0-164, -DPH_REMAPCOUNT]. cross + evict is the visual plane's
+            -- share; all - (cross + evict) is everything else, and vol is how much of that is the
+            -- volume/source window. ★★★ The verdict line states which contention dominates, because
+            -- the whole point is that an unattributed total answers neither question.
+            if SYM.ph_rm_all then
+                local all = rd16(SYM.ph_rm_all)
+                local vol, cr, ev = rd16(SYM.ph_rm_vol), rd16(SYM.ph_rm_cross), rd16(SYM.ph_rm_evict)
+                local pri = SYM.ph_rm_pri and rd16(SYM.ph_rm_pri) or 0
+                local vm  = SYM.ph_rm_vm and rd16(SYM.ph_rm_vm) or 0
+                local fb  = SYM.ph_rm_fb and rd16(SYM.ph_rm_fb) or 0
+                local plane = cr + ev
+                local other = all - (plane + vol + pri + vm + fb)
+                w("    slot-6 remaps: TOTAL %d  plane_vis %d (cross %d, evicted %d)  draw_fb %d  PRIORITY %d  vol %d  phase_vm %d  rest %d",
+                  all, plane, cr, ev, fb, pri, vol, vm, other)
+                w("      per cycle: %.1f total -- plane_vis %.1f, draw_fb %.1f, PRIORITY %.1f, vol %.1f, phase_vm %.1f, rest %.1f",
+                  all/NCYC, plane/NCYC, fb/NCYC, pri/NCYC, vol/NCYC, vm/NCYC, other/NCYC)
+                if plane > 0 then
+                    local verdict = "PLANE-VERSUS-ITSELF -- the plane crosses its own slice"
+                    if ev > cr then
+                        verdict = "SOURCE-VERSUS-PLANE -- something else keeps taking slot 6"
+                    end
+                    w("      ★★★ %s  (cross %.1f%% / evicted %.1f%% of the plane's remaps)",
+                      verdict, 100.0*cr/plane, 100.0*ev/plane)
+                end
+            end
             if SYM.cm_lead then
                 local L, I, T = rd16(SYM.cm_lead), rd16(SYM.cm_inter), rd16(SYM.cm_trail)
                 local P, tot = rd16(SYM.cm_pend), L + I + T

@@ -83,6 +83,13 @@ ph_blk_vol      fcb     0               ; ★ the block slot 6 holds IN THE VM P
 * that to res_curblk, which is this byte under its old name.
 ph_cur5         fcb     $FF             ; what slot 5 holds NOW ($FF = unknown)
 ph_cur6         fcb     $FF             ; what slot 6 holds NOW ($FF = unknown)
+                ifdef   PH_REMAPCOUNT
+ph_rm_all       fdb     0               ; ★ T-P0-164: every slot-6 remap, at the only writer
+ph_rm_vol       fdb     0               ; ★ ... of which phase_vol's -- the VOLUME/source window
+ph_rm_pri       fdb     0               ; ★ ... and phase_draw_pri_slot6's -- the PRIORITY plane
+ph_rm_vm        fdb     0               ; ★ ... and phase_vm's -- the phase transition itself
+ph_rm_fb        fdb     0               ; ★ ... and phase_draw_fb's -- the framebuffer slice walk
+                endc
 
 * ── phase_slot5 / phase_slot6 — A = an ABSOLUTE block number. THE ONLY WRITERS. ──
 * ★★★★★ THE ANSWER TO "CAN A CACHE DISAGREE WITH THE REGISTER?" IS STRUCTURAL, NOT DILIGENT
@@ -104,6 +111,16 @@ phase_slot5:
                 rts
 
 phase_slot6:
+* ★★★★ -DPH_REMAPCOUNT [T-P0-164 §4A]: the TOTAL, at the single writer. Every slot-6 remap in the
+* program passes through here, so ph_rm_all minus plane_win.s's two buckets is "everything that is
+* not the visual plane" -- the phase transitions and phase_vol. ★★ `inc` touches only CC, and A must
+* survive [the note above], so nothing else is disturbed.
+                ifdef   PH_REMAPCOUNT
+                inc     ph_rm_all+1
+                bne     ph_s6_c
+                inc     ph_rm_all
+ph_s6_c:
+                endc
                 sta     ph_cur6
                 sta     MMU_SLOT6
                 rts
@@ -134,6 +151,18 @@ ph_blk_slot5    fcb     0               ; what slot 5 holds outside that window
 * slot always maps something -- so the VM phase is defined by what it does NOT touch, not by
 * writing a sentinel. Clearing it to a dummy block would be a write with no reader.
 phase_vm:
+* ★★★★★ -DPH_REMAPCOUNT [T-P0-164]: THE PHASE TRANSITION ITSELF. After attributing the visual plane
+* (17.1 a cycle), the priority plane through slot 6 (19.1) and the volume window (6.7), **109.5 of
+* 152.4 remaps a cycle were still unaccounted** -- 72%, and neither of the dispatch's two candidates.
+* ★★★★ P3_REMAPS reports ~1.3 phase transitions a cycle, so if this counter comes back near 110 then
+* the phase routines are being called ~80x more often than a transition-per-phase model predicts,
+* and THAT is the finding rather than either contention.
+                ifdef   PH_REMAPCOUNT
+                inc     ph_rm_vm+1
+                bne     ph_vm_c
+                inc     ph_rm_vm
+ph_vm_c:
+                endc
                 lda     ph_blk_vol
                 jmp     phase_slot6
 
@@ -173,6 +202,16 @@ phase_draw_pri:
 * calling here keeps the owner count at one; plane_win.s writing the register itself would have
 * made it two, silently, in a file the census would then have had to grow to cover.
 phase_draw_fb:
+* ★★★★★ -DPH_REMAPCOUNT [T-P0-164]: THE LAST CLAIMANT, and this routine's own comment predicts it --
+* "a windowed walk crossing a slice boundary needs to move the framebuffer alone, HUNDREDS OF TIMES
+* PER PICTURE". After the visual plane (17.1 a cycle), the priority plane through slot 6 (19.1), the
+* volume window (6.7) and the phase transition (1.1), 108.3 of 152.4 were still unattributed.
+                ifdef   PH_REMAPCOUNT
+                inc     ph_rm_fb+1
+                bne     ph_fb_c
+                inc     ph_rm_fb
+ph_fb_c:
+                endc
                 pshs    a
                 adda    ph_blk_fb
                 jsr     phase_slot6
@@ -194,6 +233,18 @@ phase_draw_fb_slot5:
                 puls    a,pc
 
 phase_draw_pri_slot6:
+* ★★★★★ -DPH_REMAPCOUNT [T-P0-164]: THE PRIORITY PLANE THROUGH SLOT 6. The first attribution put
+* 135.3 of 152.4 remaps a cycle in "other", with the volume window only 6.7 of it -- so neither of
+* the dispatch's two candidates (source-versus-plane, plane-versus-itself) accounts for 89% of the
+* traffic. This counter is the next question: composite READS priority and WRITES visual per pixel,
+* and if the priority read comes through slot 6 while plane_vis owns slot 6, the contention is
+* PLANE-VERSUS-PLANE and neither two passes nor 160-wide is aimed at it.
+                ifdef   PH_REMAPCOUNT
+                inc     ph_rm_pri+1
+                bne     ph_pri_c
+                inc     ph_rm_pri
+ph_pri_c:
+                endc
                 pshs    a
                 adda    ph_blk_pri
                 jsr     phase_slot6
@@ -215,6 +266,15 @@ phase_draw_pri_slot6:
 * ★★ Still no runtime assertion, for the reason above: a check here costs cycles on the fetch path
 * to re-verify a property the phase discipline provides.
 phase_vol:
+* ★★★★ -DPH_REMAPCOUNT [T-P0-164]: the VOLUME window's own share. This is the path a cel-source or
+* resource read takes, and §1.1 predicts it is near zero during a draw because the cel cache serves
+* ~95% of lookups and mmu_phase.s's own guarantee above says a fetch never happens while drawing.
+                ifdef   PH_REMAPCOUNT
+                inc     ph_rm_vol+1
+                bne     ph_vol_c
+                inc     ph_rm_vol
+ph_vol_c:
+                endc
                 sta     ph_blk_vol
                 jmp     phase_slot6
 
