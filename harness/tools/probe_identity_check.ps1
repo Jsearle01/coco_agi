@@ -72,7 +72,11 @@ $PROBES = @(
   # RETIRED: 1,472 B -> 1,527 B 8B754B9C (+55). vc_decode_cel became a wrapper over
   # vc_decode_begin + vc_decode_row so there is ONE unpack rather than two [§2F]. **Its behaviour
   # is unchanged and the cel gate is what says so: 9,193/9,193 byte-identical, 1,525 mirrored.**
-  @{ n = "cel";  s = "src/harness/cel_probe.s";  f = @("-DHAL_GFX_MODE_SERVICE","-DHAL_SYS_FAST_CLOCK"); sz = 1527; sha = "8B754B9C" },
+  # ★★★★★ RE-PINNED T-P0-163: 1,527 -> 1,551 B (+24). cel_probe.s links view_cel.s, and the RLE walk
+  # was factored into vc_next_run with vc_decode_row driving it -- so this probe pays the same +24 the
+  # three cel-linked p3b arms do. ★★★★ Verified before re-pinning, and it is the whole argument for
+  # the change: cel 9,193 / 9,193 byte-identical to the oracle, 1,525 MIRRORED, 0 errors.
+  @{ n = "cel";  s = "src/harness/cel_probe.s";  f = @("-DHAL_GFX_MODE_SERVICE","-DHAL_SYS_FAST_CLOCK"); sz = 1551; sha = "D6F1787C" },
 # ★★★★★ PINNED AT T-P0-154, FOR THE REASON THE cel ROW ALREADY GIVES: comp_probe MOVED and the
 # on-disk baseline could not notice. The inner-loop change in composite.s is unconditional -- the
 # per-pixel co_src spill and the premature `sta co_col` are paid by the FLAT build too -- so
@@ -80,7 +84,13 @@ $PROBES = @(
 # ★★★★ `sz = 0` means "compare against whatever is on disk", which detects a STALE artifact and not
 # a CHANGED one. **comp is the gate for the compositor; it is the last probe that should be
 # unpinned.** ★★★ Its gate was run green on the moved binary before this pin: comp 124/124.
-  @{ n = "comp"; s = "src/harness/comp_probe.s"; f = @();                                                sz = 969;  sha = "1734DC24" }
+  # ★★★★★ RE-PINNED T-P0-163: 969 -> 970 B (+1), AND THE ONE BYTE IS HONEST RATHER THAN MYSTERIOUS:
+  # the -DCOMP_MARGIN counting arm's block pushed co_nextx past an 8-bit displacement, so the branch
+  # to it became `lbra`. ★★★★ The SHIPPED build pays that byte and its extra cycle even though it
+  # never assembles the counters -- which is why composite.s says so at the branch, and why a
+  # measurement arm's figures are not quoted beside a shipped timing.
+  # ★★★ Verified before re-pinning: comp 124/124 byte-identical, and the planes unchanged.
+  @{ n = "comp"; s = "src/harness/comp_probe.s"; f = @();                                                sz = 970;  sha = "E1B89D40" }
 )
 
 $bad = 0

@@ -310,7 +310,18 @@ $ARMS = @(
   #                        p3b_nomap 17,151 C08109A4 | p3b_fault 16,200 8AEF1F14
   #                        p3b_flat 16,185 E030E916 | p3b_comb 19,634 331CF6C7
   #                        p3b_comb_count 19,669 8A2F2ACB
-  @{ n = "p3b";        f = @("-DHAL_KEYBOARD");                          sz = 16429; sha = "407E0D79" },
+  # ★★★★★ RE-BASELINED T-P0-163: ONLY THREE ARMS MOVED, EVERY ONE BY EXACTLY +25 BYTES -- the
+  # vc_next_run factoring plus the COMP_MARGIN counting arm's data and hooks.
+  # ★★★★★ AND THE SIX TEXT ARMS DID NOT MOVE, WHICH IS THE CONSISTENCY CHECK: they are -DP3B_NO_CEL
+  # builds and link neither view_cel.s nor composite.s. A change to the cel path that moved them
+  # would mean it had reached somewhere it has no business being.
+  # ★★★★ +25 B for a change with NO CONSUMER YET, stated as the cost it is: vc_decode_row now drives
+  # the walk through a jsr per run and vc_rowend carries the row-end flag. Region A 993 -> 968 B.
+  # ★★★ Verified before re-pinning: cel 9,193 / 9,193 byte-identical with 1,525 MIRRORED and 0
+  # errors -- the proof the factored walk is the same walk -- and vm 9/9, 0 divergent cycles of 600.
+  # ★ RETIRED at T-P0-163: p3b 16,429 407E0D79 | p3b_comb 19,651 63F9CBFF
+  #                        p3b_comb_count 19,686 E10C4EA9
+  @{ n = "p3b";        f = @("-DHAL_KEYBOARD");                          sz = 16454; sha = "00C23E4C" },
   # ★★★★★ RE-BASELINED T-P0-125: the FIVE TEXT_WIRED arms moved +83 B (clear.lines is real), and
   # p3b, p3b_fault and p3b_flat did NOT -- the first links no text engine and the other two are
   # -DTEXT_MODELLED, which takes vm_text_ops.s's `equ` branch. ★★★ The split falls exactly along
@@ -330,9 +341,9 @@ $ARMS = @(
   # ★★★★ T-P0-128's VBL key latch is OPT-IN (-DP3B_VBLKEYS_OPT) after it failed its eye gate, so
   # the shipped combined arm is back to its P6.74 bytes. Built with the latch it was 18782 B /
   # B9F06823 (+79); that figure is recorded here so the next task re-enabling it has a reference.
-  @{ n = "p3b_comb";   f = @("-DHAL_KEYBOARD","-DP3B_COMBINED","-DP3B_IRQ"); sz = 19651; sha = "63F9CBFF" },
+  @{ n = "p3b_comb";   f = @("-DHAL_KEYBOARD","-DP3B_COMBINED","-DP3B_IRQ"); sz = 19676; sha = "B9B1C4BB" },
   # ★★★★ T-P0-130's COUNTING ARM (-Count in p3b_show.ps1): the combined arm with the pixel counters.
-  @{ n = "p3b_comb_count"; f = @("-DHAL_KEYBOARD","-DP3B_COMBINED","-DP3B_IRQ","-DP3B_COUNT"); sz = 19686; sha = "E10C4EA9" }
+  @{ n = "p3b_comb_count"; f = @("-DHAL_KEYBOARD","-DP3B_COMBINED","-DP3B_IRQ","-DP3B_COUNT"); sz = 19711; sha = "AB8138AA" }
 )
 
 # ★★★ -DP3B_COVERAGE puts the two opcode counters back [p3b_probe.s]. It is a REAL byte change --
