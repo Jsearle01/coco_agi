@@ -49,6 +49,31 @@ DSK_HALT    equ $80          ; HALT enable   (b7)
 DSK_POS     equ DSK_DRV0+DSK_MOTOR+DSK_DD          ; $29 positioning (no HALT)
 DSK_XFER    equ DSK_DRV0+DSK_MOTOR+DSK_DD+DSK_HALT ; $A9 transfer (HALT armed)
 
+* ---------------------------------------------------------------
+* DRIVE SELECTION + THE PRESENCE GATE (POP P5.24) -- GUARDED: HAL_DISK_DRIVE_SELECT.
+*
+* Undefined in every shipped build of all three participants, so with it off this file
+* assembles to EXACTLY the bytes it did before (every DSKREG write below keeps its old
+* `lda #DSK_POS` / `lda #DSK_XFER` in the `else` arm). With it on:
+*   * the six DSKREG writes OR in dr_drive, so the existing entries read the drive
+*     disk_select_drive chose (drive 0 until told otherwise);
+*   * disk_select_drive and disk_present are assembled and exported.
+*
+* ★★★ WHY THE GATE EXISTS, MEASURED (POP P5.22 §3H, four MAME configurations). Every
+* transfer here arms HALT and only DRQ or INTRQ releases it. An EMPTY drive (no index
+* pulses) and an ABSENT drive (Restore hangs Busy) raise NEITHER -- so a read aimed at
+* one HANGS THE MACHINE, and a halted CPU cannot time itself out. And dr_wait_notbusy's
+* bound does not save it: on timeout it returns exactly as if Busy had cleared.
+* ★★ So: NEVER call disk_read / disk_read_range on a drive disk_present has not passed.
+* The order is the requirement -- the gate polls with HALT OFF (bounded, the Restore
+* included); only then may the HALT-paced read run. A POLLED read cannot be the
+* identifying read instead: at 0.894 MHz it loses data after one byte (also measured).
+* ---------------------------------------------------------------
+        ifdef   HAL_DISK_DRIVE_SELECT
+DSK_POS_ND  equ DSK_MOTOR+DSK_DD                   ; positioning, drive bits from dr_drive
+DSK_XFER_ND equ DSK_MOTOR+DSK_DD+DSK_HALT          ; transfer, drive bits from dr_drive
+        endc
+
 * --- WD1773 commands (WD1773 datasheet Type I / Type II) ---
 FDC_RESTORE equ $00          ; Restore, no verify, 6ms rate
 FDC_SEEK    equ $10          ; Seek,    no verify, 6ms rate
@@ -113,6 +138,10 @@ DR_NMI_VEC  equ $FEFD        ; NMI secondary vector ($FFFC[ROM]->$FEFD->handler)
         export  disk_read
         export  disk_read_range
         export  disk_read_motor_off
+        ifdef   HAL_DISK_DRIVE_SELECT
+        export  disk_select_drive
+        export  disk_present
+        endc
         endc
 
 * ---------------------------------------------------------------
@@ -142,7 +171,12 @@ disk_read_init:
 * ---------------------------------------------------------------
 disk_read:
         * --- positioning config: drive0 + motor + DD, HALT OFF ---
+        ifdef   HAL_DISK_DRIVE_SELECT
+        lda     #DSK_POS_ND
+        ora     dr_drive
+        else
         lda     #DSK_POS
+        endc
         sta     DSKREG
         jsr     dr_spinup            ; motor spin-up settle (real HW ~0.5-1s)
 
@@ -170,7 +204,12 @@ disk_read:
         * --- issue Read Sector (HALT still OFF), THEN arm HALT ---
         lda     #FDC_READ
         sta     FDC_CMDST
+        ifdef   HAL_DISK_DRIVE_SELECT
+        lda     #DSK_XFER_ND
+        ora     dr_drive
+        else
         lda     #DSK_XFER            ; b7=1: DRQ now gates HALT
+        endc
         sta     DSKREG
 
         * --- HALT-paced, count-bounded transfer (256 bytes) ---
@@ -183,7 +222,12 @@ dr_xfer:
         * INTRQ at end-of-sector cleared HALT b7 + fired NMI (dr_nmi_done set).
 
         * --- disarm HALT, read final status ---
+        ifdef   HAL_DISK_DRIVE_SELECT
+        lda     #DSK_POS_ND
+        ora     dr_drive
+        else
         lda     #DSK_POS
+        endc
         sta     DSKREG
         lda     FDC_CMDST
         sta     dr_status
@@ -204,7 +248,12 @@ dr_err:
 * Output: dr_status (last track's status); CC.C set on error.
 * ---------------------------------------------------------------
 disk_read_range:
+        ifdef   HAL_DISK_DRIVE_SELECT
+        lda     #DSK_POS_ND
+        ora     dr_drive
+        else
         lda     #DSK_POS
+        endc
         sta     DSKREG
         jsr     dr_spinup
         lda     #FDC_RESTORE         ; Restore to track 0 (once)
@@ -249,7 +298,12 @@ dr_read_track_m1:
         ldx     dr_dest
         lda     #FDC_READ_M          ; Read Sector, m=1 (multiple record)
         sta     FDC_CMDST
+        ifdef   HAL_DISK_DRIVE_SELECT
+        lda     #DSK_XFER_ND
+        ora     dr_drive
+        else
         lda     #DSK_XFER            ; arm HALT (b7): DRQ paces the whole-track xfer
+        endc
         sta     DSKREG
         ldy     #SECS_TRACK*256      ; 18*256 = 4608 bytes, HALT-paced
 rt_xfer:
@@ -258,7 +312,12 @@ rt_xfer:
         leay    -1,y
         bne     rt_xfer
         * whole track read; the FDC is now searching sector 19 (m=1 continues).
+        ifdef   HAL_DISK_DRIVE_SELECT
+        lda     #DSK_POS_ND
+        ora     dr_drive
+        else
         lda     #DSK_POS             ; disarm HALT (b7=0) — latch write, not HALT-gated
+        endc
         sta     DSKREG
         lda     FDC_CMDST            ; Type II read status BEFORE Force-Int
         sta     dr_status
@@ -337,6 +396,114 @@ disk_read_motor_off:
         clr     DSKREG               ; motor off, no drive selected
         clr     dr_motor_on
         rts
+
+        ifdef   HAL_DISK_DRIVE_SELECT
+* ---------------------------------------------------------------
+* dr_drive -- the DSKREG select bit of the drive every entry above addresses. Drive 0
+* until disk_select_drive says otherwise, so a client that never selects behaves exactly
+* as an unguarded build does. Lives with the code (written by disk_select_drive only).
+* ---------------------------------------------------------------
+dr_drive    fcb     DSK_DRV0
+dr_drvtab   fcb     $01,$02,$04          ; drives 0,1,2: DSKREG b0,b1,b2. Drive 3 is NOT
+*                                          offered -- its select bit b6 doubles as SIDE
+*                                          SELECT on double-sided drives [Unravelled].
+dr_edges    fcb     0
+dr_lastidx  fcb     0
+
+* ---------------------------------------------------------------
+* disk_select_drive -- A = drive 0..2. CC.C set (and nothing changed) if out of range.
+* A CHANGE of drive owes a spin-up: dr_motor_on described the drive that was selected.
+* (On a CoCo the motor line is shared, so this is conservative -- one 0.6 s delay on a
+* drive switch -- and it stays correct on hardware where it is not.)
+* Clobbers A.
+* ---------------------------------------------------------------
+disk_select_drive:
+        cmpa    #3
+        bhs     dsd_bad
+        pshs    x
+        ldx     #dr_drvtab
+        lda     a,x                  ; 0..2, so the signed offset is safe
+        puls    x
+        cmpa    dr_drive
+        beq     dsd_ok
+        sta     dr_drive
+        clr     dr_motor_on
+dsd_ok:
+        andcc   #$FE
+        rts
+dsd_bad:
+        orcc    #$01
+        rts
+
+* ---------------------------------------------------------------
+* disk_present -- is a disk TURNING in the selected drive? HALT is NEVER armed here.
+*
+* Out: CC.C clear = yes (>= 2 index-pulse edges seen); CC.C set = empty, absent, or not
+*      turning. A = index-pulse edges seen, saturating at 255 (0 after a Restore timeout).
+*
+* ★ EVERY WAIT IS BOUNDED, THE RESTORE INCLUDED. An ABSENT drive leaves the WD1773 Busy
+* after Restore (measured, P5.22): dr_wait_notbusy would time out and return as if it had
+* cleared, so this routine runs its own bound and REPORTS the timeout. An EMPTY drive
+* completes the Restore but shows no index pulses. Both come back C set; only a turning
+* disk passes, and only then may the caller issue disk_read on this drive.
+*
+* Bounds at 0.894 MHz (the FDC's speed): Restore ~0.74 s, index window ~0.63 s (>= 3
+* revolutions at 300 rpm), plus dr_spinup's 0.6 s when the motor is cold.
+* Clobbers A, B. X, Y preserved.
+* ---------------------------------------------------------------
+disk_present:
+        pshs    x,y
+        lda     #DSK_POS_ND
+        ora     dr_drive
+        sta     DSKREG               ; select + motor, HALT OFF -- and it stays off
+        jsr     dr_spinup
+        lda     #FDC_FORCEINT        ; a clean Type I status, whatever ran before
+        sta     FDC_CMDST
+        jsr     dr_settle
+        lda     #FDC_RESTORE
+        sta     FDC_CMDST
+        jsr     dr_settle
+        ldx     #$9000               ; ~0.74 s: 18 cy per poll
+dp_rwait:
+        lda     FDC_CMDST
+        bita    #$01                 ; Busy?
+        beq     dp_rdone
+        leax    -1,x
+        bne     dp_rwait
+        lda     #FDC_FORCEINT        ; NO DRIVE: Busy never cleared. Free the FDC for the
+        sta     FDC_CMDST            ; next command, and say so.
+        jsr     dr_settle
+        clra
+        bra     dp_no
+dp_rdone:
+        lda     FDC_CMDST            ; Type I status: b1 = the index pulse, live
+        anda    #$02
+        sta     dr_lastidx
+        clr     dr_edges
+        ldx     #$6000               ; ~0.63 s: 23 cy per poll
+dp_iloop:
+        lda     FDC_CMDST
+        anda    #$02
+        cmpa    dr_lastidx
+        beq     dp_inext
+        sta     dr_lastidx
+        inc     dr_edges
+        bne     dp_inext
+        dec     dr_edges             ; saturate at 255
+dp_inext:
+        leax    -1,x
+        bne     dp_iloop
+        lda     dr_edges
+        cmpa    #2
+        blo     dp_no
+        puls    x,y
+        andcc   #$FE
+        rts
+dp_no:
+        puls    x,y
+        orcc    #$01
+        rts
+        endc
 
         ifdef   OBJTARGET
         endsection
